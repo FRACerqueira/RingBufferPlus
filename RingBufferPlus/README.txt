@@ -1,15 +1,36 @@
-# **Welcome to RingBufferPlus**
+﻿  _____  _               ____         __  __            _____  _               
+ |  __ \(_)             |  _ \       / _|/ _|          |  __ \| |              
+ | |__) |_ _ __   __ _  | |_) |_   _| |_| |_ ___ _ __  | |__) | |    _   _ ___ 
+ |  _  /| | '_ \ / _` | |  _ <| | | |  _|  _/ _ \ '__| |  ___/| |   | | | / __|
+ | | \ \| | | | | (_| | | |_) | |_| | | | ||  __/ |    | |    | |___| |_| \__ \
+ |_|  \_\_|_| |_|\__, | |____/ \__,_|_| |_| \___|_|    |_|    |______\__,_|___/
+                  __/ |                                                        
+                 |___/                                                          
+
+**Welcome to RingBufferPlus**
+-----------------------------------------------------------
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
 RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6 ** target frameworks.
 
-## **Official pages** :
+RingBufferPlus was developed in c# with target frameworks:
 
-#### **[Visit the RingBufferPlus official page for complete documentation](https://fracerqueira.github.io/RingBufferPlus)**
+- netstandard2.1
+- .NET 5
+- .NET 6
 
-## **RingBufferPlus - Sample Minimum Usage**
+**visit the official pages for complete documentation** :
 
-```csharp
+https://fracerqueira.github.io/RingBufferPlus
+
+**Relase Notes RingBufferPlus (V1.0.0)**
+----------------------------------------
+
+- First public release (Jan/2022)
+
+**RingBufferPlus - Sample Minimum Usage**
+-----------------------------------------
+
 public class MyClass
 {
    private readonly Guid _id;
@@ -33,11 +54,9 @@ using (var buffer = rb.Accquire())
 
 rb.Dispose();
 
-```
+**RingBufferPlus - Sample Complex Usage**
+-----------------------------------------
 
-## **RingBufferPlus - Sample Complex Usage**
-
-```csharp
 public class MyClass : IDisposable
 {
    private readonly Guid _id;
@@ -113,10 +132,3 @@ private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs 
 {
    Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
 }
-
-```
-
-## **License**
-
-This project is licensed under the [MIT License](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
-
