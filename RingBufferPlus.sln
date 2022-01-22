@@ -7,7 +7,17 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlus", "RingBuffe
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusRabbit", "RingBufferPlusRabbit\RingBufferPlusRabbit.csproj", "{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "RingBufferPlusTest", "RingBufferPlusTest\RingBufferPlusTest.csproj", "{C53D3D66-0233-4F48-BA33-FF41023D91E0}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusTest", "RingBufferPlusTest\RingBufferPlusTest.csproj", "{C53D3D66-0233-4F48-BA33-FF41023D91E0}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
+	ProjectSection(SolutionItems) = preProject
+		docs\index.md = docs\index.md
+	EndProjectSection
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Images", "Images", "{A5340B5A-0CAD-4CC0-956D-6CE07686B431}"
+	ProjectSection(SolutionItems) = preProject
+		docs\images\icon.png = docs\images\icon.png
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -30,6 +40,9 @@ Global
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{A5340B5A-0CAD-4CC0-956D-6CE07686B431} = {02FCABD7-3766-4D73-88A2-B558CBAA069D}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {4E82EE9E-8ED4-4F9B-820D-03B4C5E3A4A6}

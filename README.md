@@ -22,6 +22,7 @@ dotnet add package RingBufferPlus [--prerelease]
 ```
 
 **_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
+
 ## Examples
 The project in the folder **RingBufferPlusRabbit** contains the samples with RabbitMQ(publish).
 

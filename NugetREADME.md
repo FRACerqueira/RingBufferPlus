@@ -116,8 +116,6 @@ private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs 
 
 ```
 
-
-
 ## **License**
 
 This project is licensed under the [MIT License](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
