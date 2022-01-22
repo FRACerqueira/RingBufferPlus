@@ -146,8 +146,8 @@ private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs 
 ## Apis
 [**Top**](#-welcome-to-ringbufferplus)
 
-| Api | Details |
-| --- | --- |
+Commands | Details
+--- | ---
 
 ## Supported platforms
 [**Top**](#-welcome-to-ringbufferplus)
