@@ -7,13 +7,21 @@
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
 
+[**Usage**](#usage) | [**Api**](#apis) | [**Supported Platforms**](#supported-platforms) | [**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus)
+
+## Install
+
 RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
 
-[**Usage**](#usage) | [**Install**](#install) | [**Api**](#apis) | [**Supported Platforms**](#supported-platforms)
+```
+Install-Package RingBufferPlus [-pre]
+```
 
+```
+dotnet add package RingBufferPlus [--prerelease]
+```
 
-#### **[Visit the RingBufferPlus official page for complete documentation](https://fracerqueira.github.io/RingBufferPlus)**
-
+**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
 ## Examples
 The project in the folder **RingBufferPlusRabbit** contains the samples with RabbitMQ(publish).
 
@@ -133,21 +141,6 @@ private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs 
 }
 
 ```
-
-## Install
-[**Top**](#-welcome-to-ringbufferplus)
-
-RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
-
-```
-Install-Package RingBufferPlus [-pre]
-```
-
-```
-dotnet add package RingBufferPlus [--prerelease]
-```
-
-**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
 
 ## Apis
 [**Top**](#-welcome-to-ringbufferplus)
