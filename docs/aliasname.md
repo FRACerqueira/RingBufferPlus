@@ -14,10 +14,14 @@ Alias to Ringbuffer. When not defined Alias is setted to "RingBuffer.[name of ty
 
 ### Exception
 
+ When alias is null or empty.
+
 ```csharp
-  RingBufferFatalException("AliasName","Alias can't be null") - when alias is null or empty.
+  RingBufferFatalException
 ``` 
 
+- RingBufferFatalException.Source = "AliasName"
+- RingBufferFatalException.Message = "Alias can't be null"
 
 ### Links
 [**Main**](index.md#help) | 
