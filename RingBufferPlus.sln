@@ -11,6 +11,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusTest", "RingB
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
 	ProjectSection(SolutionItems) = preProject
+		docs\aliasname.md = docs\aliasname.md
 		docs\index.md = docs\index.md
 	EndProjectSection
 EndProject
