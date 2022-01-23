@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Alias to Ringbuffer. When not defined Alias is setted to "RingBuffer.[name of type <T>]"
+Set alias to instance of Ringbuffer. When not set, Alias is is the same "RingBuffer.[name of type <T>]"
 
 ### Methods
 
@@ -19,9 +19,6 @@ Alias to Ringbuffer. When not defined Alias is setted to "RingBuffer.[name of ty
 ```csharp
   RingBufferFatalException
 ``` 
-
-- RingBufferFatalException.Source = "AliasName"
-- RingBufferFatalException.Message = "Alias can't be null"
 
 ### Links
 [**Main**](index.md#help) | 

@@ -13,6 +13,9 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3
 	ProjectSection(SolutionItems) = preProject
 		docs\aliasname.md = docs\aliasname.md
 		docs\index.md = docs\index.md
+		docs\maxscaler.md = docs\maxscaler.md
+		docs\minscaler.md = docs\minscaler.md
+		docs\policytimeoutaccquire.md = docs\policytimeoutaccquire.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Images", "Images", "{A5340B5A-0CAD-4CC0-956D-6CE07686B431}"

@@ -13,5 +13,10 @@ namespace RingBufferPlus.Exceptions
         {
             Source = sourcode;
         }
+
+        internal RingBufferFatalException(string sourcode, string message, Exception innerexception) : base(message,innerexception)
+        {
+            Source = sourcode;
+        }
     }
 }

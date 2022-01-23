@@ -10,6 +10,7 @@ A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and
 ## Help
 - [Install](#install)
 - [Apis](#apis)
+- [Properties](properties.md)
 - [Supported Platforms](#supported-platforms)
 
 # Documentation
@@ -48,7 +49,7 @@ dotnet add package PromptPlus [--prerelease]
 
 Commands | Details
 --- | ---
-[AliasName](aliasname.md) |  set alias for Ringbuffer
+[AliasName](aliasname.md) |  set alias to RingBuffer
 
 ## Supported platforms
 [**Top**](#help)

@@ -164,6 +164,8 @@ namespace RingBufferPlus
 
             if (!initresult.Value)
             {
+                var err = new RingBufferFatalException("TryInitCapacityMinimum", "Init Capacity falured", initresult.Error);
+                LogRingBuffer($"{Alias}Init Capacity falured. {err}", LogLevel.Error);
                 throw initresult.Error;
             }
             _targetCapacity = CurrentCapacity;
