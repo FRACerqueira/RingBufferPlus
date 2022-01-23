@@ -49,7 +49,10 @@ dotnet add package PromptPlus [--prerelease]
 
 Commands | Details
 --- | ---
-[AliasName](aliasname.md) |  set alias to RingBuffer
+[AliasName](aliasname.md) |  Set alias to RingBuffer.
+[MaxScaler](maxscaler.md) |  Sets the maximum capacity of items in the buffer.
+[MinScaler](minscaler.md) |  Sets the minimum capacity of items in the buffer..
+[PolicyTimeoutAccquire](policytimeoutaccquire.md) | Defines timeout policy for acquiring items from the buffer.
 
 ## Supported platforms
 [**Top**](#help)
