@@ -76,15 +76,6 @@ namespace RingBufferPlus.ObjectValues
             return false;
         }
 
-        public bool IsTimeout(TimeSpan value)
-        {
-            if (_startRef == null)
-            {
-                return false;
-            }
-            return value.TotalMilliseconds <= Elapsed.TotalMilliseconds;
-        }
-
         public NaturalTimer()
         {
             _startRef = null;

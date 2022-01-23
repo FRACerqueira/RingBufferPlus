@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Set alias to instance of Ringbuffer. When not set, Alias is is the same "RingBuffer.[name of type <T>]"
+Set the alias for the Ringbuffer instance. When not defined, the alias is set to "Ring Buffer.[type name <T>]".
 
 ### Methods
 

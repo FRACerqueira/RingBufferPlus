@@ -9,6 +9,7 @@ A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and
 
 ## Help
 - [Install](#install)
+- [Implementation Example](#implementation-example)
 - [Apis](#apis)
 - [Properties](properties.md)
 - [Supported Platforms](#supported-platforms)
@@ -43,6 +44,10 @@ dotnet add package PromptPlus [--prerelease]
 
 **_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
 
+## Implementation Example
+[**Top**](#help)
+
+A complete usage example can be seen in the [**RingBufferPlus - RabbitMQ**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/RingBufferPlusRabbit) project. This project is an implementation of RingBufferPlus for high volume publishing to RabbitMQ queues.
 
 ## Apis
 [**Top**](#help)
@@ -52,7 +57,11 @@ Commands | Details
 [AliasName](aliasname.md) |  Set alias to RingBuffer.
 [MaxScaler](maxscaler.md) |  Sets the maximum capacity of items in the buffer.
 [MinScaler](minscaler.md) |  Sets the minimum capacity of items in the buffer..
-[PolicyTimeoutAccquire](policytimeoutaccquire.md) | Defines timeout policy for acquiring items from the buffer.
+[PolicyTimeoutAccquire](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
+[PolicyTimeoutAccquireAsync](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
+[DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
+[DefaultIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
+
 
 ## Supported platforms
 [**Top**](#help)

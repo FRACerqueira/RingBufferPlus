@@ -3,10 +3,10 @@
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
 [**Events**](events.md) |
-[**Metrics*](metric.md)
+[**Metrics**](metric.md)
 
 ## Documentation
-Defines timeout policy for acquiring items from the buffer. When not set, policy timeout acquisition is the same "MaximumCapacity".
+Sets the timeout policy for acquiring items from the buffer. When not set, policy timeout acquisition is set to "MaximumCapacity".
 
 ### Policies Type(RingBufferPolicyTimeout)
 
@@ -26,7 +26,7 @@ Notes: _**In all policies type the timeout count is performed.**_
 
 ### Exception
 
-When set to "User Policy" and the user-function is null or when set user-function and the policy is not "UserPolicy"
+When set to "UserPolicy" and the user-function is null or when set user-function and the policy is not "UserPolicy"
 
 ```csharp
   RingBufferFatalException
@@ -36,5 +36,5 @@ When set to "User Policy" and the user-function is null or when set user-functio
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
 [**Events**](events.md) |
-[**Metrics*](metric.md)
+[**Metrics**](metric.md)
 
