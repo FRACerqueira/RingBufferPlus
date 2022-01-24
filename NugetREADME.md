@@ -1,6 +1,6 @@
 # **Welcome to RingBufferPlus**
 
-A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
+A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report
 RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
 
 ## **Official pages** :

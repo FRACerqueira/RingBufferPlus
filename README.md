@@ -5,7 +5,7 @@
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![License](https://img.shields.io/github/license/FRACerqueira/RingBufferPlus)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
 
-A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
+A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report.
 
 [**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) 
 
