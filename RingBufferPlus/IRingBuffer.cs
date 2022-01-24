@@ -65,8 +65,8 @@ namespace RingBufferPlus
         IRingBuffer<T> HealthCheckAsync(Func<T, CancellationToken, Task<bool>> value);
         IRingBuffer<T> AutoScaler(Func<RingBufferMetric, CancellationToken, int> autoscaler);
         IRingBuffer<T> AutoScalerAsync(Func<RingBufferMetric, CancellationToken, Task<int>> autoscaler);
-        IRingBuffer<T> ReportMetrics(Action<RingBufferMetric, CancellationToken> report);
-        IRingBuffer<T> ReportMetricsAsync(Func<RingBufferMetric, CancellationToken, Task> report);
+        IRingBuffer<T> MetricsReport(Action<RingBufferMetric, CancellationToken> report);
+        IRingBuffer<T> MetricsReportAsync(Func<RingBufferMetric, CancellationToken, Task> report);
         IRingBuffer<T> AddLogProvider(RingBufferLogLevel defaultlevel, ILoggerFactory value);
         IBuildRingBuffer<T> Build();
     }

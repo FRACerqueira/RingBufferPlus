@@ -589,14 +589,14 @@ namespace RingBufferPlus
             return this;
         }
 
-        public IRingBuffer<T> ReportMetrics(Action<RingBufferMetric, CancellationToken> report)
+        public IRingBuffer<T> MetricsReport(Action<RingBufferMetric, CancellationToken> report)
         {
             if (report is null) throw new RingBufferFatalException("ReportMetrics", "Action Report can't be null");
             _reportSync = report;
             return this;
         }
 
-        public IRingBuffer<T> ReportMetricsAsync(Func<RingBufferMetric, CancellationToken, Task> report)
+        public IRingBuffer<T> MetricsReportAsync(Func<RingBufferMetric, CancellationToken, Task> report)
         {
             if (report is null) throw new RingBufferFatalException("ReportMetricsAsync", "Action Report can't be null");
             _reportAsync = report;

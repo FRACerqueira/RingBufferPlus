@@ -357,7 +357,7 @@ namespace RingBufferPlusTest
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
                 .Factory((_) => new MyClassTest())
-                .ReportMetrics((metric, _) => { runmetric = metric; })
+                .MetricsReport((metric, _) => { runmetric = metric; })
                 .DefaultIntervalReport(100)
                 .Build();
 
@@ -391,7 +391,7 @@ namespace RingBufferPlusTest
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
                     .Factory((_) => new MyClassTest())
-                    .ReportMetrics((metric, _) =>
+                    .MetricsReport((metric, _) =>
                     {
                         runmetric++;
                         throw new Exception();
@@ -427,7 +427,7 @@ namespace RingBufferPlusTest
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
                 .Factory((_) => new MyClassTest())
-                .ReportMetricsAsync(async (metric, _) =>
+                .MetricsReportAsync(async (metric, _) =>
                 {
                     runmetric = metric;
                     await Task.CompletedTask;
@@ -465,7 +465,7 @@ namespace RingBufferPlusTest
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
                     .Factory((_) => new MyClassTest())
-                    .ReportMetricsAsync(async (metric, _) =>
+                    .MetricsReportAsync(async (metric, _) =>
                     {
                         runmetric++;
                         await Task.FromException(new Exception());
@@ -499,7 +499,7 @@ namespace RingBufferPlusTest
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
-                .ReportMetrics((metric, _) => { runmetric = metric; })
+                .MetricsReport((metric, _) => { runmetric = metric; })
                 .DefaultIntervalReport(100)
                 .Build();
 
@@ -533,7 +533,7 @@ namespace RingBufferPlusTest
                 var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
-                .ReportMetrics((metric, _) =>
+                .MetricsReport((metric, _) =>
                 {
                     runmetric++;
                     throw new Exception();
@@ -568,7 +568,7 @@ namespace RingBufferPlusTest
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
-                .ReportMetricsAsync(async (metric, _) =>
+                .MetricsReportAsync(async (metric, _) =>
                 {
                     runmetric = metric;
                     await Task.CompletedTask;
@@ -606,7 +606,7 @@ namespace RingBufferPlusTest
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
                     .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
-                    .ReportMetricsAsync(async (metric, _) =>
+                    .MetricsReportAsync(async (metric, _) =>
                     {
                         runmetric++;
                         await Task.FromException(new Exception());

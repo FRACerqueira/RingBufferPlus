@@ -7,7 +7,7 @@
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
 
-[**Usage**](#usage) | [**Api**](#apis) | [**Supported Platforms**](#supported-platforms) | [**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus)
+[**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) | [**Usage**](#usage) | [**Supported Platforms**](#supported-platforms) 
 
 ## Install
 
@@ -142,12 +142,6 @@ private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs 
 }
 
 ```
-
-## Apis
-[**Top**](#-welcome-to-ringbufferplus)
-
-Commands | Details
---- | ---
 
 ## Supported platforms
 [**Top**](#-welcome-to-ringbufferplus)

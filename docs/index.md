@@ -52,7 +52,7 @@ A complete usage example can be seen in the [**RingBufferPlus - RabbitMQ**](http
 ## Apis
 [**Top**](#help)
 
-Commands | Details
+Title | Details
 --- | ---
 [AliasName](aliasname.md) |  Set alias to RingBuffer.
 [MaxScaler](maxscaler.md) |  Sets the maximum capacity of items in the buffer.
@@ -61,7 +61,26 @@ Commands | Details
 [PolicyTimeoutAccquireAsync](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
 [DefaultIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
-
+[DefaultIntervalAutoScaler](defaultintervalautoscaler.md) | Sets the default interval to perform auto-scaling of buffer items.
+[DefaultIntervalReport](defaultintervalreport.md) | Set the default interval to perform the metric reporting.
+[Factory](factory.md) | Set create-function to an item in the buffer.
+[FactoryAsync](factory.md) | Set create-function to an item in the buffer.
+[HealthCheck](healthcheck.md) | Set the integrity function to a buffer item.
+[HealthCheckAsync](healthcheck.md) | Set the integrity function to a buffer item.
+[AutoScaler](autoscaler.md) | Set the auto-scaling function of buffer items.
+[AutoScalerAsync](autoscaler.md) | Set the auto-scaling function of buffer items.
+[MetricsReport](metricsreport.md) | Set action for metrics report.
+[MetricsReportAsync](metricsreport.md) | Set action for metrics report.
+[AddLogProvider](addlogprovider.md) | Set log provider and default message level.
+[Build](ringbufferbuild.md) | Executes and validates all commands, provides the events to be configured and the execution command.
+[ErrorCallBack](errorcallback.md) | Error return event.
+[TimeoutCallBack](timeoutcallback.md) | Timeout return event.
+[AutoScaleCallback](autoscalecallback.md) | Auto-Scaler return event.
+[Run](ringbufferrun.md) | Performs instance creation and provides command to acquire buffer item.
+[Accquire](accquire.md) | Acquire an item from the buffer.
+[AccquireAsync](accquire.md) | Acquire an item from the buffer.
+[Metric class](metricclass.md) | Metric class details.
+[Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
 
 ## Supported platforms
 [**Top**](#help)
