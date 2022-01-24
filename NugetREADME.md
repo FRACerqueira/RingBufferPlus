@@ -1,39 +1,13 @@
-# <img align="left" width="100" height="100" src="./docs/images/icon.png"># **Welcome to RingBufferPlus**
-[![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
-[![Publish](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/publish.yml/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/publish.yml)
-[![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
-[![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
-[![License](https://img.shields.io/github/license/FRACerqueira/RingBufferPlus)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
+# **Welcome to RingBufferPlus**
 
-A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report.
-
-[**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) 
-
-## Install
-
+A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report
 RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
 
-```
-Install-Package RingBufferPlus [-pre]
-```
+## **Official pages** :
 
-```
-dotnet add package RingBufferPlus [--prerelease]
-```
-
-**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
-
-## Examples
-The project in the folder **RingBufferPlusRabbit** contains the samples with RabbitMQ(publish).
-
-```
-dotnet run --project RingBufferPlusRabbit
-```
-
-## Usage
+#### **[Visit the RingBufferPlus official page for complete documentation](https://fracerqueira.github.io/RingBufferPlus)**
 
 ## **RingBufferPlus - Sample Minimum Usage**
-[**Top**](#-welcome-to-ringbufferplus)
 
 ```csharp
 public class MyClass
@@ -62,7 +36,6 @@ rb.Dispose();
 ```
 
 ## **RingBufferPlus - Sample Complex Usage**
-[**Top**](#-welcome-to-ringbufferplus)
 
 ```csharp
 public class MyClass : IDisposable
@@ -109,8 +82,8 @@ var build_rb = RingBuffer<MyClass>
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
-                   return 5;	
-                })
+		   return 5;	
+		})
                 .Build();
 
 build_rb.AutoScalerCallback += Ring_AutoScalerCallback;
@@ -142,12 +115,6 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 }
 
 ```
-
-## Supported platforms
-[**Top**](#-welcome-to-ringbufferplus)
-
-- Windows
-- Linux (Ubuntu, etc)
 
 ## **License**
 

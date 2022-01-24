@@ -1,41 +1,36 @@
-# <img align="left" width="100" height="100" src="./docs/images/icon.png"># **Welcome to RingBufferPlus**
-[![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
-[![Publish](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/publish.yml/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/publish.yml)
-[![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
-[![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
-[![License](https://img.shields.io/github/license/FRACerqueira/RingBufferPlus)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
+﻿  _____  _               ____         __  __            _____  _               
+ |  __ \(_)             |  _ \       / _|/ _|          |  __ \| |              
+ | |__) |_ _ __   __ _  | |_) |_   _| |_| |_ ___ _ __  | |__) | |    _   _ ___ 
+ |  _  /| | '_ \ / _` | |  _ <| | | |  _|  _/ _ \ '__| |  ___/| |   | | | / __|
+ | | \ \| | | | | (_| | | |_) | |_| | | | ||  __/ |    | |    | |___| |_| \__ \
+ |_|  \_\_|_| |_|\__, | |____/ \__,_|_| |_| \___|_|    |_|    |______\__,_|___/
+                  __/ |                                                        
+                 |___/                                                          
+
+**Welcome to RingBufferPlus**
+-----------------------------------------------------------
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report.
+RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6 ** target frameworks.
 
-[**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) 
+RingBufferPlus was developed in c# with target frameworks:
 
-## Install
+- netstandard2.1
+- .NET 5
+- .NET 6
 
-RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
+**visit the official pages for complete documentation** :
 
-```
-Install-Package RingBufferPlus [-pre]
-```
+https://fracerqueira.github.io/RingBufferPlus
 
-```
-dotnet add package RingBufferPlus [--prerelease]
-```
+**Relase Notes RingBufferPlus (V1.0.0)**
+----------------------------------------
 
-**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
+- First public release (Jan/2022)
 
-## Examples
-The project in the folder **RingBufferPlusRabbit** contains the samples with RabbitMQ(publish).
+**RingBufferPlus - Sample Minimum Usage**
+-----------------------------------------
 
-```
-dotnet run --project RingBufferPlusRabbit
-```
-
-## Usage
-
-## **RingBufferPlus - Sample Minimum Usage**
-[**Top**](#-welcome-to-ringbufferplus)
-
-```csharp
 public class MyClass
 {
    private readonly Guid _id;
@@ -59,12 +54,9 @@ using (var buffer = rb.Accquire())
 
 rb.Dispose();
 
-```
+**RingBufferPlus - Sample Complex Usage**
+-----------------------------------------
 
-## **RingBufferPlus - Sample Complex Usage**
-[**Top**](#-welcome-to-ringbufferplus)
-
-```csharp
 public class MyClass : IDisposable
 {
    private readonly Guid _id;
@@ -109,8 +101,8 @@ var build_rb = RingBuffer<MyClass>
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
-                   return 5;	
-                })
+		   return 5;	
+		})
                 .Build();
 
 build_rb.AutoScalerCallback += Ring_AutoScalerCallback;
@@ -140,16 +132,3 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 {
    Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
 }
-
-```
-
-## Supported platforms
-[**Top**](#-welcome-to-ringbufferplus)
-
-- Windows
-- Linux (Ubuntu, etc)
-
-## **License**
-
-This project is licensed under the [MIT License](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
-
