@@ -18,7 +18,6 @@ A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and
 
 A ring buffer is a memory allocation scheme where memory is reused (reclaimed) when an index, incremented modulo the buffer size, writes over a previously used location.
 A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
-Note that a ring buffer with n elements is usually used to implement a queue with n-1 elements--there is always one empty element in the buffer. Otherwise, it becomes difficult to distinguish between a full and empty queue--the read and write pointers would be identical in both cases.
 
 ## Install
 [**Top**](#help)
