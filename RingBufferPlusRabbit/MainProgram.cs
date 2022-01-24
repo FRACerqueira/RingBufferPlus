@@ -140,7 +140,7 @@ namespace RingBufferPlusRabbit
 
             var ringCnn = RingBuffer<IConnection>
                 .CreateRingBuffer(4)
-                .MaxScaler(8)
+                .MaxScale(8)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
                 .Factory((ctk) => cnnfactory.CreateConnection())
                 .HealthCheck((cnn, ctk) =>
@@ -164,8 +164,8 @@ namespace RingBufferPlusRabbit
 
             var build_ringdmodel = RingBuffer<IModel>
                 .CreateRingBuffer(10)
-                .MinScaler(2)
-                .MaxScaler(102)
+                .MinScale(2)
+                .MaxScale(102)
                 .DefaultTimeoutAccquire(800)
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
@@ -173,7 +173,7 @@ namespace RingBufferPlusRabbit
                 .AddLogProvider(RingBufferLogLevel.Information,_loggerFactory)
                 .Build();
 
-            //build_ringdmodel.AutoScaleCallback += Ring_AutoScaleCallback;
+            //build_ringdmodel.AutoScalerCallback += Ring_AutoScalerCallback;
             //build_ringdmodel.ErrorCallBack += Ring_ErrorCallBack;
             //build_ringCnn.TimeoutCallBack += Ring_TimeoutCallBack;
 
@@ -339,7 +339,7 @@ namespace RingBufferPlusRabbit
             Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount} Overload = {e.Metric.OverloadCount}. Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
         }
 
-        private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs e)
+        private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
         {
             Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Acq./OverRate = {e.Metric.AcquisitionCount}/{RateMetric(e.Metric):P3} Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
         }

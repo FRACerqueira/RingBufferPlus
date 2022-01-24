@@ -2,8 +2,8 @@
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Events**](events.md) |
-[**Metrics**](metric.md)
+[**Timeout CallBack**](timeoutcallback.md) |
+[**Metrics**](metricclass.md)
 
 ## Documentation
 Sets the timeout policy for acquiring items from the buffer. When not set, policy timeout acquisition is set to "MaximumCapacity".
@@ -35,6 +35,6 @@ When set to "UserPolicy" and the user-function is null or when set user-function
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Events**](events.md) |
-[**Metrics**](metric.md)
+[**Timeout CallBack**](timeoutcallback.md) |
+[**Metrics**](metricclass.md)
 

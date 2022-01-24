@@ -41,7 +41,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 completion.Set();
@@ -79,7 +79,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 completion.Set();
@@ -114,8 +114,8 @@ namespace RingBufferPlusTest
         {
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(cap)
-                .MaxScaler(max)
-                .MinScaler(min)
+                .MaxScale(max)
+                .MinScale(min)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => newtarg)
                 .Build();
@@ -124,7 +124,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 completion.Set();
@@ -159,8 +159,8 @@ namespace RingBufferPlusTest
         {
             var brb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(cap)
-                .MaxScaler(max)
-                .MinScaler(min)
+                .MaxScale(max)
+                .MinScale(min)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .AutoScaler((_, _) => newtarg)
                 .Build();
@@ -169,7 +169,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 completion.Set();
@@ -219,7 +219,7 @@ namespace RingBufferPlusTest
                 var triggerException = false;
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MaxScaler(12)
+                    .MaxScale(12)
                     .Factory((_) =>
                     {
                         if (triggerException)
@@ -235,7 +235,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     completion.Set();
@@ -264,7 +264,7 @@ namespace RingBufferPlusTest
                 var triggerException = false;
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MaxScaler(12)
+                    .MaxScale(12)
                     .FactoryAsync((_) =>
                     {
                         if (triggerException)
@@ -280,7 +280,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     completion.Set();
@@ -309,7 +309,7 @@ namespace RingBufferPlusTest
                 var cnt = 0;
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MinScaler(8)
+                    .MinScale(8)
                     .Factory((_) =>
                     {
                         if (cnt > 3)
@@ -334,7 +334,7 @@ namespace RingBufferPlusTest
                 var cnt = 0;
                 var brb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MinScaler(8)
+                    .MinScale(8)
                     .FactoryAsync((_) =>
                     {
                         if (cnt > 3)
@@ -365,7 +365,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -402,7 +402,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -439,7 +439,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -475,7 +475,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -507,7 +507,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -544,7 +544,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -580,7 +580,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -617,7 +617,7 @@ namespace RingBufferPlusTest
 
                 var completion = new ManualResetEvent(false);
 
-                brb.AutoScaleCallback += (inst, e) =>
+                brb.AutoScalerCallback += (inst, e) =>
                 {
                     arg = e;
                     ((RingBuffer<MyClassTest>)inst).StopReport();
@@ -654,7 +654,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopHealthCheck();
@@ -689,7 +689,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopHealthCheck();
@@ -724,7 +724,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopHealthCheck();
@@ -759,7 +759,7 @@ namespace RingBufferPlusTest
 
             var completion = new ManualResetEvent(false);
 
-            brb.AutoScaleCallback += (inst, e) =>
+            brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
                 ((RingBuffer<MyClassTest>)inst).StopHealthCheck();

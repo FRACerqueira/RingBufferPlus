@@ -31,8 +31,8 @@ namespace RingBufferPlusTest
         {
             var rb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
-                .MaxScaler(20)
-                .MinScaler(8)
+                .MaxScale(20)
+                .MinScale(8)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
@@ -120,7 +120,7 @@ namespace RingBufferPlusTest
             {
                 var rb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MinScaler(11)
+                    .MinScale(11)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -133,7 +133,7 @@ namespace RingBufferPlusTest
             {
                 var rb = RingBuffer<MyClassTest>
                     .CreateRingBuffer(10)
-                    .MaxScaler(9)
+                    .MaxScale(9)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -156,7 +156,7 @@ namespace RingBufferPlusTest
         {
             var rb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
-                .MaxScaler(20)
+                .MaxScale(20)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
                 .Build();
@@ -204,7 +204,7 @@ namespace RingBufferPlusTest
         {
             var rb = RingBuffer<MyClassTest>
                 .CreateRingBuffer(10)
-                .MinScaler(5)
+                .MinScale(5)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
                 .Build();

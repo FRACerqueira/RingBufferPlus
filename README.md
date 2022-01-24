@@ -7,7 +7,7 @@
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.
 
-[**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) | [**Usage**](#usage) | [**Supported Platforms**](#supported-platforms) 
+[**Visit the RingBufferPlus official page for complete documentation**](https://fracerqueira.github.io/RingBufferPlus) 
 
 ## Install
 
@@ -97,8 +97,8 @@ public class MyClass : IDisposable
 var build_rb = RingBuffer<MyClass>
                 .CreateRingBuffer(5)
                 .AliasName("Test")
-                .MinScaler(2)
-                .MaxScaler(10)
+                .MinScale(2)
+                .MaxScale(10)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
@@ -106,14 +106,14 @@ var build_rb = RingBuffer<MyClass>
                 .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
-                .ReportMetrics((metric,ctk) => Console.WriteLine(metric.ErrorCount))
+                .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
                    return 5;	
                 })
                 .Build();
 
-build_rb.AutoScaleCallback += Ring_AutoScaleCallback;
+build_rb.AutoScalerCallback += Ring_AutoScalerCallback;
 build_rb.ErrorCallBack += Ring_ErrorCallBack;
 build_rb.TimeoutCallBack += Ring_TimeoutCallBack;
 
@@ -136,7 +136,7 @@ private void Ring_TimeoutCallBack(object sender, RingBufferTimeoutEventArgs e)
    Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount} Overload = {e.Metric.OverloadCount}. Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
 }
 
-private void Ring_AutoScaleCallback(object sender, RingBufferAutoScaleEventArgs e)
+private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
 {
    Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
 }

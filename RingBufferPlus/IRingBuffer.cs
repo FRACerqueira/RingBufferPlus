@@ -40,15 +40,15 @@ namespace RingBufferPlus
     {
         event EventHandler<RingBufferErrorEventArgs>? ErrorCallBack;
         event EventHandler<RingBufferTimeoutEventArgs>? TimeoutCallBack;
-        event EventHandler<RingBufferAutoScaleEventArgs>? AutoScaleCallback;
+        event EventHandler<RingBufferAutoScaleEventArgs>? AutoScalerCallback;
         IRunningRingBuffer<T> Run(CancellationToken? cancellationToken = null);
     }
 
     public interface IRingBuffer<T>
     {
         IRingBuffer<T> AliasName(string value);
-        IRingBuffer<T> MinScaler(int value);
-        IRingBuffer<T> MaxScaler(int value);
+        IRingBuffer<T> MinScale(int value);
+        IRingBuffer<T> MaxScale(int value);
         IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
         IRingBuffer<T> PolicyTimeoutAccquireAsync(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, Task<bool>>? userpolicy = null);
         IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value);

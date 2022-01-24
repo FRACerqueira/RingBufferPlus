@@ -149,7 +149,7 @@ namespace RingBufferPlus
         #region IBuildRingBuffer
 
         public event EventHandler<RingBufferErrorEventArgs>? ErrorCallBack;
-        public event EventHandler<RingBufferAutoScaleEventArgs>? AutoScaleCallback;
+        public event EventHandler<RingBufferAutoScaleEventArgs>? AutoScalerCallback;
         public event EventHandler<RingBufferTimeoutEventArgs>? TimeoutCallBack;
 
         public IRunningRingBuffer<T> Run(CancellationToken? cancellationToken = null)
@@ -465,14 +465,14 @@ namespace RingBufferPlus
             return this;
         }
 
-        public IRingBuffer<T> MaxScaler(int value)
+        public IRingBuffer<T> MaxScale(int value)
         {
             if (value <= 0) throw new RingBufferFatalException("MaxScaler","MaxAvaliable must be greater than zero");
             MaximumCapacity = value;
             return this;
         }
 
-        public IRingBuffer<T> MinScaler(int value)
+        public IRingBuffer<T> MinScale(int value)
         {
             if (value <= 0) throw new RingBufferFatalException("MinScaler","MinAvaliable must be greater than zero");
             MinimumCapacity = value;
@@ -1076,7 +1076,7 @@ namespace RingBufferPlus
                 {
                     _triggerTaskAutoScaler = false;
                     LogRingBuffer($"{Alias} trigger AutoScale: {localmetric.Capacity} to {_targetCapacity}");
-                    AutoScaleCallback?.Invoke(this, new RingBufferAutoScaleEventArgs(Alias, localmetric.Capacity, _targetCapacity, localmetric));
+                    AutoScalerCallback?.Invoke(this, new RingBufferAutoScaleEventArgs(Alias, localmetric.Capacity, _targetCapacity, localmetric));
                 }
             }
         }
