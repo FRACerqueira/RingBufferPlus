@@ -18,7 +18,7 @@ namespace RingBufferPlusRabbit
     {
         private readonly IHostApplicationLifetime _appLifetime;
         private Task Testtask;
-        readonly List<Task> threads = new();
+        readonly List<Task> threads = new List<Task>();
         private readonly CancellationTokenSource _stoppingCts;
         private long countReduceRage;
         private long LastAcquisitionCount;
@@ -46,7 +46,7 @@ namespace RingBufferPlusRabbit
             {
                 try
                 {
-                    RunTest(cancellationToken);
+                    RunPOC(cancellationToken);
                 }
                 catch (AggregateException ex) when (ex.InnerException is TaskCanceledException tex)
                 {
@@ -97,12 +97,19 @@ namespace RingBufferPlusRabbit
 
         private static IModel CreateModel(IRunningRingBuffer<IConnection> ringCnn)
         {
-            using var ctx = ringCnn.Accquire();
-            if (ctx.SucceededAccquire)
+            IModel result;
+            using (var ctx = ringCnn.Accquire())
             {
-                return ctx.Current.CreateModel();
+                if (ctx.SucceededAccquire)
+                {
+                    result = ctx.Current.CreateModel();
+                }
+                else
+                {
+                    throw ctx.Error;
+                }
             }
-            throw ctx.Error;
+            return result;
         }
 
         private static async Task<bool> HCModelAsync(IModel model)
@@ -128,7 +135,7 @@ namespace RingBufferPlusRabbit
             }
         }
 
-        private void RunTest(CancellationToken cancellationToken)
+        private void RunPOC(CancellationToken cancellationToken)
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US"); ;
             Thread.CurrentThread.CurrentUICulture = new CultureInfo("en-US");
@@ -136,48 +143,60 @@ namespace RingBufferPlusRabbit
             //default Connection for local rabbitmq
             var cnnfactory = new ConnectionFactory
             {
+                ClientProvidedName = "RingBuffer",
             };
 
-            var ringCnn = RingBuffer<IConnection>
-                .CreateRingBuffer(4)
-                .MaxScale(8)
-                .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
-                .Factory((ctk) => cnnfactory.CreateConnection())
-                .HealthCheck((cnn, ctk) =>
+            using (var cnn = cnnfactory.CreateConnection())
+            {
+                using (var md = cnn.CreateModel())
                 {
-                    if (cnn != null)
+                    md.QueueDeclare("Qtest",true,false,false);
+                }
+            }
+
+            var build_ringCnn = RingBuffer<IConnection>
+                    .CreateRingBuffer( 3)
+                    .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
+                    .Factory((ctk) => cnnfactory.CreateConnection())
+                    .HealthCheck((cnn, ctk) =>
                     {
-                        if (cnn.IsOpen)
+                        if (cnn != null)
                         {
-                            return true;
+                            if (cnn.IsOpen)
+                            {
+                                return true;
+                            }
+                            return false;
                         }
-                        return false;
-                    }
-                    else
-                    {
-                        return false;
-                    }
-                })
-                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
-                .Build()
-                .Run(cancellationToken);
+                        else
+                        {
+                            return false;
+                        }
+                    })
+                    //.AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
+                    .Build();
+            build_ringCnn.AutoScalerCallback += Ring_AutoScalerCallback;
+            build_ringCnn.ErrorCallBack += Ring_ErrorCallBack;
+            build_ringCnn.TimeoutCallBack += Ring_TimeoutCallBack;
+            var ringCnn = build_ringCnn.Run(cancellationToken);
+
 
             var build_ringdmodel = RingBuffer<IModel>
-                .CreateRingBuffer(10)
-                .MinScale(2)
+                .CreateRingBuffer(20)
+                .MinScale(5)
                 .MaxScale(102)
-                .DefaultTimeoutAccquire(800)
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
                 .AutoScaler(MyAutoscalerModel)
-                .AddLogProvider(RingBufferLogLevel.Information,_loggerFactory)
+                //.AddLogProvider(RingBufferLogLevel.Information,_loggerFactory)
                 .Build();
 
-            //build_ringdmodel.AutoScalerCallback += Ring_AutoScalerCallback;
-            //build_ringdmodel.ErrorCallBack += Ring_ErrorCallBack;
-            //build_ringCnn.TimeoutCallBack += Ring_TimeoutCallBack;
+            build_ringdmodel.AutoScalerCallback += Ring_AutoScalerCallback;
+            build_ringdmodel.ErrorCallBack += Ring_ErrorCallBack;
+            build_ringdmodel.TimeoutCallBack += Ring_TimeoutCallBack;
 
             var ringmodel = build_ringdmodel.Run(cancellationToken);
+
 
             var threadCount = 100;
             var messageBodyBytes = Encoding.UTF8.GetBytes("Hello World!");
@@ -193,7 +212,7 @@ namespace RingBufferPlusRabbit
                         timer.Start();
                         while (!cancellationToken.IsCancellationRequested)
                         {
-                            if (timer.TotalSeconds > 120)
+                            if (timer.TotalMinutes > 3)
                             {
                                 threadCount--;
                                 Console.WriteLine($"Stoping this Thread. Total running = {threadCount}");
@@ -218,12 +237,16 @@ namespace RingBufferPlusRabbit
                                     }
                                     catch (Exception ex)
                                     {
-                                        Console.WriteLine($"{ctx.Alias} => Error: {ex.Message}.");
+                                        ctx.RemoveAvaliable();
+                                        Console.WriteLine($"{ctx.Alias} => Error: {ex}.");
                                     }
                                 }
-                                else
+                                else if (!ringmodel.HasSick)
                                 {
-                                    Console.WriteLine($"{ctx.Alias} => Error: {ctx.Error?.Message ?? "Null"}.  Available {ctx.Available}");
+                                    if (ctx.Capacity >= ringmodel.MaximumCapacity)
+                                    {
+                                        Console.WriteLine($"{ctx.Alias} => Error: {ctx.Error}.  Available/Running {ctx.Available}/{ctx.Running}");
+                                    }
                                 }
                             }
                         }

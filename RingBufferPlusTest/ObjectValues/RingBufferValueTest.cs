@@ -17,7 +17,7 @@ namespace RingBufferPlusTest.ObjectValues
             public int MyProperty { get; set; }
         }
 
-        private void ActionFake(MyClassTest test)
+        private void ActionFake(MyClassTest test,bool skip)
         {
             CountActionFake++;
             test.MyProperty = 0;
@@ -27,7 +27,7 @@ namespace RingBufferPlusTest.ObjectValues
         public void Should_have_CorrectValues()
         {
             var inst = new MyClassTest();
-            var featureTest = new RingBufferValue<MyClassTest>("Alias", 1, 2, true, new Exception("teste"), inst, ActionFake);
+            var featureTest = new RingBufferValue<MyClassTest>("Alias", 1, 2, 0,true, new Exception("teste"), inst, ActionFake);
             Assert.Equal(1, featureTest.Available);
             Assert.True(featureTest.SucceededAccquire);
             Assert.Equal("Alias", featureTest.Alias);
@@ -42,7 +42,7 @@ namespace RingBufferPlusTest.ObjectValues
         public void Should_have_CorrectDispose_withAction()
         {
             var inst = new MyClassTest();
-            using (_ = new RingBufferValue<MyClassTest>("Alias", 1, 2, true, new Exception("teste"), inst, ActionFake))
+            using (_ = new RingBufferValue<MyClassTest>("Alias", 1, 2,0, true, new Exception("teste"), inst, ActionFake))
             {
             };
             Assert.Equal(1, CountActionFake);
@@ -53,7 +53,7 @@ namespace RingBufferPlusTest.ObjectValues
         public void Should_have_CorrectDispose_withoutAction()
         {
             var inst = new MyClassTest();
-            using (_ = new RingBufferValue<MyClassTest>("Alias", 1, 2, true, new Exception("teste"), inst, null))
+            using (_ = new RingBufferValue<MyClassTest>("Alias", 1, 2,0, true, new Exception("teste"), inst, null))
             {
             };
             Assert.Equal(0, CountActionFake);

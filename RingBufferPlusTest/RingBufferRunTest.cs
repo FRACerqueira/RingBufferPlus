@@ -64,7 +64,6 @@ namespace RingBufferPlusTest
             Assert.Equal(10, arg.Metric.Minimum);
             Assert.Equal(0, arg.Metric.OverloadCount);
             Assert.Equal(0, arg.Metric.Running);
-            Assert.Equal(10, arg.Metric.Target);
         }
 
         [Fact]
@@ -102,7 +101,6 @@ namespace RingBufferPlusTest
             Assert.Equal(10, arg.Metric.Minimum);
             Assert.Equal(0, arg.Metric.OverloadCount);
             Assert.Equal(0, arg.Metric.Running);
-            Assert.Equal(10, arg.Metric.Target);
         }
 
         [Theory]

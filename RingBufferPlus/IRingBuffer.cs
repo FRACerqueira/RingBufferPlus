@@ -24,6 +24,7 @@ namespace RingBufferPlus
         RingBufferPolicyTimeout PolicyTimeout { get; }
         bool HasLogging { get; }
         LogLevel DefaultLogLevel { get; }
+        bool HasSick { get; }
         bool HasReport { get; }
         bool HasUserpolicyAccquire { get; }
         bool HasUserHealthCheck { get; }

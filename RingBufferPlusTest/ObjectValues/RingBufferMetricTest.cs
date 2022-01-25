@@ -9,7 +9,7 @@ namespace RingBufferPlusTest.ObjectValues
         [Fact]
         public void Should_have_CorrectValues()
         {
-            var featureTest = new RingBufferMetric("Alias", 1, 2, 3, 4, 5, 6, 7, 8, 9, TimeSpan.FromMilliseconds(10));
+            var featureTest = new RingBufferMetric("Alias",  2, 3, 4, 5, 6, 7, 8, 9, TimeSpan.FromMilliseconds(10));
             Assert.Equal(7, featureTest.Minimum);
             Assert.Equal(8, featureTest.Maximum);
             Assert.Equal(9, featureTest.Avaliable);
@@ -21,7 +21,6 @@ namespace RingBufferPlusTest.ObjectValues
             Assert.Equal(3, featureTest.ErrorCount);
             Assert.Equal(4, featureTest.OverloadCount);
             Assert.Equal(6, featureTest.Running);
-            Assert.Equal(1, featureTest.Target);
         }
     }
 }

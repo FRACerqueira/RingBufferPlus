@@ -8,10 +8,9 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferMetric(string alias, int target, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, int running, int min, int max, int aval, TimeSpan tm) : this()
+        internal RingBufferMetric(string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, int running, int min, int max, int aval, TimeSpan tm) : this()
         {
             Alias = alias;
-            Target = target;
             ErrorCount = errorcount;
             TimeoutCount = timeoutcount;
             OverloadCount = overloadcount;
@@ -29,7 +28,6 @@ namespace RingBufferPlus.ObjectValues
         public long AcquisitionCount { get; } = 0;
         public long OverloadCount { get; } = 0;
         public int Running { get; } = 0;
-        public int Target { get; } = 0;
         public int Avaliable { get; } = 0;
         public int Capacity => Avaliable + Running;
         public int Minimum { get; } = 0;

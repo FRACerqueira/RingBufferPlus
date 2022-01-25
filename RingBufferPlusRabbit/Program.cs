@@ -11,7 +11,6 @@ namespace RingBufferPlusRabbit
         {
             var host = Host.CreateDefaultBuilder(args)
                     .UseConsoleLifetime()
-                    .UseEnvironment("CLI")
                     .ConfigureServices((hostContext, services) =>
                     {
                         services.AddLogging(
