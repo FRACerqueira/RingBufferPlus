@@ -4,16 +4,17 @@ namespace RingBufferPlus.ObjectValues
 {
     public class RingBufferValue<T> : IDisposable
     {
-        private readonly Action<T>? _turnback;
+        private readonly Action<T,bool>? _turnback;
         private bool disposedValue;
 
         private RingBufferValue()
         {
         }
 
-        internal RingBufferValue(string alias, int available, long elapsedTime, bool succeeded, Exception error, T value, Action<T>? turnback) : this()
+        internal RingBufferValue(string alias, int available,int running, long elapsedTime, bool succeeded, Exception error, T value, Action<T,bool>? turnback) : this()
         {
             Available = available;
+            Running = running;
             ElapsedTime = elapsedTime;
             Alias = alias;
             SucceededAccquire = succeeded;
@@ -28,7 +29,14 @@ namespace RingBufferPlus.ObjectValues
         public T Current { get; }
         public Exception Error { get; }
         public int Available { get; }
+        public int Running { get; }
+        public int Capacity => Available + Running;
+        internal bool SkiptTurnback { get; set; }
 
+        public void RemoveAvaliable()
+        {
+            SkiptTurnback = true;
+        }
         protected virtual void Dispose(bool disposing)
         {
             if (!disposedValue)
@@ -37,7 +45,7 @@ namespace RingBufferPlus.ObjectValues
                 {
                     if (SucceededAccquire)
                     {
-                        _turnback?.Invoke(Current);
+                        _turnback?.Invoke(Current,SkiptTurnback);
                     }
                     disposedValue = true;
                 }

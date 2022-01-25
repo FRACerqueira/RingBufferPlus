@@ -1,34 +1,16 @@
-﻿using System;
-using System.Threading;
-
-namespace RingBufferPlus.Features
+﻿namespace RingBufferPlus.Features
 {
-    internal class ReportFeature
+    internal struct ReportCount
     {
-        private readonly CancellationToken _token;
         private readonly object _sync = new();
-        private readonly int _maxAvaliable;
-        private readonly int _minAvaliable;
-        public TimeSpan BaseTime { get; }
 
-        private ReportFeature()
+        public ReportCount()
         {
+            _errorCount = 0;
+            _waitCount = 0;
+            _acquisitionCount = 0;
+            _timeoutCount = 0;
         }
-
-        public ReportFeature(
-            int maxAvaliable,
-            int minAvaliable,
-            TimeSpan baseTime,
-            CancellationToken cancellationToken) : this()
-        {
-            _maxAvaliable = maxAvaliable;
-            _minAvaliable = minAvaliable;
-            BaseTime = baseTime;
-            _token = cancellationToken;
-        }
-
-        public int MaxAvaliable => _maxAvaliable;
-        public int MinAvaliable => _minAvaliable;
 
         private long _timeoutCount;
         public long TimeoutCount
