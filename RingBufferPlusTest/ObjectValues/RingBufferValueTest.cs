@@ -31,7 +31,7 @@ namespace RingBufferPlusTest.ObjectValues
             Assert.Equal(1, featureTest.Available);
             Assert.True(featureTest.SucceededAccquire);
             Assert.Equal("Alias", featureTest.Alias);
-            Assert.Equal(2, featureTest.ElapsedTime);
+            Assert.Equal(0, featureTest.ElapsedTime);
             Assert.NotNull(featureTest.Error);
             Assert.Equal("teste", featureTest.Error.Message);
             Assert.Equal(inst, featureTest.Current);

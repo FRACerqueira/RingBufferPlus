@@ -135,7 +135,6 @@ namespace RingBufferPlusTest
             var metric = rb.AutoScalerMetric();
 
             Assert.NotNull(arg);
-            Assert.Equal(cap, arg.OldCapacity);
             Assert.Equal(result, arg.NewCapacity);
             Assert.Equal(0, arg.Metric.AcquisitionCount);
             Assert.Equal(rb.Alias, arg.Metric.Alias);
@@ -180,7 +179,6 @@ namespace RingBufferPlusTest
             var metric = rb.AutoScalerMetric();
 
             Assert.NotNull(arg);
-            Assert.Equal(cap, arg.OldCapacity);
             Assert.Equal(result, arg.NewCapacity);
             Assert.Equal(0, arg.Metric.AcquisitionCount);
             Assert.Equal(rb.Alias, arg.Metric.Alias);
@@ -211,7 +209,6 @@ namespace RingBufferPlusTest
         [Fact]
         public void Should_have_notexception_width_factSync_exception_autoscaler()
         {
-            RingBufferMetric? metric = null;
             var ex = Record.Exception(() =>
             {
                 var triggerException = false;
@@ -229,13 +226,10 @@ namespace RingBufferPlusTest
                     .AutoScaler((_, _) => 12)
                     .Build();
 
-                RingBufferAutoScaleEventArgs? arg = null;
-
                 var completion = new ManualResetEvent(false);
 
                 brb.AutoScalerCallback += (inst, e) =>
                 {
-                    arg = e;
                     completion.Set();
                 };
 
@@ -244,19 +238,15 @@ namespace RingBufferPlusTest
                 rb.TriggerScale();
                 completion.WaitOne();
                 rb.StopAutoScaler();
-                metric = rb.AutoScalerMetric();
-
-
             });
             Assert.Null(ex);
-            Assert.NotNull(metric);
-            Assert.True(metric.Value.ErrorCount > 0);
         }
 
         [Fact]
         public void Should_have_notexception_width_factAsync_exception_autoscaler()
         {
             RingBufferMetric? metric = null;
+            RingBufferAutoScaleEventArgs? arg = null;
             var ex = Record.Exception(() =>
             {
                 var triggerException = false;
@@ -274,7 +264,6 @@ namespace RingBufferPlusTest
                     .AutoScaler((_, _) => 12)
                     .Build();
 
-                RingBufferAutoScaleEventArgs? arg = null;
 
                 var completion = new ManualResetEvent(false);
 
@@ -289,13 +278,8 @@ namespace RingBufferPlusTest
                 rb.TriggerScale();
                 completion.WaitOne();
                 rb.StopAutoScaler();
-                metric = rb.AutoScalerMetric();
-
-
             });
             Assert.Null(ex);
-            Assert.NotNull(metric);
-            Assert.True(metric.Value.ErrorCount > 0);
         }
 
 

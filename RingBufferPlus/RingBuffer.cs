@@ -785,6 +785,7 @@ namespace RingBufferPlus
         private async Task ApplyPolicyTimeoutAccquireAsync(string source, TimeSpan basetime, RingBufferTimeoutException exception, RingBufferMetric metric)
         {
 
+            IncrementTimeout();
             if (_policytimeoutAccquire == RingBufferPolicyTimeout.MaximumCapacity)
             {
                 if (metric.Capacity >= metric.Maximum && metric.Avaliable == 0)
@@ -825,6 +826,7 @@ namespace RingBufferPlus
                 }
                 catch (Exception ex)
                 {
+                    IncrementError();
                     tmout = new ValueException<bool>(false, ex);
                 }
                 if (tmout.Value || tmout.Error != null)
@@ -962,6 +964,7 @@ namespace RingBufferPlus
                 }
                 catch (Exception ex)
                 {
+                    IncrementError();
                     if (!HasSick)
                     {
                         LogRingBuffer($"{Alias} Auto Scaler  falured: {ex}", LogLevel.Error);
@@ -1109,6 +1112,7 @@ namespace RingBufferPlus
                     }
                     catch (Exception ex)
                     {
+                        IncrementError();
                         if (MinimumCapacity == InitialCapacity)
                         {
                             var err = new RingBufferFactoryException(Alias, $"{Alias} Min({MinimumCapacity}) capacity failed, current {localcapacity}", ex);
@@ -1132,6 +1136,7 @@ namespace RingBufferPlus
             var localcapacity = CurrentCapacity;
             if (localcapacity < MinimumCapacity && !_cts.IsCancellationRequested)
             {
+                IncrementError();
                 var err = new RingBufferFatalException("TryAddCapacity", $"{Alias} Min({MinimumCapacity}) capacity failed, current {localcapacity}");
                 return new ValueException<int>(localcapacity, err);
             }
