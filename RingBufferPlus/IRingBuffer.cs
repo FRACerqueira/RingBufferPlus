@@ -10,9 +10,7 @@ namespace RingBufferPlus
     public interface IPropertiesRingBuffer
     {
         string Alias { get; }
-        int CurrentCapacity { get; }
-        int CurrentAvailable { get; }
-        int CurrentRunning { get; }
+        RingBufferfState CurrentState { get; }
         int InitialCapacity { get; }
         int MinimumCapacity { get; }
         int MaximumCapacity { get; }
@@ -24,7 +22,6 @@ namespace RingBufferPlus
         RingBufferPolicyTimeout PolicyTimeout { get; }
         bool HasLogging { get; }
         LogLevel DefaultLogLevel { get; }
-        bool HasSick { get; }
         bool HasReport { get; }
         bool HasUserpolicyAccquire { get; }
         bool HasUserHealthCheck { get; }
@@ -48,8 +45,8 @@ namespace RingBufferPlus
     public interface IRingBuffer<T>
     {
         IRingBuffer<T> AliasName(string value);
-        IRingBuffer<T> MinScale(int value);
-        IRingBuffer<T> MaxScale(int value);
+        IRingBuffer<T> MinBuffer(int value);
+        IRingBuffer<T> MaxBuffer(int value);
         IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
         IRingBuffer<T> PolicyTimeoutAccquireAsync(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, Task<bool>>? userpolicy = null);
         IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value);

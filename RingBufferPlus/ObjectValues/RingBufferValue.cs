@@ -33,7 +33,7 @@ namespace RingBufferPlus.ObjectValues
         public int Capacity => Available + Running;
         internal bool SkiptTurnback { get; set; }
 
-        public void RemoveAvaliable()
+        public void Invalidate()
         {
             SkiptTurnback = true;
         }

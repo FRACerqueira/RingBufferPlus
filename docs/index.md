@@ -62,7 +62,7 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateRingBuffer(3)
+	.CreateBuffer(3)
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -110,10 +110,10 @@ public class MyClass : IDisposable
 }
 
 var build_rb = RingBuffer<MyClass>
-                .CreateRingBuffer(5)
+                .CreateBuffer(5)
+                .MinBuffer(2)
+                .MaxBuffer(10)
                 .AliasName("Test")
-                .MinScale(2)
-                .MaxScale(10)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
@@ -163,9 +163,10 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 
 Title | Details
 --- | ---
+[CreateBuffer](createbuffer.md) |  Create new instance of builder-RingBuffer and sets the initial capacity of items in the buffer.
 [AliasName](aliasname.md) |  Set alias to RingBuffer.
-[MaxScaler](maxscaler.md) |  Sets the maximum capacity of items in the buffer.
-[MinScaler](minscaler.md) |  Sets the minimum capacity of items in the buffer..
+[MaxBuffer](maxbuffer.md) |  Sets the maximum capacity of items in the buffer.
+[MinBuffer](minbuffer.md) |  Sets the minimum capacity of items in the buffer..
 [PolicyTimeoutAccquire](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [PolicyTimeoutAccquireAsync](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 

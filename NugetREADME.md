@@ -21,7 +21,7 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateRingBuffer(3)
+	.CreateBuffer(3)
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -68,10 +68,10 @@ public class MyClass : IDisposable
 }
 
 var build_rb = RingBuffer<MyClass>
-                .CreateRingBuffer(5)
+                .CreateBuffer(5)
+                .MinBuffer(2)
+                .MaxBuffer(10)
                 .AliasName("Test")
-                .MinScale(2)
-                .MaxScale(10)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)

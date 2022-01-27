@@ -155,7 +155,7 @@ namespace RingBufferPlusRabbit
             }
 
             var build_ringCnn = RingBuffer<IConnection>
-                    .CreateRingBuffer( 3)
+                    .CreateBuffer( 3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
                     .Factory((ctk) => cnnfactory.CreateConnection())
                     .HealthCheck((cnn, ctk) =>
@@ -182,9 +182,9 @@ namespace RingBufferPlusRabbit
 
 
             var build_ringdmodel = RingBuffer<IModel>
-                .CreateRingBuffer(20)
-                .MinScale(5)
-                .MaxScale(102)
+                .CreateBuffer(20)
+                .MinBuffer(5)
+                .MaxBuffer(102)
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
                 .AutoScaler(MyAutoscalerModel)
@@ -237,11 +237,11 @@ namespace RingBufferPlusRabbit
                                     }
                                     catch (Exception ex)
                                     {
-                                        ctx.RemoveAvaliable();
+                                        ctx.Invalidate();
                                         Console.WriteLine($"{ctx.Alias} => Error: {ex}.");
                                     }
                                 }
-                                else if (!ringmodel.HasSick)
+                                else if (!ringmodel.CurrentState.HasSick)
                                 {
                                     if (ctx.Capacity >= ringmodel.MaximumCapacity)
                                     {
@@ -327,7 +327,7 @@ namespace RingBufferPlusRabbit
                 else if (LastAcquisitionCount < arg.AcquisitionCount && arg.TimeoutCount == 0)
                 {
                     countReduceRage++;
-                    if (countReduceRage >= 5)
+                    if (countReduceRage >= 2)
                     {
                         if (arg.Avaliable > 2)
                         {
