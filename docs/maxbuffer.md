@@ -1,7 +1,8 @@
 # <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus # MaxBuffer
 
 [**Main**](index.md#help) | 
-[**Apis**](index.md#apis)
+[**Apis**](index.md#apis) |
+[**CreateBuffer**](createbuffer.md)
 
 ## Documentation
 Sets the maximum capacity of items in the buffer. When not set, MaxBuffer is the same value of [CreateBuffer](createbuffer.md).
@@ -22,5 +23,8 @@ When MaxBuffer is less than or equal to zero.
 
 ### Links
 [**Main**](index.md#help) | 
-[**Apis**](index.md#apis)
+[**Apis**](index.md#apis) |
+[**CreateBuffer**](createbuffer.md)
+
+
 
