@@ -182,6 +182,8 @@ Title | Details
 [MetricsReport](metricsreport.md) | Set action for metrics report.
 [MetricsReportAsync](metricsreport.md) | Set action for metrics report.
 [AddLogProvider](addlogprovider.md) | Set log provider and default message level.
+[AddRetryPolicySickFactory](addRetrypolicysickfactory.md) | Set Retry Policy to factory n item in the buffer.
+[LinkedCurrentState](linkedcurrentstate.md) | ???
 [Build](ringbufferbuild.md) | Executes and validates all commands, provides the events to be configured and the execution command.
 [ErrorCallBack](errorcallback.md) | Error return event.
 [TimeoutCallBack](timeoutcallback.md) | Timeout return event.
