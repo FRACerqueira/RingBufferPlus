@@ -11,18 +11,20 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferValue(string alias, int available,int running, long elapsedTime, bool succeeded, Exception error, T value, Action<T,bool>? turnback) : this()
+        internal RingBufferValue(string alias,RingBufferfState state, long elapsedTime, bool succeeded, Exception error, T value, Action<T,bool>? turnback) : this()
         {
-            Available = available;
-            Running = running;
+            Available = state.CurrentAvailable;
+            Running = state.CurrentRunning;
             ElapsedTime = elapsedTime;
             Alias = alias;
             SucceededAccquire = succeeded;
             Error = error;
             Current = value;
+            HasSick = state.HasSick;
             _turnback = turnback;
         }
-
+        public RingBufferfState State { get; }
+        public bool HasSick { get; }
         public long ElapsedTime { get; }
         public string Alias { get; }
         public bool SucceededAccquire { get; }

@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Polly.Retry;
 
 namespace RingBufferPlus
 {
@@ -47,6 +48,8 @@ namespace RingBufferPlus
         IRingBuffer<T> AliasName(string value);
         IRingBuffer<T> MinBuffer(int value);
         IRingBuffer<T> MaxBuffer(int value);
+        IRingBuffer<T> AddRetryPolicySickFactory(RetryPolicy<T> policy);
+        IRingBuffer<T> LinkedCurrentState(Func<bool> value);
         IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
         IRingBuffer<T> PolicyTimeoutAccquireAsync(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, Task<bool>>? userpolicy = null);
         IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value);

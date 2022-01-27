@@ -65,6 +65,10 @@
 		<None Include="..\README.md" Pack="false" />
 		<None Include="..\NugetREADME.md" Pack="true" PackagePath="\" />
 	</ItemGroup>
+	
+	<ItemGroup>
+	  <PackageReference Include="Polly" Version="7.2.3" />
+	</ItemGroup>
 
 
 </Project>

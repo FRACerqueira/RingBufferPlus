@@ -11,6 +11,10 @@ using System.Globalization;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Polly.Retry;
+using Polly;
+using System.Net.Sockets;
+using RabbitMQ.Client.Exceptions;
 
 namespace RingBufferPlusRabbit
 {
@@ -135,6 +139,15 @@ namespace RingBufferPlusRabbit
             }
         }
 
+        private static RetryPolicy<T> BuildPolicy<T>(int retryCount = 5) 
+        {
+            return Policy<T>
+                    .Handle<SocketException>()
+                        .Or<RabbitMQClientException>()
+                        .Or<BrokerUnreachableException>()
+                    .WaitAndRetry(retryCount, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
+        }
+
         private void RunPOC(CancellationToken cancellationToken)
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US"); ;
@@ -144,19 +157,21 @@ namespace RingBufferPlusRabbit
             var cnnfactory = new ConnectionFactory
             {
                 ClientProvidedName = "RingBuffer",
+                 AutomaticRecoveryEnabled = false,
             };
 
             using (var cnn = cnnfactory.CreateConnection())
             {
                 using (var md = cnn.CreateModel())
                 {
-                    md.QueueDeclare("Qtest",true,false,false);
+                    md.QueueDeclare("Qtest", true, false, false);
                 }
             }
 
             var build_ringCnn = RingBuffer<IConnection>
                     .CreateBuffer( 3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
+                    .AddRetryPolicySickFactory(BuildPolicy<IConnection>())
                     .Factory((ctk) => cnnfactory.CreateConnection())
                     .HealthCheck((cnn, ctk) =>
                     {
@@ -185,6 +200,7 @@ namespace RingBufferPlusRabbit
                 .CreateBuffer(20)
                 .MinBuffer(5)
                 .MaxBuffer(102)
+                .LinkedCurrentState(() => !ringCnn.CurrentState.HasSick)
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
                 .AutoScaler(MyAutoscalerModel)
