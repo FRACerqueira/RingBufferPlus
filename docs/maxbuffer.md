@@ -5,7 +5,7 @@
 [**CreateBuffer**](createbuffer.md)
 
 ## Documentation
-Sets the maximum capacity of items in the buffer. 
+Sets the maximum capacity of items in the buffer.</br>
 When not set, MaxBuffer is the same value of [CreateBuffer](createbuffer.md).
 
 ### Methods
