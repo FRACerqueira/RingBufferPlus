@@ -5,7 +5,8 @@
 [**CreateBuffer**](createbuffer.md)
 
 ## Documentation
-Sets the minimum capacity of items in the buffer. When not set, MinBuffer is the same value of [CreateBuffer](createbuffer.md).
+Sets the minimum capacity of items in the buffer. 
+When not set, MinBuffer is the same value of [CreateBuffer](createbuffer.md).
 
 ### Methods
 

@@ -163,7 +163,7 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 
 Title | Details
 --- | ---
-[CreateBuffer](createbuffer.md) |  Create new instance of builder-RingBuffer and sets the initial capacity of items in the buffer.
+[CreateBuffer](createbuffer.md) |  Create new instance of IRingBuffer and sets the initial capacity of items in the buffer.
 [AliasName](aliasname.md) |  Set alias to RingBuffer.
 [MaxBuffer](maxbuffer.md) |  Sets the maximum capacity of items in the buffer.
 [MinBuffer](minbuffer.md) |  Sets the minimum capacity of items in the buffer..
