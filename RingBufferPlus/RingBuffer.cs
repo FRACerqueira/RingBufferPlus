@@ -1,9 +1,10 @@
-﻿using RingBufferPlus.Events;
+﻿using Microsoft.Extensions.Logging;
+using Polly.Retry;
+using RingBufferPlus.Events;
 using RingBufferPlus.Exceptions;
 using RingBufferPlus.Features;
 using RingBufferPlus.Internals;
 using RingBufferPlus.ObjectValues;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Concurrent;
 using System.Threading;
@@ -15,14 +16,11 @@ namespace RingBufferPlus
     {
 
         #region Private Properties
-
         private struct RingAccquireresult
         {
             public RingAccquireresult()
             {
-                ElapsedTime = 0;
-                Value = default;
-                Error = new InvalidOperationException($"Invalid Create {nameof(RingAccquireresult)}");
+                throw new InvalidOperationException($"Invalid Create {nameof(RingAccquireresult)}");
             }
 
             public RingAccquireresult(long elapsedTime, T value, Exception error)
@@ -58,6 +56,10 @@ namespace RingBufferPlus
         private ReportCount _reportCount = new ReportCount();
         private Task? _reportTask;
         private bool _stopTaskReport;
+        private RetryPolicy<T> _policySickfactory;
+
+        private Func<bool> _observerstatesSync;
+        private Task<bool> _observerstatesAsync;
 
 
         private Func<RingBufferMetric, CancellationToken, Task<int>>? _autoScaleFuncAsync;
@@ -88,13 +90,13 @@ namespace RingBufferPlus
         private CancellationTokenSource _cts;
         private bool _disposedValue;
         private readonly object _singleThread = new object();
-
+        private bool _startCompleted;
 
         #endregion  
 
         #region Constructor
 
-        public static IRingBuffer<T> CreateRingBuffer(int value)
+        public static IRingBuffer<T> CreateBuffer(int value)
         {
             return new RingBuffer<T>(value);
         }
@@ -104,7 +106,6 @@ namespace RingBufferPlus
             if (value <= 0) throw new RingBufferFatalException("RingBufferPlus", "InitialCapacity must be greater than zero");
 
             availableBuffer = new ConcurrentQueue<T>();
-
             TimeoutAccquire = TimeSpan.Zero;
             WaitNextTry = TimeSpan.Zero;
 
@@ -124,10 +125,35 @@ namespace RingBufferPlus
 
         #region IPropertiesRingBuffer
 
-        public int CurrentRunning => (int)Interlocked.Read(ref _runningCount);
-        public int CurrentAvailable => availableBuffer.Count;
-        public int CurrentCapacity => CurrentRunning + CurrentAvailable;
-        public bool HasSick => (CurrentAvailable + CurrentRunning) < MinimumCapacity;
+        public RingBufferfState CurrentState
+        {
+            get
+            {
+                lock (_singleThread)
+                {
+                    var ava = availableBuffer.Count;
+                    var run = (int)Interlocked.Read(ref _runningCount);
+                    var ok = false;
+                    if (_startCompleted)
+                    {
+                        ok = (ava + run) < MinimumCapacity;
+                        if (ok && _observerstatesSync != null)
+                        {
+                            ok = _observerstatesSync();
+                        }
+                        else if (ok && _observerstatesAsync != null)
+                        {
+                            Task.Run(async () =>
+                            {
+                                ok = await _observerstatesAsync
+                                        .ConfigureAwait(false);
+                            }).Wait();
+                        }
+                    }
+                    return new RingBufferfState((int)Interlocked.Read(ref _runningCount), availableBuffer.Count, ok);
+                }
+            }
+        }
 
         public RingBufferPolicyTimeout PolicyTimeout => _policytimeoutAccquire;
         public TimeSpan IntervalHealthCheck => _intervalHealthCheck;
@@ -156,13 +182,13 @@ namespace RingBufferPlus
 
         public IRunningRingBuffer<T> Run(CancellationToken? cancellationToken = null)
         {
-
+            _startCompleted = false;
             _cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken ?? CancellationToken.None);
             _runningCount = 0;
 
             LogRingBuffer($"{Alias} Start TryInitCapacityMinimum {InitialCapacity}");
             var initresult = TryAddCapacity(MinimumCapacity);
-            LogRingBuffer($"{Alias} End TryInitCapacityMinimum {CurrentCapacity}");
+            LogRingBuffer($"{Alias} End TryInitCapacityMinimum {CurrentState.CurrentCapacity}");
 
             if (initresult.Error != null)
             {
@@ -254,7 +280,7 @@ namespace RingBufferPlus
 
                 _healthCheckTask.Start();
             }
-
+            _startCompleted = true;
             return this;
         }
 
@@ -267,11 +293,11 @@ namespace RingBufferPlus
             var aux = RingAccquire(timeout);
             if (!aux.SucceededAccquire)
             {
-                if (!HasSick)
+                if (!aux.HasSick)
                 {
                     if (aux.Error is RingBufferTimeoutException exception)
                     {
-                        await ApplyPolicyTimeoutAccquireAsync(nameof(AccquireAsync), TimeoutAccquire, exception, CreateMetricAutoScaler())
+                        await ApplyPolicyTimeoutAccquireAsync(nameof(AccquireAsync), TimeoutAccquire, exception, CreateMetricAutoScaler(aux.State))
                             .ConfigureAwait(false);
                     }
                     else
@@ -288,11 +314,11 @@ namespace RingBufferPlus
             var aux = RingAccquire(timeout);
             if (!aux.SucceededAccquire)
             {
-                if (!HasSick)
+                if (!aux.HasSick)
                 {
                     if (aux.Error is RingBufferTimeoutException exception)
                     {
-                        ApplyPolicyTimeoutAccquireAsync(nameof(Accquire), TimeoutAccquire, exception, CreateMetricAutoScaler())
+                        ApplyPolicyTimeoutAccquireAsync(nameof(Accquire), TimeoutAccquire, exception, CreateMetricAutoScaler(aux.State))
                             .GetAwaiter()
                             .GetResult();
                     }
@@ -309,6 +335,27 @@ namespace RingBufferPlus
         #endregion
 
         #region IRingBuffer
+
+        public IRingBuffer<T> AddLinkedCurrentState(Func<bool> value)
+        {
+            if (value == null) throw new RingBufferFatalException("AddLinkedCurrentState", "Linked Function can't be null");
+            _observerstatesSync = value;
+            return this;
+        }
+
+        public IRingBuffer<T> AddLinkedCurrentStateAsync(Task<bool> value)
+        {
+            if (value == null) throw new RingBufferFatalException("AddLinkedCurrentStateAsync", "Linked Function can't be null");
+            _observerstatesAsync = value;
+            return this;
+        }
+
+        public IRingBuffer<T> AddRetryPolicyFactory(RetryPolicy<T> policy)
+        {
+            if (policy == null) throw new RingBufferFatalException("AddRetryPolicyFactory", "Policy can't be null");
+            _policySickfactory = policy;
+            return this;
+        }
 
         public IBuildRingBuffer<T> Build()
         {
@@ -473,7 +520,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultTimeoutAccquire", "Timeout Available must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultTimeoutAccquire", "Timeout Available must be greater than zero");
             TimeoutAccquire = value;
             return this;
         }
@@ -485,14 +532,14 @@ namespace RingBufferPlus
             return this;
         }
 
-        public IRingBuffer<T> MaxScale(int value)
+        public IRingBuffer<T> MaxBuffer(int value)
         {
             if (value <= 0) throw new RingBufferFatalException("MaxScaler", "MaxAvaliable must be greater than zero");
             MaximumCapacity = value;
             return this;
         }
 
-        public IRingBuffer<T> MinScale(int value)
+        public IRingBuffer<T> MinBuffer(int value)
         {
             if (value <= 0) throw new RingBufferFatalException("MinScaler", "MinAvaliable must be greater than zero");
             MinimumCapacity = value;
@@ -522,7 +569,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalHealthCheck(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalHealthCheck", "Timeout HealthCheck must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalHealthCheck", "Timeout HealthCheck must be greater than zero");
             _intervalHealthCheck = value;
             return this;
         }
@@ -548,7 +595,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalAutoScaler(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalAutoScaler", "Interval AutoScaler must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalAutoScaler", "Interval AutoScaler must be greater than zero");
             _intervalAutoScaler = value;
             return this;
         }
@@ -604,7 +651,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalReport(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalReport", "Interval Report must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalReport", "Interval Report must be greater than zero");
             _intervalReport = value;
             return this;
         }
@@ -677,7 +724,7 @@ namespace RingBufferPlus
 
         internal RingBufferMetric TestMetricAutoScaler()
         {
-            return CreateMetricAutoScaler();
+            return CreateMetricAutoScaler(CurrentState);
         }
 
 
@@ -696,8 +743,7 @@ namespace RingBufferPlus
             {
                 locallevel = level.Value;
             }
-            var msg = $"[{DateTime.Now}] {message}";
-            _logger.Log(locallevel, msg);
+            _logger.Log(locallevel, $"[{DateTime.Now}] {message}");
         }
 
         private static bool IsValidStatusTask(Task task)
@@ -716,17 +762,25 @@ namespace RingBufferPlus
             };
         }
 
-        private void RenewContextBuffer(T value, bool skiptTurnback)
+        private void RenewContextBuffer(RingBufferValue<T> value)
         {
             lock (_singleThread)
             {
-                if (!skiptTurnback)
+                if (_reportTask != null && value.SucceededAccquire)
                 {
-                    availableBuffer.Enqueue(value);
+                    lock (_singleThread)
+                    {
+                        _reportCount.IncrementAcquisitionSucceeded();
+                        _reportCount.AddTotaSucceededlExecution(value.ElapsedExecute);
+                    }
+                }
+                if (!value.SkiptTurnback)
+                {
+                    availableBuffer.Enqueue(value.Current);
                 }
                 else
                 {
-                    if (value is IDisposable disposable)
+                    if (value.Current is IDisposable disposable)
                     {
                         disposable.Dispose();
                     }
@@ -744,7 +798,6 @@ namespace RingBufferPlus
                 {
                     break;
                 }
-
                 using (var tmpBufferElement = RingAccquire(TimeoutAccquire))
                 {
                     if (tmpBufferElement.SucceededAccquire)
@@ -769,7 +822,7 @@ namespace RingBufferPlus
                         catch (Exception ex)
                         {
                             IncrementError();
-                            if (!HasSick)
+                            if (!tmpBufferElement.HasSick)
                             {
                                 var err = new RingBufferHealthCheckException(Alias, "Health Check falured.", ex);
                                 LogRingBuffer($"{Alias} Health Check Error: {err}", LogLevel.Error);
@@ -862,15 +915,23 @@ namespace RingBufferPlus
             {
                 localtmout = timeout.Value;
             }
-
             var timer = new NaturalTimer();
             timer.ReStart();
             T tmpBufferElement;
+
+            var localsta = CurrentState;
+            if (CurrentState.HasSick)
+            {
+                timer.Stop();
+                _ = NaturalTimer.Delay(WaitNextTry, null, _cts.Token);
+                return new RingBufferValue<T>(Alias, localsta, (long)timer.TotalMilliseconds, false, null, default, null);
+            }
+
             while (!availableBuffer.TryDequeue(out tmpBufferElement))
             {
                 if (NaturalTimer.Delay(WaitNextTry, null, _cts.Token))
                 {
-                    return new RingBufferValue<T>(Alias, CurrentAvailable, CurrentRunning, (long)timer.TotalMilliseconds, false, null, tmpBufferElement, null);
+                    return new RingBufferValue<T>(Alias, localsta, (long)timer.TotalMilliseconds, false, null, tmpBufferElement, null);
                 }
                 if (localtmout.TotalMilliseconds != -1 && timer.TotalMilliseconds > localtmout.TotalMilliseconds)
                 {
@@ -881,12 +942,15 @@ namespace RingBufferPlus
                         IncrementTimeout();
                         ex = new RingBufferTimeoutException(nameof(RingAccquire), (long)timer.TotalMilliseconds, $"Timeout({localtmout.TotalMilliseconds}) {nameof(RingAccquire)}({timer.TotalMilliseconds:F0})");
                     }
-                    return new RingBufferValue<T>(Alias, CurrentAvailable, CurrentRunning, (long)timer.TotalMilliseconds, false, ex, tmpBufferElement, null);
+                    return new RingBufferValue<T>(Alias, localsta, (long)timer.TotalMilliseconds, false, ex, tmpBufferElement, null);
                 }
                 IncrementWaitCount();
+                localsta = CurrentState;
+
             }
             //do not move increment. This is critial order imediate after while loop
             Interlocked.Increment(ref _runningCount);
+            var oksta = CurrentState;
 
             timer.Stop();
             IncrementAcquisition();
@@ -898,26 +962,29 @@ namespace RingBufferPlus
             }
             Interlocked.Increment(ref CountSkipDelay);
 
-            return new RingBufferValue<T>(Alias, CurrentAvailable, CurrentRunning, (long)timer.TotalMilliseconds, true, null, tmpBufferElement, RenewContextBuffer);
+            return new RingBufferValue<T>(Alias, oksta, (long)timer.TotalMilliseconds, true, null, tmpBufferElement, RenewContextBuffer);
 
         }
 
         private RingBufferMetric CreateMetricReport()
         {
+            var sta = CurrentState;
             return new(
                 Alias,
                 _reportCount.TimeoutCount,
                 _reportCount.ErrorCount,
                 _reportCount.WaitCount,
                 _reportCount.AcquisitionCount,
-                CurrentRunning,
+                sta.CurrentRunning,
                 MinimumCapacity,
                 MaximumCapacity,
-                CurrentAvailable,
+                sta.CurrentAvailable,
+                _reportCount.AcquisitionSucceeded,
+                _reportCount.AverageSucceededExecution,
                 _intervalReport);
         }
 
-        private RingBufferMetric CreateMetricAutoScaler()
+        private RingBufferMetric CreateMetricAutoScaler(RingBufferfState sta)
         {
             return new(
                 Alias,
@@ -925,10 +992,12 @@ namespace RingBufferPlus
                 _autoScalercount.ErrorCount,
                 _autoScalercount.WaitCount,
                 _autoScalercount.AcquisitionCount,
-                CurrentRunning,
+                sta.CurrentRunning,
                 MinimumCapacity,
                 MaximumCapacity,
-                CurrentAvailable,
+                sta.CurrentAvailable,
+                _autoScalercount.AcquisitionCount,
+                TimeSpan.Zero,
                 _intervalAutoScaler);
         }
 
@@ -942,47 +1011,53 @@ namespace RingBufferPlus
                     return;
                 }
 
-                int newAvaliable;
-                RingBufferMetric metric;
-                try
+                var sta = CurrentState;
+                int newAvaliable = 0;
+                RingBufferMetric metric = CreateMetricAutoScaler(sta);
+                if (!sta.HasSick)
                 {
+                    try
+                    {
+                        //user autoscaler
+                        if (_autoScaleFuncAsync != null)
+                        {
+                            newAvaliable = await _autoScaleFuncAsync.Invoke(metric, _cts.Token)
+                                    .ConfigureAwait(false);
+                        }
+                        else
+                        {
+                            newAvaliable = _autoScaleFuncSync.Invoke(metric, _cts.Token);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        IncrementError();
+                        if (!sta.HasSick)
+                        {
+                            LogRingBuffer($"{Alias} Auto Scaler  falured: {ex}", LogLevel.Error);
+                            ErrorCallBack?.Invoke(this, new RingBufferErrorEventArgs(Alias, ex));
+                        }
+                        continue;
+                    }
 
-                    //user autoscaler
-                    lock (_singleThread)
+                    if (newAvaliable < MinimumCapacity)
                     {
-                        metric = CreateMetricAutoScaler();
+                        newAvaliable = MinimumCapacity;
                     }
-                    if (_autoScaleFuncAsync != null)
+                    if (newAvaliable > MaximumCapacity)
                     {
-                        newAvaliable = await _autoScaleFuncAsync.Invoke(metric, _cts.Token)
-                                .ConfigureAwait(false);
-                    }
-                    else
-                    {
-                        newAvaliable = _autoScaleFuncSync.Invoke(metric, _cts.Token);
+                        newAvaliable = MaximumCapacity;
                     }
                 }
-                catch (Exception ex)
+                else
                 {
-                    IncrementError();
-                    if (!HasSick)
+                    if (IsCloseCircuit())
                     {
-                        LogRingBuffer($"{Alias} Auto Scaler  falured: {ex}", LogLevel.Error);
-                        ErrorCallBack?.Invoke(this, new RingBufferErrorEventArgs(Alias, ex));
+                        newAvaliable = MinimumCapacity;
                     }
-                    continue;
                 }
 
-                if (newAvaliable < MinimumCapacity)
-                {
-                    newAvaliable = MinimumCapacity;
-                }
-                if (newAvaliable > MaximumCapacity)
-                {
-                    newAvaliable = MaximumCapacity;
-                }
-
-                var resultCapacity = RedefineCapacity(newAvaliable, metric.Capacity);
+                var resultCapacity = RedefineCapacity(newAvaliable, sta.CurrentCapacity);
 
                 if (metric.Capacity != resultCapacity || _triggerTaskAutoScaler)
                 {
@@ -1006,15 +1081,15 @@ namespace RingBufferPlus
             {
                 while (diff < 0 && !_cts.Token.IsCancellationRequested)
                 {
-                    if (HasSick)
+                    var sta = CurrentState;
+                    if (!sta.HasSick)
                     {
-                        return CurrentCapacity;
+                        if (sta.CurrentCapacity <= MinimumCapacity)
+                        {
+                            break;
+                        }
                     }
-                    else if (CurrentCapacity <= MinimumCapacity)
-                    {
-                        break;
-                    }
-                    else if (availableBuffer.TryDequeue(out T deletebuffer))
+                    if (availableBuffer.TryDequeue(out T deletebuffer))
                     {
                         if (deletebuffer is IDisposable disposable)
                         {
@@ -1027,14 +1102,14 @@ namespace RingBufferPlus
                         NaturalTimer.Delay(WaitNextTry, null, _cts.Token);
                     }
                 }
-                return CurrentCapacity;
+                return CurrentState.CurrentCapacity;
             }
 
             var result = TryAddCapacity(diff);
 
             if (result.Error != null)
             {
-                if (!HasSick)
+                if (!CurrentState.HasSick)
                 {
                     LogRingBuffer($"{Alias} RedefineCapacity falured : {result.Error}", LogLevel.Error);
                     ErrorCallBack?.Invoke(this, new RingBufferErrorEventArgs(Alias, result.Error));
@@ -1080,67 +1155,218 @@ namespace RingBufferPlus
             }
         }
 
+        private bool IsCloseCircuit()
+        {
+            if (_policySickfactory != null && CurrentState.HasSick)
+            {
+                if (itemFactoryFunc.ExistFuncSync)
+                {
+                    try
+                    {
+                        var buff = _policySickfactory.Execute(() =>
+                        {
+                            return itemFactoryFunc.ItemSync(_cts.Token);
+                        });
+                        if (buff is IDisposable disposable)
+                        {
+                            disposable.Dispose();
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        _ = NaturalTimer.Delay(WaitNextTry,null,_cts.Token);
+                        return false;
+                    }
+                    return true;
+                }
+                else
+                {
+                    try
+                    {
+                        Exception tex = null;
+                        var buff = _policySickfactory.Execute(() =>
+                        {
+                            T buff = default;
+                            Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                        .ConfigureAwait(false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    tex = ex;
+                                }
+                            }).Wait();
+                            return buff;
+                        });
+                        if (tex != null)
+                        {
+                            throw tex;
+                        }
+                        if (buff is IDisposable disposable)
+                        {
+                            disposable.Dispose();
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        _ = NaturalTimer.Delay(WaitNextTry, null, _cts.Token);
+                        return false;
+                    }
+                    return true;
+                }
+            }
+            else
+            {
+                if (itemFactoryFunc.ExistFuncSync)
+                {
+                    var buff = itemFactoryFunc.ItemSync(_cts.Token);
+                    if (buff is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                    return true;
+                }
+                else
+                {
+                    Exception tex = null;
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                .ConfigureAwait(false);
+                            if (buff is IDisposable disposable)
+                            {
+                                disposable.Dispose();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            tex = ex;
+                        }
+                    }).Wait();
+                    if (tex == null)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         private ValueException<int> TryAddCapacity(int addvalue)
         {
             ValueException<int>? result = null;
-            var tk = new Task(async () =>
+            for (var i = 0; i < addvalue; i++)
             {
-                for (var i = 0; i < addvalue; i++)
+                if (_cts.IsCancellationRequested)
                 {
-                    if (_cts.IsCancellationRequested)
+                    break;
+                }
+                var localstate = CurrentState;
+                if (localstate.CurrentCapacity >= MaximumCapacity)
+                {
+                    break;
+                }
+                try
+                {
+                    T buff = default;
+                    if (_policySickfactory != null)
                     {
-                        break;
-                    }
-                    var localcapacity = CurrentCapacity;
-                    if (localcapacity >= MaximumCapacity)
-                    {
-                        break;
-                    }
-                    try
-                    {
-                        T buff;
                         if (itemFactoryFunc.ExistFuncSync)
                         {
-                            buff = itemFactoryFunc.ItemSync(_cts.Token);
+                            buff = _policySickfactory.Execute(() =>
+                            {
+                                return itemFactoryFunc.ItemSync(_cts.Token);
+                            });
+                            availableBuffer.Enqueue(buff);
                         }
                         else
                         {
-                            buff = await itemFactoryFunc.ItemAsync(_cts.Token)
-                                .ConfigureAwait(false);
+                            buff = _policySickfactory.Execute(() =>
+                            {
+                                Exception tex = null;
+                                T aux = default;
+                                Task.Run(async () =>
+                                {
+                                    try
+                                    {
+                                        aux = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                       .ConfigureAwait(false);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        tex = ex;
+                                    }
+                                }).Wait();
+                                if (tex != null)
+                                {
+                                    throw tex;
+                                }
+                                return aux;
+                            });
+                            availableBuffer.Enqueue(buff);
                         }
-                        availableBuffer.Enqueue(buff);
                     }
-                    catch (Exception ex)
+                    else
                     {
-                        IncrementError();
-                        if (MinimumCapacity == InitialCapacity)
+                        if (itemFactoryFunc.ExistFuncSync)
                         {
-                            var err = new RingBufferFactoryException(Alias, $"{Alias} Min({MinimumCapacity}) capacity failed, current {localcapacity}", ex);
-                            result = new ValueException<int>(localcapacity, err);
-                            break;
+                            buff = itemFactoryFunc.ItemSync(_cts.Token);
+                            availableBuffer.Enqueue(buff);
+                        }
+                        else
+                        {
+                            Exception tex = null;
+                            Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                        .ConfigureAwait(false);
+                                    availableBuffer.Enqueue(buff);
+                                }
+                                catch (Exception ex ) 
+                                {
+                                    tex = ex;
+                                }
+                            }).Wait();
+                            if (tex != null)
+                            {
+                                IncrementError();
+                                if (MinimumCapacity == InitialCapacity)
+                                {
+                                    var err = new RingBufferFactoryException(Alias, $"{Alias} Min({MinimumCapacity}) capacity failed, current {localstate.CurrentCapacity}", tex);
+                                    result = new ValueException<int>(localstate.CurrentCapacity, err);
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
-            },_cts.Token, TaskCreationOptions.AttachedToParent);
-
-            try
-            {
-                tk.Start();
-                tk.Wait();
+                catch (Exception ex)
+                {
+                    IncrementError();
+                    if (MinimumCapacity == InitialCapacity)
+                    {
+                        var err = new RingBufferFactoryException(Alias, $"{Alias} Min({MinimumCapacity}) capacity failed, current {localstate.CurrentCapacity}", ex);
+                        result = new ValueException<int>(localstate.CurrentCapacity, err);
+                        break;
+                    }
+                }
             }
-            catch (TaskCanceledException)
-            {
-                return new ValueException<int>(CurrentCapacity, null);
-            }
 
-            var localcapacity = CurrentCapacity;
-            if (localcapacity < MinimumCapacity && !_cts.IsCancellationRequested)
+            var localcapacityok = CurrentState;
+            if (localcapacityok.CurrentCapacity < MinimumCapacity && !_cts.IsCancellationRequested)
             {
                 IncrementError();
-                var err = new RingBufferFatalException("TryAddCapacity", $"{Alias} Min({MinimumCapacity}) capacity failed, current {localcapacity}");
-                return new ValueException<int>(localcapacity, err);
+                var err = new RingBufferFatalException("TryAddCapacity", $"{Alias} Min({MinimumCapacity}) capacity failed, current {localcapacityok.CurrentCapacity}");
+                return new ValueException<int>(localcapacityok.CurrentCapacity, err);
             }
-            return new ValueException<int>(localcapacity, null);
+            return new ValueException<int>(localcapacityok.CurrentCapacity, null);
         }
 
         #endregion

@@ -62,7 +62,7 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateRingBuffer(3)
+	.CreateBuffer(3)
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -110,10 +110,12 @@ public class MyClass : IDisposable
 }
 
 var build_rb = RingBuffer<MyClass>
-                .CreateRingBuffer(5)
+                .CreateBuffer(5)
+                .MinBuffer(2)
+                .MaxBuffer(10)
                 .AliasName("Test")
-                .MinScale(2)
-                .MaxScale(10)
+                .AddRetryPolicyFactory(MyBuildPolicy<MyClass>())
+                .AddLinkedCurrentState(() => true)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
@@ -163,9 +165,10 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 
 Title | Details
 --- | ---
+[CreateBuffer](createbuffer.md) |  Create new instance of IRingBuffer and sets the initial capacity of items in the buffer.
 [AliasName](aliasname.md) |  Set alias to RingBuffer.
-[MaxScaler](maxscaler.md) |  Sets the maximum capacity of items in the buffer.
-[MinScaler](minscaler.md) |  Sets the minimum capacity of items in the buffer..
+[MaxBuffer](maxbuffer.md) |  Sets the maximum capacity of items in the buffer.
+[MinBuffer](minbuffer.md) |  Sets the minimum capacity of items in the buffer..
 [PolicyTimeoutAccquire](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [PolicyTimeoutAccquireAsync](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
@@ -181,6 +184,9 @@ Title | Details
 [MetricsReport](metricsreport.md) | Set action for metrics report.
 [MetricsReportAsync](metricsreport.md) | Set action for metrics report.
 [AddLogProvider](addlogprovider.md) | Set log provider and default message level.
+[AddRetryPolicyFactory](addretrypolicyfactory.md) | Set Retry Policy to factory buffer.
+[AddLinkedCurrentState](addlinkedcurrentstate.md) | Extra function to set state "HasSick" in CurrentState. 
+[AddLinkedCurrentStateAsync](addlinkedcurrentstate.md) | Extra function to set state "HasSick" in CurrentState.
 [Build](ringbufferbuild.md) | Executes and validates all commands, provides the events to be configured and the execution command.
 [ErrorCallBack](errorcallback.md) | Error return event.
 [TimeoutCallBack](timeoutcallback.md) | Timeout return event.
@@ -190,6 +196,7 @@ Title | Details
 [AccquireAsync](accquire.md) | Acquire an item from the buffer.
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
+[CurrentState class](currentstate.md) | Ring buffer CurrentState class details.
 
 ## Supported platforms
 [**Top**](#help)

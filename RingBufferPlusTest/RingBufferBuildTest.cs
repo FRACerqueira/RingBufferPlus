@@ -1,6 +1,6 @@
-﻿using RingBufferPlus;
+﻿using Microsoft.Extensions.Logging;
+using RingBufferPlus;
 using RingBufferPlus.ObjectValues;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -21,7 +21,7 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(0);
+                    .CreateBuffer(0);
             });
             Assert.NotNull(ex);
         }
@@ -30,87 +30,55 @@ namespace RingBufferPlusTest
         public void Should_have_DefautValue_width_max_min_and_not_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
-                .MaxScale(20)
-                .MinScale(8)
+                .CreateBuffer(10)
+                .MaxBuffer(20)
+                .MinBuffer(8)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
+            Assert.Equal(0, rb.CurrentState.CurrentAvailable);
             Assert.Equal(20, rb.MaximumCapacity);
             Assert.Equal(8, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
+            Assert.Equal(0, rb.CurrentState.CurrentCapacity);
             Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
+            Assert.Equal(0, rb.CurrentState.CurrentRunning);
+
         }
 
         [Fact]
         public void Should_have_DefautValue_FactoryAync()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
+            Assert.Equal(0, rb.CurrentState.CurrentAvailable);
             Assert.Equal(10, rb.MaximumCapacity);
             Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
+            Assert.Equal(0, rb.CurrentState.CurrentCapacity);
+            Assert.Equal(0, rb.CurrentState.CurrentRunning);
         }
 
         [Fact]
         public void Should_have_DefautValue_timespan_HealthCheck_not_has_HealthCheck()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
+            Assert.False(rb.HasUserHealthCheck);
         }
 
         [Fact]
         public void Should_have_DefautValue_timespan_HealthCheck_has_HealthCheck()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .HealthCheck((_, _) => true)
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(11, rb.MaximumCapacity);
-            Assert.Equal(11, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(11, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
+            Assert.True(rb.HasUserHealthCheck);
         }
 
         [Fact]
@@ -119,8 +87,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(10)
-                    .MinScale(11)
+                    .CreateBuffer(10)
+                    .MinBuffer(11)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -132,8 +100,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(10)
-                    .MaxScale(9)
+                    .CreateBuffer(10)
+                    .MaxBuffer(9)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -145,7 +113,7 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(10)
+                    .CreateBuffer(10)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -155,32 +123,24 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_MaxScaler_with_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
-                .MaxScale(20)
+                .CreateBuffer(10)
+                .MaxBuffer(20)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
+
             Assert.Equal(20, rb.MaximumCapacity);
             Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
             Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_logprovider()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .Factory((_) => new MyClassTest())
-                .AddLogProvider(RingBufferLogLevel.Information,new LoggerFactory())
+                .AddLogProvider(RingBufferLogLevel.Information, new LoggerFactory())
                 .Build();
             Assert.True(rb.HasLogging);
             Assert.Equal(LogLevel.Information, rb.DefaultLogLevel);
@@ -190,7 +150,7 @@ namespace RingBufferPlusTest
         public void Should_have_accept__not_logprovider()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.False(rb.HasLogging);
@@ -203,45 +163,24 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_MinScaler_with_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
-                .MinScale(5)
+                .CreateBuffer(10)
+                .MinBuffer(5)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
                 .Build();
-            Assert.Equal($"RingBuffer.{nameof(MyClassTest)}", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
             Assert.Equal(10, rb.MaximumCapacity);
             Assert.Equal(5, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_AliasName()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .AliasName("Test")
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal($"Test", rb.Alias);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         private class PolicyFakeProviderOK
@@ -318,22 +257,12 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_PolicyTimeoutAccquire_Sync(Tuple<RingBufferPolicyTimeout, Func<RingBufferMetric, CancellationToken, bool>?> testcase)
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(testcase.Item1, rb.PolicyTimeout);
             Assert.Equal(testcase.Item2 != null, rb.HasUserpolicyAccquire);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Theory]
@@ -341,22 +270,12 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_PolicyTimeoutAccquire_ASync(Tuple<RingBufferPolicyTimeout, Func<RingBufferMetric, CancellationToken, Task<bool>>?> testcase)
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .PolicyTimeoutAccquireAsync(testcase.Item1, testcase.Item2)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(testcase.Item1, rb.PolicyTimeout);
             Assert.Equal(testcase.Item2 != null, rb.HasUserpolicyAccquire);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Theory]
@@ -366,7 +285,7 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(10)
+                    .CreateBuffer(10)
                     .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
                     .Factory((_) => new MyClassTest())
                     .Build();
@@ -381,7 +300,7 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateRingBuffer(10)
+                    .CreateBuffer(10)
                     .PolicyTimeoutAccquireAsync(testcase.Item1, testcase.Item2)
                     .Factory((_) => new MyClassTest())
                     .Build();
@@ -393,201 +312,111 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_TimeoutAccquire()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .DefaultTimeoutAccquire(TimeSpan.FromMilliseconds(100))
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(TimeSpan.FromMilliseconds(100), rb.TimeoutAccquire);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
         }
 
         [Fact]
         public void Should_have_accept_width_HealthCheckSync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .HealthCheck((_, _) => true)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserHealthCheck);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(11, rb.MaximumCapacity);
-            Assert.Equal(11, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(11, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_HealthCheckSync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .HealthCheck((_, _) => true)
                 .DefaultIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserHealthCheck);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(11, rb.MaximumCapacity);
-            Assert.Equal(11, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(11, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(333, rb.IntervalHealthCheck.TotalMilliseconds);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_HealthCheckASync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .HealthCheckAsync((_, _) => Task.FromResult(true))
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserHealthCheck);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(11, rb.MaximumCapacity);
-            Assert.Equal(11, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(11, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_HealthCheckASync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .HealthCheck((_, _) => true)
                 .DefaultIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserHealthCheck);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(11, rb.MaximumCapacity);
-            Assert.Equal(11, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(11, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(333, rb.IntervalHealthCheck.TotalMilliseconds);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_AutoScalerSync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserAutoScaler);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
             Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_AutoScalerSync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .DefaultIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserAutoScaler);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_AutoScalerASync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .AutoScalerAsync((_, _) => Task.FromResult(10))
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserAutoScaler);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
-            Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
         [Fact]
         public void Should_have_accept_width_AutoScalerASync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateRingBuffer(10)
+                .CreateBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .DefaultIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasUserAutoScaler);
-            Assert.Equal(0, rb.CurrentAvailable);
-            Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentCapacity);
-            Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(RingBufferPolicyTimeout.MaximumCapacity, rb.PolicyTimeout);
-            Assert.Equal(0, rb.CurrentRunning);
-            Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.Equal(DefaultValues.WaitTimeAvailable, rb.WaitNextTry);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
-            Assert.Equal(DefaultValues.TimeoutAccquire, rb.TimeoutAccquire);
         }
 
     }

@@ -11,7 +11,7 @@
 		<Description>A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Report-Metrics.</Description>
 		<PackageReleaseNotes>https://github.com/FRACerqueira/RingBufferPlus/releases</PackageReleaseNotes>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageTags>c#;circular buffer;ring buffer;rabbitmq</PackageTags>
+		<PackageTags>csharp;dotnet;dotnetcore;ringbuffer ring-buffer;circular-buffer;rabittmq;cyclic-buffer</PackageTags>
 		<RepositoryUrl>https://github.com/FRACerqueira/RingBufferPlus</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageId>RingBufferPlus</PackageId>
@@ -64,6 +64,10 @@
 		</None>
 		<None Include="..\README.md" Pack="false" />
 		<None Include="..\NugetREADME.md" Pack="true" PackagePath="\" />
+	</ItemGroup>
+	
+	<ItemGroup>
+	  <PackageReference Include="Polly" Version="7.2.3" />
 	</ItemGroup>
 
 

@@ -11,11 +11,34 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusTest", "RingB
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
 	ProjectSection(SolutionItems) = preProject
+		docs\accquire.md = docs\accquire.md
+		docs\addlinkedcurrentstate.md = docs\addlinkedcurrentstate.md
+		docs\addlogprovider.md = docs\addlogprovider.md
+		docs\addretrypolicyfactory.md = docs\addretrypolicyfactory.md
 		docs\aliasname.md = docs\aliasname.md
+		docs\autoscalecallback.md = docs\autoscalecallback.md
+		docs\autoscaler.md = docs\autoscaler.md
+		docs\bufferclass.md = docs\bufferclass.md
+		docs\createbuffer.md = docs\createbuffer.md
+		docs\currentstate.md = docs\currentstate.md
+		docs\defaultintervalautoscaler.md = docs\defaultintervalautoscaler.md
+		docs\defaultintervalhealthcheck.md = docs\defaultintervalhealthcheck.md
+		docs\defaultintervalreport.md = docs\defaultintervalreport.md
+		docs\defaulttimeoutaccquire.md = docs\defaulttimeoutaccquire.md
+		docs\errorcallback.md = docs\errorcallback.md
+		docs\factory.md = docs\factory.md
+		docs\healthcheck.md = docs\healthcheck.md
 		docs\index.md = docs\index.md
-		docs\maxscaler.md = docs\maxscaler.md
-		docs\minscaler.md = docs\minscaler.md
+		docs\LinkedCurrentState.md = docs\LinkedCurrentState.md
+		docs\maxbuffer.md = docs\maxbuffer.md
+		docs\metricclass.md = docs\metricclass.md
+		docs\metricsreport.md = docs\metricsreport.md
+		docs\minbuffer.md = docs\minbuffer.md
 		docs\policytimeoutaccquire.md = docs\policytimeoutaccquire.md
+		docs\properties.md = docs\properties.md
+		docs\ringbufferbuild.md = docs\ringbufferbuild.md
+		docs\ringbufferrun.md = docs\ringbufferrun.md
+		docs\timeoutcallback.md = docs\timeoutcallback.md
 	EndProjectSection
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Images", "Images", "{A5340B5A-0CAD-4CC0-956D-6CE07686B431}"
