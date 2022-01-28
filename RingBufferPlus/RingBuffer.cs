@@ -520,7 +520,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultTimeoutAccquire", "Timeout Available must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultTimeoutAccquire", "Timeout Available must be greater than zero");
             TimeoutAccquire = value;
             return this;
         }
@@ -569,7 +569,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalHealthCheck(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalHealthCheck", "Timeout HealthCheck must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalHealthCheck", "Timeout HealthCheck must be greater than zero");
             _intervalHealthCheck = value;
             return this;
         }
@@ -595,7 +595,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalAutoScaler(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalAutoScaler", "Interval AutoScaler must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalAutoScaler", "Interval AutoScaler must be greater than zero");
             _intervalAutoScaler = value;
             return this;
         }
@@ -651,7 +651,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> DefaultIntervalReport(TimeSpan value)
         {
-            if (value.TotalMilliseconds == 0) throw new RingBufferFatalException("DefaultIntervalReport", "Interval Report must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw new RingBufferFatalException("DefaultIntervalReport", "Interval Report must be greater than zero");
             _intervalReport = value;
             return this;
         }

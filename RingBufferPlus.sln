@@ -13,7 +13,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3
 	ProjectSection(SolutionItems) = preProject
 		docs\accquire.md = docs\accquire.md
 		docs\addlogprovider.md = docs\addlogprovider.md
-		docs\AddRetryPolicySickFactory.md = docs\AddRetryPolicySickFactory.md
 		docs\aliasname.md = docs\aliasname.md
 		docs\autoscalecallback.md = docs\autoscalecallback.md
 		docs\autoscaler.md = docs\autoscaler.md
