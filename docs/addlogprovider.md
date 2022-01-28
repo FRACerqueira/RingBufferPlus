@@ -10,7 +10,7 @@ When logging is enabled, exceptions and warnings are generated even with callbac
 
 ### RingBufferLogLevel Type
 
-Defina o nÌvel de log padr„o para setter /information/trace. Error and warning log levels are not affected.
+Defina o n√≠vel de log padr√£o para setter /information/trace. Error and warning log levels are not affected.
 
 - Trace
 - Debug
