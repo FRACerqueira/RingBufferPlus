@@ -2,12 +2,12 @@
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[*RingBufferMetric**](metricclass.md)
+[**RingBufferMetric**](metricclass.md)
 
 ## Documentation
 Defines the function to run the AutoScaler for the buffer.
 
-Should return new  target capacity for the buffer..
+Should return new  target capacity for the buffer.
 
 ### Methods
 

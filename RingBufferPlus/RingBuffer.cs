@@ -352,7 +352,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> AddRetryPolicyFactory(RetryPolicy<T> policy)
         {
-            if (policy == null) throw new RingBufferFatalException("AddRetryPolicySickFactory", "Policy can't be null");
+            if (policy == null) throw new RingBufferFatalException("AddRetryPolicyFactory", "Policy can't be null");
             _policySickfactory = policy;
             return this;
         }

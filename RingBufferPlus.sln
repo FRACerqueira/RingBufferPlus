@@ -12,12 +12,15 @@ EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
 	ProjectSection(SolutionItems) = preProject
 		docs\accquire.md = docs\accquire.md
+		docs\addlinkedcurrentstate.md = docs\addlinkedcurrentstate.md
 		docs\addlogprovider.md = docs\addlogprovider.md
+		docs\addretrypolicyfactory.md = docs\addretrypolicyfactory.md
 		docs\aliasname.md = docs\aliasname.md
 		docs\autoscalecallback.md = docs\autoscalecallback.md
 		docs\autoscaler.md = docs\autoscaler.md
 		docs\bufferclass.md = docs\bufferclass.md
 		docs\createbuffer.md = docs\createbuffer.md
+		docs\currentstate.md = docs\currentstate.md
 		docs\defaultintervalautoscaler.md = docs\defaultintervalautoscaler.md
 		docs\defaultintervalhealthcheck.md = docs\defaultintervalhealthcheck.md
 		docs\defaultintervalreport.md = docs\defaultintervalreport.md
