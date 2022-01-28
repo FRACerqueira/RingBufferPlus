@@ -7,6 +7,7 @@ using RingBufferPlus.Internals;
 using RingBufferPlus.ObjectValues;
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -58,7 +59,9 @@ namespace RingBufferPlus
         private bool _stopTaskReport;
         private RetryPolicy<T> _policySickfactory;
 
-        Func<bool> _observerstate;
+        private Func<bool> _observerstatesSync;
+        private Task<bool> _observerstatesAsync;
+
 
         private Func<RingBufferMetric, CancellationToken, Task<int>>? _autoScaleFuncAsync;
         private Func<RingBufferMetric, CancellationToken, int>? _autoScaleFuncSync;
@@ -104,7 +107,6 @@ namespace RingBufferPlus
             if (value <= 0) throw new RingBufferFatalException("RingBufferPlus", "InitialCapacity must be greater than zero");
 
             availableBuffer = new ConcurrentQueue<T>();
-
             TimeoutAccquire = TimeSpan.Zero;
             WaitNextTry = TimeSpan.Zero;
 
@@ -136,10 +138,17 @@ namespace RingBufferPlus
                     if (_startCompleted)
                     {
                         ok = (ava + run) < MinimumCapacity;
-                        if (ok && _observerstate != null)
+                        if (ok && _observerstatesSync != null)
                         {
-                            var sta = _observerstate.Invoke();
-                            ok = sta;
+                            ok = _observerstatesSync();
+                        }
+                        else if (ok && _observerstatesAsync != null)
+                        {
+                            Task.Run(async () => 
+                            {
+                                ok = await _observerstatesAsync
+                                        .ConfigureAwait(false);
+                            }).Wait();
                         }
                     }
                     return new RingBufferfState((int)Interlocked.Read(ref _runningCount), availableBuffer.Count, ok);
@@ -328,13 +337,21 @@ namespace RingBufferPlus
 
         #region IRingBuffer
 
-        public IRingBuffer<T> LinkedCurrentState(Func<bool> value)
+        public IRingBuffer<T> AddLinkedCurrentState(Func<bool> value)
         {
-            _observerstate = value;
+            if (value == null) throw new RingBufferFatalException("AddLinkedCurrentState", "Linked Function can't be null");
+            _observerstatesSync = value;
             return this;
         }
 
-        public IRingBuffer<T> AddRetryPolicySickFactory(RetryPolicy<T> policy)
+        public IRingBuffer<T> AddLinkedCurrentStateAsync(Task<bool> value)
+        {
+            if (value == null) throw new RingBufferFatalException("AddLinkedCurrentStateAsync", "Linked Function can't be null");
+            _observerstatesAsync = value;
+            return this;
+        }
+
+        public IRingBuffer<T> AddRetryPolicyFactory(RetryPolicy<T> policy)
         {
             if (policy == null) throw new RingBufferFatalException("AddRetryPolicySickFactory", "Policy can't be null");
             _policySickfactory = policy;

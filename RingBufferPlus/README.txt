@@ -91,6 +91,8 @@ var build_rb = RingBuffer<MyClass>
                 .MinBuffer(2)
                 .MaxBuffer(10)
                 .AliasName("Test")
+                .AddRetryPolicyFactory(MyBuildPolicy<MyClass>())
+                .AddLinkedCurrentState(() => true)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)

@@ -171,7 +171,7 @@ namespace RingBufferPlusRabbit
             var build_ringCnn = RingBuffer<IConnection>
                     .CreateBuffer( 3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
-                    .AddRetryPolicySickFactory(BuildPolicy<IConnection>())
+                    .AddRetryPolicyFactory(BuildPolicy<IConnection>())
                     .Factory((ctk) => cnnfactory.CreateConnection())
                     .HealthCheck((cnn, ctk) =>
                     {
@@ -200,7 +200,7 @@ namespace RingBufferPlusRabbit
                 .CreateBuffer(20)
                 .MinBuffer(5)
                 .MaxBuffer(102)
-                .LinkedCurrentState(() => !ringCnn.CurrentState.HasSick)
+                .AddLinkedCurrentState(() => !ringCnn.CurrentState.HasSick)
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
                 .AutoScaler(MyAutoscalerModel)
