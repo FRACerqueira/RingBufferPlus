@@ -1,4 +1,6 @@
-﻿namespace RingBufferPlus.Features
+﻿using System;
+
+namespace RingBufferPlus.Features
 {
     internal struct ReportCount
     {
@@ -10,6 +12,8 @@
             _waitCount = 0;
             _acquisitionCount = 0;
             _timeoutCount = 0;
+            _totalSucceededexec = TimeSpan.Zero;
+            _acquisitionSucceededCount = 0;
         }
 
         private long _timeoutCount;
@@ -49,6 +53,56 @@
                 }
             }
         }
+
+        public void IncrementAcquisitionSucceeded()
+        {
+            lock (_sync)
+            {
+                _acquisitionSucceededCount++;
+            }
+        }
+
+
+        private long _acquisitionSucceededCount;
+        public long AcquisitionSucceeded
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    return _acquisitionSucceededCount;
+                }
+            }
+        }
+
+        private TimeSpan _totalSucceededexec;
+
+        public void AddTotaSucceededlExecution(TimeSpan value)
+        {
+            lock (_sync)
+            {
+                _totalSucceededexec = _totalSucceededexec.Add(value);
+            }
+        }
+
+        public TimeSpan AverageSucceededExecution
+        {
+            get
+            {
+                lock (_sync)
+                {
+                    double aux = 0;
+                    if (_acquisitionSucceededCount > 0)
+                    {
+                        aux = _totalSucceededexec.TotalMilliseconds / _acquisitionSucceededCount;
+                    }
+                    return TimeSpan.FromMilliseconds(aux);
+                }
+            }
+        }
+
+
+
         public void IncrementAcquisition()
         {
             lock (_sync)
@@ -124,8 +178,9 @@
                 _waitCount = 0;
                 _acquisitionCount = 0;
                 _timeoutCount = 0;
+                _totalSucceededexec = TimeSpan.Zero;
+                _acquisitionSucceededCount = 0;
             }
         }
-
     }
 }

@@ -4,36 +4,42 @@ namespace RingBufferPlus.ObjectValues
 {
     public class RingBufferValue<T> : IDisposable
     {
-        private readonly Action<T,bool>? _turnback;
+        private readonly Action<RingBufferValue<T>>? _turnback;
         private bool disposedValue;
-
+        private NaturalTimer _timer;
         private RingBufferValue()
         {
         }
 
-        internal RingBufferValue(string alias,RingBufferfState state, long elapsedTime, bool succeeded, Exception error, T value, Action<T,bool>? turnback) : this()
+        internal RingBufferValue(string alias, RingBufferfState state, long elapsedTime, bool succeeded, Exception error, T value, Action<RingBufferValue<T>>? turnback) : this()
         {
-            Available = state.CurrentAvailable;
-            Running = state.CurrentRunning;
-            ElapsedTime = elapsedTime;
+            ElapsedAccquire = elapsedTime;
             Alias = alias;
             SucceededAccquire = succeeded;
             Error = error;
             Current = value;
             HasSick = state.HasSick;
             _turnback = turnback;
+            _timer = new NaturalTimer();
+            _timer.Start();
         }
         public RingBufferfState State { get; }
         public bool HasSick { get; }
-        public long ElapsedTime { get; }
+        public long ElapsedAccquire { get; }
         public string Alias { get; }
         public bool SucceededAccquire { get; }
         public T Current { get; }
         public Exception Error { get; }
-        public int Available { get; }
-        public int Running { get; }
-        public int Capacity => Available + Running;
+
         internal bool SkiptTurnback { get; set; }
+        internal TimeSpan ElapsedExecute
+        {
+            get
+            {
+                _timer.Stop();
+                return _timer.Elapsed;
+            }
+        }
 
         public void Invalidate()
         {
@@ -45,10 +51,7 @@ namespace RingBufferPlus.ObjectValues
             {
                 if (disposing)
                 {
-                    if (SucceededAccquire)
-                    {
-                        _turnback?.Invoke(Current,SkiptTurnback);
-                    }
+                    _turnback?.Invoke(this);
                     disposedValue = true;
                 }
             }

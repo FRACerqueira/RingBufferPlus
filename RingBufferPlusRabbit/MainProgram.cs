@@ -1,20 +1,19 @@
-﻿using RingBufferPlus;
-using RingBufferPlus.Events;
-using RingBufferPlus.Exceptions;
-using RingBufferPlus.ObjectValues;
-using Microsoft.Extensions.Hosting;
+﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Polly;
+using Polly.Retry;
 using RabbitMQ.Client;
+using RabbitMQ.Client.Exceptions;
+using RingBufferPlus;
+using RingBufferPlus.Events;
+using RingBufferPlus.ObjectValues;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Polly.Retry;
-using Polly;
-using System.Net.Sockets;
-using RabbitMQ.Client.Exceptions;
 
 namespace RingBufferPlusRabbit
 {
@@ -139,7 +138,7 @@ namespace RingBufferPlusRabbit
             }
         }
 
-        private static RetryPolicy<T> BuildPolicy<T>(int retryCount = 5) 
+        private static RetryPolicy<T> BuildPolicy<T>(int retryCount = 5)
         {
             return Policy<T>
                     .Handle<SocketException>()
@@ -157,7 +156,7 @@ namespace RingBufferPlusRabbit
             var cnnfactory = new ConnectionFactory
             {
                 ClientProvidedName = "RingBuffer",
-                 AutomaticRecoveryEnabled = false,
+                AutomaticRecoveryEnabled = false,
             };
 
             using (var cnn = cnnfactory.CreateConnection())
@@ -169,7 +168,7 @@ namespace RingBufferPlusRabbit
             }
 
             var build_ringCnn = RingBuffer<IConnection>
-                    .CreateBuffer( 3)
+                    .CreateBuffer(3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
                     .AddRetryPolicyFactory(BuildPolicy<IConnection>())
                     .Factory((ctk) => cnnfactory.CreateConnection())
@@ -188,11 +187,12 @@ namespace RingBufferPlusRabbit
                             return false;
                         }
                     })
-                    //.AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
+                    .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
                     .Build();
-            build_ringCnn.AutoScalerCallback += Ring_AutoScalerCallback;
-            build_ringCnn.ErrorCallBack += Ring_ErrorCallBack;
-            build_ringCnn.TimeoutCallBack += Ring_TimeoutCallBack;
+
+            //build_ringCnn.AutoScalerCallback += Ring_AutoScalerCallback;
+            //build_ringCnn.ErrorCallBack += Ring_ErrorCallBack;
+            //build_ringCnn.TimeoutCallBack += Ring_TimeoutCallBack;
             var ringCnn = build_ringCnn.Run(cancellationToken);
 
 
@@ -204,12 +204,14 @@ namespace RingBufferPlusRabbit
                 .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
                 .HealthCheckAsync((model, ctk) => HCModelAsync(model))
                 .AutoScaler(MyAutoscalerModel)
-                //.AddLogProvider(RingBufferLogLevel.Information,_loggerFactory)
+                .DefaultIntervalReport(10000)
+                .MetricsReport((metric, _) => Console.WriteLine($"\n[{DateTime.Now.ToLongTimeString()}] {metric.Alias} Report(10 sec) => Avg.Exec(Ok): {metric.AverageSucceededExecution.TotalMilliseconds} ms. Accq(Ok/Err) : {metric.AcquisitionSucceededCount}/{metric.ErrorCount}\n"))
+                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
                 .Build();
 
-            build_ringdmodel.AutoScalerCallback += Ring_AutoScalerCallback;
-            build_ringdmodel.ErrorCallBack += Ring_ErrorCallBack;
-            build_ringdmodel.TimeoutCallBack += Ring_TimeoutCallBack;
+            //build_ringdmodel.AutoScalerCallback += Ring_AutoScalerCallback;
+            //build_ringdmodel.ErrorCallBack += Ring_ErrorCallBack;
+            //build_ringdmodel.TimeoutCallBack += Ring_TimeoutCallBack;
 
             var ringmodel = build_ringdmodel.Run(cancellationToken);
 
@@ -259,9 +261,9 @@ namespace RingBufferPlusRabbit
                                 }
                                 else if (!ringmodel.CurrentState.HasSick)
                                 {
-                                    if (ctx.Capacity >= ringmodel.MaximumCapacity)
+                                    if (ctx.State.CurrentCapacity >= ringmodel.MaximumCapacity)
                                     {
-                                        Console.WriteLine($"{ctx.Alias} => Error: {ctx.Error}.  Available/Running {ctx.Available}/{ctx.Running}");
+                                        Console.WriteLine($"{ctx.Alias} => Error: {ctx.Error}.  Available/Running {ctx.State.CurrentAvailable}/{ctx.State.CurrentRunning}");
                                     }
                                 }
                             }

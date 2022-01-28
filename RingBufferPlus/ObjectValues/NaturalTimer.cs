@@ -41,7 +41,7 @@ namespace RingBufferPlus.ObjectValues
 
         public static bool Delay(long timemileseconds, Func<bool>? cancfunc = null, CancellationToken? cancellationToken = null)
         {
-            return Delay(TimeSpan.FromMilliseconds(timemileseconds),cancfunc,cancellationToken);
+            return Delay(TimeSpan.FromMilliseconds(timemileseconds), cancfunc, cancellationToken);
         }
 
         public static bool Delay(TimeSpan time, Func<bool>? cancfunc = null, CancellationToken? cancellationToken = null)

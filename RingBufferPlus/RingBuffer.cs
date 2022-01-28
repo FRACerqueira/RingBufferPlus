@@ -7,7 +7,6 @@ using RingBufferPlus.Internals;
 using RingBufferPlus.ObjectValues;
 using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -128,7 +127,7 @@ namespace RingBufferPlus
 
         public RingBufferfState CurrentState
         {
-            get 
+            get
             {
                 lock (_singleThread)
                 {
@@ -144,7 +143,7 @@ namespace RingBufferPlus
                         }
                         else if (ok && _observerstatesAsync != null)
                         {
-                            Task.Run(async () => 
+                            Task.Run(async () =>
                             {
                                 ok = await _observerstatesAsync
                                         .ConfigureAwait(false);
@@ -763,17 +762,25 @@ namespace RingBufferPlus
             };
         }
 
-        private void RenewContextBuffer(T value, bool skiptTurnback)
+        private void RenewContextBuffer(RingBufferValue<T> value)
         {
             lock (_singleThread)
             {
-                if (!skiptTurnback)
+                if (_reportTask != null && value.SucceededAccquire)
                 {
-                    availableBuffer.Enqueue(value);
+                    lock (_singleThread)
+                    {
+                        _reportCount.IncrementAcquisitionSucceeded();
+                        _reportCount.AddTotaSucceededlExecution(value.ElapsedExecute);
+                    }
+                }
+                if (!value.SkiptTurnback)
+                {
+                    availableBuffer.Enqueue(value.Current);
                 }
                 else
                 {
-                    if (value is IDisposable disposable)
+                    if (value.Current is IDisposable disposable)
                     {
                         disposable.Dispose();
                     }
@@ -917,14 +924,15 @@ namespace RingBufferPlus
             if (CurrentState.HasSick)
             {
                 timer.Stop();
-                return new RingBufferValue<T>(Alias,localsta, (long)timer.TotalMilliseconds, false, null, default, null);
+                _ = NaturalTimer.Delay(WaitNextTry, null, _cts.Token);
+                return new RingBufferValue<T>(Alias, localsta, (long)timer.TotalMilliseconds, false, null, default, null);
             }
 
             while (!availableBuffer.TryDequeue(out tmpBufferElement))
             {
                 if (NaturalTimer.Delay(WaitNextTry, null, _cts.Token))
                 {
-                    return new RingBufferValue<T>(Alias,localsta, (long)timer.TotalMilliseconds, false, null, tmpBufferElement, null);
+                    return new RingBufferValue<T>(Alias, localsta, (long)timer.TotalMilliseconds, false, null, tmpBufferElement, null);
                 }
                 if (localtmout.TotalMilliseconds != -1 && timer.TotalMilliseconds > localtmout.TotalMilliseconds)
                 {
@@ -955,7 +963,7 @@ namespace RingBufferPlus
             }
             Interlocked.Increment(ref CountSkipDelay);
 
-            return new RingBufferValue<T>(Alias,oksta, (long)timer.TotalMilliseconds, true, null, tmpBufferElement, RenewContextBuffer);
+            return new RingBufferValue<T>(Alias, oksta, (long)timer.TotalMilliseconds, true, null, tmpBufferElement, RenewContextBuffer);
 
         }
 
@@ -972,6 +980,8 @@ namespace RingBufferPlus
                 MinimumCapacity,
                 MaximumCapacity,
                 sta.CurrentAvailable,
+                _reportCount.AcquisitionSucceeded,
+                _reportCount.AverageSucceededExecution,
                 _intervalReport);
         }
 
@@ -987,6 +997,8 @@ namespace RingBufferPlus
                 MinimumCapacity,
                 MaximumCapacity,
                 sta.CurrentAvailable,
+                _autoScalercount.AcquisitionCount,
+                TimeSpan.Zero,
                 _intervalAutoScaler);
         }
 

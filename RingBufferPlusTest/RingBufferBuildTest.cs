@@ -1,6 +1,6 @@
-﻿using RingBufferPlus;
+﻿using Microsoft.Extensions.Logging;
+using RingBufferPlus;
 using RingBufferPlus.ObjectValues;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -140,7 +140,7 @@ namespace RingBufferPlusTest
             var rb = RingBuffer<MyClassTest>
                 .CreateBuffer(10)
                 .Factory((_) => new MyClassTest())
-                .AddLogProvider(RingBufferLogLevel.Information,new LoggerFactory())
+                .AddLogProvider(RingBufferLogLevel.Information, new LoggerFactory())
                 .Build();
             Assert.True(rb.HasLogging);
             Assert.Equal(LogLevel.Information, rb.DefaultLogLevel);

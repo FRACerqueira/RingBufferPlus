@@ -8,7 +8,7 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferMetric(string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, int running, int min, int max, int aval, TimeSpan tm) : this()
+        internal RingBufferMetric(string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, int running, int min, int max, int aval, long succeededCount, TimeSpan timeexec, TimeSpan timebase) : this()
         {
             Alias = alias;
             ErrorCount = errorcount;
@@ -19,7 +19,9 @@ namespace RingBufferPlus.ObjectValues
             Minimum = min;
             Maximum = max;
             Avaliable = aval;
-            CalculationInterval = tm;
+            CalculationInterval = timebase;
+            AcquisitionSucceededCount = succeededCount;
+            AverageSucceededExecution = timeexec;
         }
 
         public string Alias { get; } = string.Empty;
@@ -33,5 +35,7 @@ namespace RingBufferPlus.ObjectValues
         public int Minimum { get; } = 0;
         public int Maximum { get; } = 0;
         public TimeSpan CalculationInterval { get; } = TimeSpan.Zero;
+        public long AcquisitionSucceededCount { get; } = 0;
+        public TimeSpan AverageSucceededExecution { get; } = TimeSpan.Zero;
     }
 }

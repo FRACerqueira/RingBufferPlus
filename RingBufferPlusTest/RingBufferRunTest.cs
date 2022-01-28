@@ -245,7 +245,6 @@ namespace RingBufferPlusTest
         [Fact]
         public void Should_have_notexception_width_factAsync_exception_autoscaler()
         {
-            RingBufferMetric? metric = null;
             RingBufferAutoScaleEventArgs? arg = null;
             var ex = Record.Exception(() =>
             {

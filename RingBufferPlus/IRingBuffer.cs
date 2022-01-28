@@ -1,10 +1,10 @@
-﻿using RingBufferPlus.Events;
+﻿using Microsoft.Extensions.Logging;
+using Polly.Retry;
+using RingBufferPlus.Events;
 using RingBufferPlus.ObjectValues;
-using Microsoft.Extensions.Logging;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
-using Polly.Retry;
 
 namespace RingBufferPlus
 {
