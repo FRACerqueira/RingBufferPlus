@@ -28,3 +28,4 @@ When function is null.
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
 [**RingBufferMetric**](metricclass.md)
+

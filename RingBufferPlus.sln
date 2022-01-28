@@ -29,7 +29,6 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3
 		docs\factory.md = docs\factory.md
 		docs\healthcheck.md = docs\healthcheck.md
 		docs\index.md = docs\index.md
-		docs\LinkedCurrentState.md = docs\LinkedCurrentState.md
 		docs\maxbuffer.md = docs\maxbuffer.md
 		docs\metricclass.md = docs\metricclass.md
 		docs\metricsreport.md = docs\metricsreport.md

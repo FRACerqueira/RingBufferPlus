@@ -27,4 +27,3 @@ When MinBuffer is less than or equal to zero.
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
 [**CreateBuffer**](createbuffer.md)
-
