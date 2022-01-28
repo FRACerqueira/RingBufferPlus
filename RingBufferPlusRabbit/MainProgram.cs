@@ -230,11 +230,11 @@ namespace RingBufferPlusRabbit
                         timer.Start();
                         while (!cancellationToken.IsCancellationRequested)
                         {
-                            if (timer.TotalMinutes > 3)
+                            if (timer.TotalMinutes > 5)
                             {
                                 threadCount--;
                                 Console.WriteLine($"Stoping this Thread. Total running = {threadCount}");
-                                //after 3 minutes end thread;
+                                //after 5 minutes end thread;
                                 break;
                             }
                             using (var ctx = await ringmodel.AccquireAsync().ConfigureAwait(false))
@@ -285,7 +285,7 @@ namespace RingBufferPlusRabbit
                 var timer = new NaturalTimer();
                 timer.Start();
 
-                while (timer.TotalSeconds < 60)
+                while (timer.TotalSeconds < 90)
                 {
                     Thread.Sleep(100);
                     if (cancellationToken.IsCancellationRequested)

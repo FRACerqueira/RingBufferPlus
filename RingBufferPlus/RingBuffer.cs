@@ -798,7 +798,6 @@ namespace RingBufferPlus
                 {
                     break;
                 }
-
                 using (var tmpBufferElement = RingAccquire(TimeoutAccquire))
                 {
                     if (tmpBufferElement.SucceededAccquire)
@@ -1050,7 +1049,13 @@ namespace RingBufferPlus
                         newAvaliable = MaximumCapacity;
                     }
                 }
-
+                else
+                {
+                    if (IsCloseCircuit())
+                    {
+                        newAvaliable = MinimumCapacity;
+                    }
+                }
 
                 var resultCapacity = RedefineCapacity(newAvaliable, sta.CurrentCapacity);
 
@@ -1150,6 +1155,108 @@ namespace RingBufferPlus
             }
         }
 
+        private bool IsCloseCircuit()
+        {
+            if (_policySickfactory != null && CurrentState.HasSick)
+            {
+                if (itemFactoryFunc.ExistFuncSync)
+                {
+                    try
+                    {
+                        var buff = _policySickfactory.Execute(() =>
+                        {
+                            return itemFactoryFunc.ItemSync(_cts.Token);
+                        });
+                        if (buff is IDisposable disposable)
+                        {
+                            disposable.Dispose();
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        _ = NaturalTimer.Delay(WaitNextTry,null,_cts.Token);
+                        return false;
+                    }
+                    return true;
+                }
+                else
+                {
+                    try
+                    {
+                        Exception tex = null;
+                        var buff = _policySickfactory.Execute(() =>
+                        {
+                            T buff = default;
+                            Task.Run(async () =>
+                            {
+                                try
+                                {
+                                    buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                        .ConfigureAwait(false);
+                                }
+                                catch (Exception ex)
+                                {
+                                    tex = ex;
+                                }
+                            }).Wait();
+                            return buff;
+                        });
+                        if (tex != null)
+                        {
+                            throw tex;
+                        }
+                        if (buff is IDisposable disposable)
+                        {
+                            disposable.Dispose();
+                        }
+                    }
+                    catch (Exception)
+                    {
+                        _ = NaturalTimer.Delay(WaitNextTry, null, _cts.Token);
+                        return false;
+                    }
+                    return true;
+                }
+            }
+            else
+            {
+                if (itemFactoryFunc.ExistFuncSync)
+                {
+                    var buff = itemFactoryFunc.ItemSync(_cts.Token);
+                    if (buff is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+                    return true;
+                }
+                else
+                {
+                    Exception tex = null;
+                    Task.Run(async () =>
+                    {
+                        try
+                        {
+                            var buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                .ConfigureAwait(false);
+                            if (buff is IDisposable disposable)
+                            {
+                                disposable.Dispose();
+                            }
+                        }
+                        catch (Exception ex)
+                        {
+                            tex = ex;
+                        }
+                    }).Wait();
+                    if (tex == null)
+                    {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+
         private ValueException<int> TryAddCapacity(int addvalue)
         {
             ValueException<int>? result = null;
@@ -1167,11 +1274,7 @@ namespace RingBufferPlus
                 try
                 {
                     T buff = default;
-                    if (localstate.HasSick)
-                    {
-                        return new ValueException<int>(localstate.CurrentCapacity, null);
-                    }
-                    if (_policySickfactory != null && CurrentState.HasSick)
+                    if (_policySickfactory != null)
                     {
                         if (itemFactoryFunc.ExistFuncSync)
                         {
@@ -1179,19 +1282,33 @@ namespace RingBufferPlus
                             {
                                 return itemFactoryFunc.ItemSync(_cts.Token);
                             });
+                            availableBuffer.Enqueue(buff);
                         }
                         else
                         {
                             buff = _policySickfactory.Execute(() =>
                             {
+                                Exception tex = null;
                                 T aux = default;
                                 Task.Run(async () =>
                                 {
-                                    aux = await itemFactoryFunc.ItemAsync(_cts.Token)
-                                   .ConfigureAwait(false);
+                                    try
+                                    {
+                                        aux = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                       .ConfigureAwait(false);
+                                    }
+                                    catch (Exception ex)
+                                    {
+                                        tex = ex;
+                                    }
                                 }).Wait();
+                                if (tex != null)
+                                {
+                                    throw tex;
+                                }
                                 return aux;
                             });
+                            availableBuffer.Enqueue(buff);
                         }
                     }
                     else
@@ -1199,17 +1316,36 @@ namespace RingBufferPlus
                         if (itemFactoryFunc.ExistFuncSync)
                         {
                             buff = itemFactoryFunc.ItemSync(_cts.Token);
+                            availableBuffer.Enqueue(buff);
                         }
                         else
                         {
+                            Exception tex = null;
                             Task.Run(async () =>
                             {
-                                buff = await itemFactoryFunc.ItemAsync(_cts.Token)
-                                    .ConfigureAwait(false);
+                                try
+                                {
+                                    buff = await itemFactoryFunc.ItemAsync(_cts.Token)
+                                        .ConfigureAwait(false);
+                                    availableBuffer.Enqueue(buff);
+                                }
+                                catch (Exception ex ) 
+                                {
+                                    tex = ex;
+                                }
                             }).Wait();
+                            if (tex != null)
+                            {
+                                IncrementError();
+                                if (MinimumCapacity == InitialCapacity)
+                                {
+                                    var err = new RingBufferFactoryException(Alias, $"{Alias} Min({MinimumCapacity}) capacity failed, current {localstate.CurrentCapacity}", tex);
+                                    result = new ValueException<int>(localstate.CurrentCapacity, err);
+                                    break;
+                                }
+                            }
                         }
                     }
-                    availableBuffer.Enqueue(buff);
                 }
                 catch (Exception ex)
                 {
