@@ -120,31 +120,24 @@ namespace RingBufferPlusTest
 
             RingBufferAutoScaleEventArgs? arg = null;
 
-            var completion = new ManualResetEvent(false);
+            var completion = new CountdownEvent(3);
 
             brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
-                completion.Set();
+                completion.Signal();
             };
 
             var rb = brb.Run();
-            rb.TriggerScale();
-            completion.WaitOne();
+            while (!completion.IsSet)
+            {
+                rb.TriggerScale();
+                Thread.Sleep(1);
+            }
+            completion.Wait();
             rb.StopAutoScaler();
-            var metric = rb.AutoScalerMetric();
-
             Assert.NotNull(arg);
-            Assert.Equal(result, arg.NewCapacity);
-            Assert.Equal(0, arg.Metric.AcquisitionCount);
-            Assert.Equal(rb.Alias, arg.Metric.Alias);
-            Assert.True(result <= rb.CurrentState.CurrentCapacity);
-            Assert.Equal(rb.IntervalAutoScaler, arg.Metric.CalculationInterval);
-            Assert.Equal(0, arg.Metric.ErrorCount);
-            Assert.Equal(max, arg.Metric.Maximum);
-            Assert.Equal(min, arg.Metric.Minimum);
-            Assert.Equal(0, arg.Metric.OverloadCount);
-            Assert.Equal(0, arg.Metric.Running);
+            Assert.True(result == rb.CurrentState.CurrentCapacity);
         }
 
         [Theory]
@@ -164,46 +157,34 @@ namespace RingBufferPlusTest
 
             RingBufferAutoScaleEventArgs? arg = null;
 
-            var completion = new ManualResetEvent(false);
+            var completion = new CountdownEvent(3);
 
             brb.AutoScalerCallback += (inst, e) =>
             {
                 arg = e;
-                completion.Set();
+                completion.Signal();
             };
 
             var rb = brb.Run();
-            rb.TriggerScale();
-            completion.WaitOne();
+            while (!completion.IsSet)
+            {
+                rb.TriggerScale();
+                Thread.Sleep(1);
+            }
             rb.StopAutoScaler();
-            var metric = rb.AutoScalerMetric();
-
             Assert.NotNull(arg);
-            Assert.Equal(result, arg.NewCapacity);
-            Assert.Equal(0, arg.Metric.AcquisitionCount);
-            Assert.Equal(rb.Alias, arg.Metric.Alias);
             Assert.Equal(result, rb.CurrentState.CurrentCapacity);
-            Assert.Equal(rb.IntervalAutoScaler, arg.Metric.CalculationInterval);
-            Assert.Equal(0, arg.Metric.ErrorCount);
-            Assert.Equal(max, arg.Metric.Maximum);
-            Assert.Equal(min, arg.Metric.Minimum);
-            Assert.Equal(0, arg.Metric.OverloadCount);
-            Assert.Equal(0, arg.Metric.Running);
-
         }
 
         [Fact]
         public void Should_have_exception_width_factSync_exception()
         {
-            var ex = Record.Exception(() =>
-            {
-                var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
-                    .Factory((_) => throw new Exception())
-                    .Build()
-                    .Run();
-            });
-            Assert.NotNull(ex);
+            var rb = RingBuffer<MyClassTest>
+                .CreateBuffer(10)
+                .Factory((_) => throw new Exception())
+                .Build()
+                .Run();
+            Assert.True(rb.CurrentState.FailureState);
         }
 
         [Fact]
@@ -283,52 +264,46 @@ namespace RingBufferPlusTest
 
 
         [Fact]
-        public void Should_have_exception_when_factSync_lessthan_minimum()
+        public void Should_have_not_exception_when_factSync_lessthan_minimum()
         {
-            var ex = Record.Exception(() =>
-            {
-                var cnt = 0;
-                var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
-                    .MinBuffer(8)
-                    .Factory((_) =>
+            var cnt = 0;
+            var brb = RingBuffer<MyClassTest>
+                .CreateBuffer(10)
+                .MinBuffer(8)
+                .Factory((_) =>
+                {
+                    if (cnt > 3)
                     {
-                        if (cnt > 3)
-                        {
-                            throw new Exception();
-                        }
-                        Interlocked.Increment(ref cnt);
-                        return new MyClassTest();
-                    })
-                    .Build()
-                    .Run();
-            });
-            Assert.NotNull(ex);
+                        throw new Exception();
+                    }
+                    Interlocked.Increment(ref cnt);
+                    return new MyClassTest();
+                })
+                .Build()
+                .Run(); 
+            Assert.True(brb.CurrentState.FailureState);
         }
 
 
         [Fact]
-        public void Should_have_exception_when_factAsync_lessthan_minimum()
+        public void Should_have_not_exception_when_factAsync_lessthan_minimum()
         {
-            var ex = Record.Exception(() =>
-            {
-                var cnt = 0;
-                var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
-                    .MinBuffer(8)
-                    .FactoryAsync((_) =>
+            var cnt = 0;
+            var brb = RingBuffer<MyClassTest>
+                .CreateBuffer(10)
+                .MinBuffer(8)
+                .FactoryAsync((_) =>
+                {
+                    if (cnt > 3)
                     {
-                        if (cnt > 3)
-                        {
-                            throw new Exception();
-                        }
-                        Interlocked.Increment(ref cnt);
-                        return Task.FromResult(new MyClassTest());
-                    })
-                    .Build()
-                    .Run();
-            });
-            Assert.NotNull(ex);
+                        throw new Exception();
+                    }
+                    Interlocked.Increment(ref cnt);
+                    return Task.FromResult(new MyClassTest());
+                })
+                .Build()
+                .Run();
+            Assert.True(brb.CurrentState.FailureState);
         }
 
         [Fact]
