@@ -13,7 +13,7 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferValue(string alias, RingBufferfState state, long elapsedTime, bool succeeded, Exception error, T value, Action<RingBufferValue<T>>? turnback) : this()
+        internal RingBufferValue(string alias, RingBufferState state, long elapsedTime, bool succeeded, Exception error, T value, Action<RingBufferValue<T>>? turnback) : this()
         {
             ElapsedAccquire = elapsedTime;
             Alias = alias;
@@ -25,7 +25,7 @@ namespace RingBufferPlus.ObjectValues
             _timer = new NaturalTimer();
             _timer.Start();
         }
-        public RingBufferfState State { get; }
+        public RingBufferState State { get; }
         public long ElapsedAccquire { get; }
         public string Alias { get; }
         public bool SucceededAccquire { get; }

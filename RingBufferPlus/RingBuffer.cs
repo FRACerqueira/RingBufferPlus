@@ -117,7 +117,7 @@ namespace RingBufferPlus
 
         #region IPropertiesRingBuffer
 
-        public RingBufferfState CurrentState
+        public RingBufferState CurrentState
         {
             get
             {
@@ -135,12 +135,12 @@ namespace RingBufferPlus
                             hassick = true;
                         }
                     }
-                    return new RingBufferfState(_runningCount, availableBuffer.Count, MaximumCapacity, MinimumCapacity, hassick);
+                    return new RingBufferState(_runningCount, availableBuffer.Count, MaximumCapacity, MinimumCapacity, hassick);
                 }
             }
         }
 
-        private RingBufferfState InternalCurrentState => new RingBufferfState(_runningCount, availableBuffer.Count,MaximumCapacity,MinimumCapacity, false);
+        private RingBufferState InternalCurrentState => new RingBufferState(_runningCount, availableBuffer.Count,MaximumCapacity,MinimumCapacity, false);
 
         public RingBufferPolicyTimeout PolicyTimeout => _policytimeoutAccquire;
 
@@ -923,7 +923,7 @@ namespace RingBufferPlus
                 _intervalReport);
         }
 
-        private RingBufferMetric CreateMetricAutoScaler(RingBufferfState sta)
+        private RingBufferMetric CreateMetricAutoScaler(RingBufferState sta)
         {
             return new(
                 sta,

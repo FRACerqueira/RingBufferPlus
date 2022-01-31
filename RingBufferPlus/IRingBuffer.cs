@@ -10,7 +10,7 @@ namespace RingBufferPlus
     public interface IPropertiesRingBuffer
     {
         string Alias { get; }
-        RingBufferfState CurrentState { get; }
+        RingBufferState CurrentState { get; }
         int InitialCapacity { get; }
         int MinimumCapacity { get; }
         int MaximumCapacity { get; }

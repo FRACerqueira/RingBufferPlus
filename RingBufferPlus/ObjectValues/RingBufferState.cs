@@ -4,7 +4,7 @@ using System.Diagnostics.CodeAnalysis;
 namespace RingBufferPlus.ObjectValues
 {
     [ExcludeFromCodeCoverage]
-    public struct RingBufferfState
+    public struct RingBufferState
     {
         private readonly int _currentRunning;
         private readonly int _currentAvailable;
@@ -13,12 +13,17 @@ namespace RingBufferPlus.ObjectValues
         private readonly int _max;
         private readonly int _min;
 
-        public RingBufferfState()
+        public RingBufferState()
         {
-            throw new InvalidOperationException($"Invalid Create {nameof(RingBufferfState)}");
+            _currentRunning = 0;
+            _currentAvailable = 0;
+            _currentCapacity = 0;
+            _max = 0;
+            _min = 0;
+            _hassick = true;
         }
 
-        internal RingBufferfState(int currentRunning, int currentAvailable,int max,int min, bool hasSick)
+        internal RingBufferState(int currentRunning, int currentAvailable,int max,int min, bool hasSick)
         {
             _currentRunning = currentRunning;
             _currentAvailable = currentAvailable;

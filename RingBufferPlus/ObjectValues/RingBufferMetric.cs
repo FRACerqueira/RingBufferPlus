@@ -10,7 +10,7 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferMetric(RingBufferfState state, string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, long succeededCount, TimeSpan timeexec, TimeSpan timebase) 
+        internal RingBufferMetric(RingBufferState state, string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, long succeededCount, TimeSpan timeexec, TimeSpan timebase) 
         {
             State = state;
             Alias = alias;
@@ -23,7 +23,7 @@ namespace RingBufferPlus.ObjectValues
             AverageSucceededExecution = timeexec;
         }
 
-        public RingBufferfState State { get; } = new RingBufferfState();
+        public RingBufferState State { get; } = new RingBufferState();
         public string Alias { get; } = string.Empty;
         public long TimeoutCount { get; } = 0;
         public long ErrorCount { get; } = 0;
