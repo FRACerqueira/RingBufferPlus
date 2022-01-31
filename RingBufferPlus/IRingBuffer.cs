@@ -1,5 +1,4 @@
 ﻿using Microsoft.Extensions.Logging;
-using Polly.Retry;
 using RingBufferPlus.Events;
 using RingBufferPlus.ObjectValues;
 using System;
@@ -20,6 +19,8 @@ namespace RingBufferPlus
         TimeSpan IntervalAutoScaler { get; }
         TimeSpan IntervalReport { get; }
         TimeSpan TimeoutAccquire { get; }
+        TimeSpan IntervalOpenCircuit { get; }
+
         RingBufferPolicyTimeout PolicyTimeout { get; }
         bool HasLogging { get; }
         LogLevel DefaultLogLevel { get; }
@@ -32,7 +33,6 @@ namespace RingBufferPlus
     public interface IRunningRingBuffer<T> : IPropertiesRingBuffer, IDisposable
     {
         RingBufferValue<T> Accquire(TimeSpan? timeout = null);
-        Task<RingBufferValue<T>> AccquireAsync(TimeSpan? timeout = null);
     }
 
     public interface IBuildRingBuffer<T> : IRunningRingBuffer<T>
@@ -48,17 +48,17 @@ namespace RingBufferPlus
         IRingBuffer<T> AliasName(string value);
         IRingBuffer<T> MinBuffer(int value);
         IRingBuffer<T> MaxBuffer(int value);
-        IRingBuffer<T> AddRetryPolicyFactory(RetryPolicy<T> policy);
-        IRingBuffer<T> AddLinkedCurrentState(Func<bool> value);
-        IRingBuffer<T> AddLinkedCurrentStateAsync(Task<bool> value);
+        IRingBuffer<T> LinkedFailureState(Func<bool> value);
         IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
-        IRingBuffer<T> PolicyTimeoutAccquireAsync(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, Task<bool>>? userpolicy = null);
         IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value);
         IRingBuffer<T> DefaultTimeoutAccquire(long mileseconds);
         IRingBuffer<T> DefaultIntervalHealthCheck(TimeSpan value);
         IRingBuffer<T> DefaultIntervalHealthCheck(long mileseconds);
         IRingBuffer<T> DefaultIntervalAutoScaler(TimeSpan value);
         IRingBuffer<T> DefaultIntervalAutoScaler(long mileseconds);
+        IRingBuffer<T> DefaultIntervalOpenCircuit(long mileseconds);
+        IRingBuffer<T> DefaultIntervalOpenCircuit(TimeSpan value);
+
         IRingBuffer<T> DefaultIntervalReport(TimeSpan value);
         IRingBuffer<T> DefaultIntervalReport(long mileseconds);
         IRingBuffer<T> Factory(Func<CancellationToken, T> value);

@@ -24,6 +24,6 @@ namespace RingBufferPlus.ObjectValues
         public int CurrentAvailable => _currentAvailable;
         public int CurrentRunning => _currentRunning;
         public int CurrentCapacity => _currentCapacity;
-        public bool HasSick => _hassick;
+        public bool FailureState => _hassick;
     }
 }

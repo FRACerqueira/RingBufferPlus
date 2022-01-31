@@ -265,18 +265,6 @@ namespace RingBufferPlusTest
             Assert.Equal(testcase.Item2 != null, rb.HasUserpolicyAccquire);
         }
 
-        [Theory]
-        [MemberData(nameof(PolicyFakeProviderOK.PolicyTestCasesASync), MemberType = typeof(PolicyFakeProviderOK))]
-        public void Should_have_accept_width_PolicyTimeoutAccquire_ASync(Tuple<RingBufferPolicyTimeout, Func<RingBufferMetric, CancellationToken, Task<bool>>?> testcase)
-        {
-            var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
-                .PolicyTimeoutAccquireAsync(testcase.Item1, testcase.Item2)
-                .Factory((_) => new MyClassTest())
-                .Build();
-            Assert.Equal(testcase.Item1, rb.PolicyTimeout);
-            Assert.Equal(testcase.Item2 != null, rb.HasUserpolicyAccquire);
-        }
 
         [Theory]
         [MemberData(nameof(PolicyFakeProviderNOK.PolicyTestCasesSync), MemberType = typeof(PolicyFakeProviderNOK))]
@@ -287,21 +275,6 @@ namespace RingBufferPlusTest
                 var rb = RingBuffer<MyClassTest>
                     .CreateBuffer(10)
                     .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
-                    .Factory((_) => new MyClassTest())
-                    .Build();
-            });
-            Assert.NotNull(ex);
-        }
-
-        [Theory]
-        [MemberData(nameof(PolicyFakeProviderNOK.PolicyTestCasesASync), MemberType = typeof(PolicyFakeProviderNOK))]
-        public void Should_have_exception_width_PolicyTimeoutAccquire_ASync(Tuple<RingBufferPolicyTimeout, Func<RingBufferMetric, CancellationToken, Task<bool>>?> testcase)
-        {
-            var ex = Record.Exception(() =>
-            {
-                var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
-                    .PolicyTimeoutAccquireAsync(testcase.Item1, testcase.Item2)
                     .Factory((_) => new MyClassTest())
                     .Build();
             });

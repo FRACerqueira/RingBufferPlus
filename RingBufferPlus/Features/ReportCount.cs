@@ -14,17 +14,22 @@ namespace RingBufferPlus.Features
             _timeoutCount = 0;
             _totalSucceededexec = TimeSpan.Zero;
             _acquisitionSucceededCount = 0;
+            _syncCount = false;
         }
 
-        private long _timeoutCount;
-        public long TimeoutCount
+        private volatile int _timeoutCount;
+        public int TimeoutCount
         {
             get
             {
-                lock (_sync)
+                if (_syncCount)
                 {
-                    return _timeoutCount;
+                    lock (_sync)
+                    {
+                        return _timeoutCount;
+                    }
                 }
+                return _timeoutCount;
             }
         }
         public void IncrementTimeout()
@@ -34,23 +39,20 @@ namespace RingBufferPlus.Features
                 _timeoutCount++;
             }
         }
-        public void DecrementTimeout()
-        {
-            lock (_sync)
-            {
-                _timeoutCount--;
-            }
-        }
 
-        private long _acquisitionCount;
-        public long AcquisitionCount
+        private volatile int _acquisitionCount;
+        public int AcquisitionCount
         {
             get
             {
-                lock (_sync)
+                if (_syncCount)
                 {
-                    return _acquisitionCount;
+                    lock (_sync)
+                    {
+                        return _acquisitionCount;
+                    }
                 }
+                return _acquisitionCount;
             }
         }
 
@@ -63,20 +65,23 @@ namespace RingBufferPlus.Features
         }
 
 
-        private long _acquisitionSucceededCount;
-        public long AcquisitionSucceeded
+        private volatile int _acquisitionSucceededCount;
+        public int AcquisitionSucceeded
         {
             get
             {
-                lock (_sync)
+                if (_syncCount)
                 {
-                    return _acquisitionSucceededCount;
+                    lock (_sync)
+                    {
+                        return _acquisitionSucceededCount;
+                    }
                 }
+                return _acquisitionSucceededCount;
             }
         }
 
         private TimeSpan _totalSucceededexec;
-
         public void AddTotaSucceededlExecution(TimeSpan value)
         {
             lock (_sync)
@@ -91,17 +96,16 @@ namespace RingBufferPlus.Features
             {
                 lock (_sync)
                 {
+                    int acq = _acquisitionSucceededCount;
                     double aux = 0;
-                    if (_acquisitionSucceededCount > 0)
+                    if (acq > 0)
                     {
-                        aux = _totalSucceededexec.TotalMilliseconds / _acquisitionSucceededCount;
+                        aux = _totalSucceededexec.TotalMilliseconds / acq;
                     }
                     return TimeSpan.FromMilliseconds(aux);
                 }
             }
         }
-
-
 
         public void IncrementAcquisition()
         {
@@ -110,23 +114,20 @@ namespace RingBufferPlus.Features
                 _acquisitionCount++;
             }
         }
-        public void DecrementAcquisition()
-        {
-            lock (_sync)
-            {
-                _acquisitionCount--;
-            }
-        }
 
-        private long _waitCount;
-        public long WaitCount
+        private volatile int _waitCount;
+        public int WaitCount
         {
             get
             {
-                lock (_sync)
+                if (_syncCount)
                 {
-                    return _waitCount;
+                    lock (_sync)
+                    {
+                        return _waitCount;
+                    }
                 }
+                return _waitCount;
             }
         }
         public void IncrementWaitCount()
@@ -136,23 +137,20 @@ namespace RingBufferPlus.Features
                 _waitCount++;
             }
         }
-        public void DecrementWaitCount()
-        {
-            lock (_sync)
-            {
-                _waitCount--;
-            }
-        }
 
-        private long _errorCount;
-        public long ErrorCount
+        private volatile int _errorCount;
+        public int ErrorCount
         {
             get
             {
-                lock (_sync)
+                if (_syncCount)
                 {
-                    return _errorCount;
+                    lock (_sync)
+                    {
+                        return _errorCount;
+                    }
                 }
+                return _errorCount;
             }
         }
         public void IncrementErrorCount()
@@ -162,25 +160,24 @@ namespace RingBufferPlus.Features
                 _errorCount++;
             }
         }
-        public void DecrementErrorCount()
+
+        private volatile bool _syncCount;
+        public bool SyncCount
         {
-            lock (_sync)
-            {
-                _errorCount--;
-            }
+            get => _syncCount;
+            set => _syncCount = value;
         }
 
         public void ResetCount()
         {
-            lock (_sync)
-            {
-                _errorCount = 0;
-                _waitCount = 0;
-                _acquisitionCount = 0;
-                _timeoutCount = 0;
-                _totalSucceededexec = TimeSpan.Zero;
-                _acquisitionSucceededCount = 0;
-            }
+            _syncCount = true;
+            _errorCount = 0;
+            _waitCount = 0;
+            _acquisitionCount = 0;
+            _timeoutCount = 0;
+            _totalSucceededexec = TimeSpan.Zero;
+            _acquisitionSucceededCount = 0;
+            _syncCount = false;
         }
     }
 }

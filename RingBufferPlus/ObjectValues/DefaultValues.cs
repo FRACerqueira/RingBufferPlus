@@ -9,5 +9,6 @@ namespace RingBufferPlus.ObjectValues
         public static readonly TimeSpan IntervalHealthcheck = TimeSpan.FromMilliseconds(250);
         public static readonly TimeSpan IntervalScaler = TimeSpan.FromMilliseconds(500);
         public static readonly TimeSpan IntervalReport = TimeSpan.FromSeconds(60);
+        public static readonly TimeSpan IntervalOpenCircuit = TimeSpan.FromSeconds(20);
     }
 }

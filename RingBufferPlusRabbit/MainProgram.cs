@@ -1,16 +1,12 @@
 ﻿using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using Polly;
-using Polly.Retry;
 using RabbitMQ.Client;
-using RabbitMQ.Client.Exceptions;
 using RingBufferPlus;
 using RingBufferPlus.Events;
 using RingBufferPlus.ObjectValues;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -138,15 +134,6 @@ namespace RingBufferPlusRabbit
             }
         }
 
-        private static RetryPolicy<T> BuildPolicy<T>(int retryCount = 5)
-        {
-            return Policy<T>
-                    .Handle<SocketException>()
-                        .Or<RabbitMQClientException>()
-                        .Or<BrokerUnreachableException>()
-                    .WaitAndRetry(retryCount, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)));
-        }
-
         private void RunPOC(CancellationToken cancellationToken)
         {
             Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US"); ;
@@ -155,8 +142,7 @@ namespace RingBufferPlusRabbit
             //default Connection for local rabbitmq
             var cnnfactory = new ConnectionFactory
             {
-                ClientProvidedName = "RingBuffer",
-                AutomaticRecoveryEnabled = false,
+                ClientProvidedName = "RingBuffer"
             };
 
             using (var cnn = cnnfactory.CreateConnection())
@@ -170,7 +156,6 @@ namespace RingBufferPlusRabbit
             var build_ringCnn = RingBuffer<IConnection>
                     .CreateBuffer(3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
-                    .AddRetryPolicyFactory(BuildPolicy<IConnection>())
                     .Factory((ctk) => cnnfactory.CreateConnection())
                     .HealthCheck((cnn, ctk) =>
                     {
@@ -200,9 +185,12 @@ namespace RingBufferPlusRabbit
                 .CreateBuffer(20)
                 .MinBuffer(5)
                 .MaxBuffer(102)
-                .AddLinkedCurrentState(() => !ringCnn.CurrentState.HasSick)
-                .FactoryAsync((ctk) => CreateModelAsync(ringCnn))
-                .HealthCheckAsync((model, ctk) => HCModelAsync(model))
+                .LinkedFailureState(() =>
+                {
+                    return ringCnn.CurrentState.FailureState;
+                })
+                .Factory((ctk) => CreateModel(ringCnn))
+                .HealthCheck((model, ctk) => HCModel(model))
                 .AutoScaler(MyAutoscalerModel)
                 .DefaultIntervalReport(10000)
                 .MetricsReport((metric, _) => Console.WriteLine($"\n[{DateTime.Now.ToLongTimeString()}] {metric.Alias} Report(10 sec) => Avg.Exec(Ok): {metric.AverageSucceededExecution.TotalMilliseconds} ms. Accq(Ok/Err) : {metric.AcquisitionSucceededCount}/{metric.ErrorCount}\n"))
@@ -224,20 +212,20 @@ namespace RingBufferPlusRabbit
 
                 for (int i = 0; i < threadCount; i++)
                 {
-                    var thread = Task.Run(async () =>
+                    var thread = Task.Run(() =>
                     {
                         var timer = new NaturalTimer();
                         timer.Start();
                         while (!cancellationToken.IsCancellationRequested)
                         {
-                            if (timer.TotalMinutes > 5)
+                            if (timer.TotalMinutes > 4)
                             {
                                 threadCount--;
                                 Console.WriteLine($"Stoping this Thread. Total running = {threadCount}");
-                                //after 5 minutes end thread;
+                                //after 4 minutes end thread;
                                 break;
                             }
-                            using (var ctx = await ringmodel.AccquireAsync().ConfigureAwait(false))
+                            using (var ctx = ringmodel.Accquire())
                             {
                                 if (ctx.SucceededAccquire)
                                 {
@@ -259,7 +247,7 @@ namespace RingBufferPlusRabbit
                                         Console.WriteLine($"{ctx.Alias} => Error: {ex}.");
                                     }
                                 }
-                                else if (!ringmodel.CurrentState.HasSick)
+                                else if (!ringmodel.CurrentState.FailureState)
                                 {
                                     if (ctx.State.CurrentCapacity >= ringmodel.MaximumCapacity)
                                     {
@@ -342,7 +330,7 @@ namespace RingBufferPlusRabbit
                         newcapacity = arg.Minimum;
                     }
                 }
-                else if (LastAcquisitionCount < arg.AcquisitionCount && arg.TimeoutCount == 0)
+                else if (LastAcquisitionCount < arg.AcquisitionCount && arg.TimeoutCount == 0 && arg.Avaliable > 1)
                 {
                     countReduceRage++;
                     if (countReduceRage >= 2)

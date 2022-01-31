@@ -18,7 +18,7 @@ namespace RingBufferPlus.ObjectValues
             SucceededAccquire = succeeded;
             Error = error;
             Current = value;
-            HasSick = state.HasSick;
+            HasSick = state.FailureState;
             _turnback = turnback;
             _timer = new NaturalTimer();
             _timer.Start();

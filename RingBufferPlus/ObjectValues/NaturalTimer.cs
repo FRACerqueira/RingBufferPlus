@@ -38,13 +38,22 @@ namespace RingBufferPlus.ObjectValues
                 return (DateTimeOffset.UtcNow.DateTime - _startRef.Value).Add(TimeSpan.FromMilliseconds(_totalRef));
             }
         }
+        public static bool Delay(TimeSpan time, CancellationToken? cancellationToken = null)
+        {
+            return Delay(time, null, cancellationToken);
+        }
 
-        public static bool Delay(long timemileseconds, Func<bool>? cancfunc = null, CancellationToken? cancellationToken = null)
+        public static bool Delay(long timemileseconds, CancellationToken? cancellationToken = null)
+        {
+            return Delay(TimeSpan.FromMilliseconds(timemileseconds), null, cancellationToken);
+        }
+
+        public static bool Delay(long timemileseconds, Func<bool>? cancfunc, CancellationToken? cancellationToken)
         {
             return Delay(TimeSpan.FromMilliseconds(timemileseconds), cancfunc, cancellationToken);
         }
 
-        public static bool Delay(TimeSpan time, Func<bool>? cancfunc = null, CancellationToken? cancellationToken = null)
+        public static bool Delay(TimeSpan time, Func<bool>? cancfunc, CancellationToken? cancellationToken)
         {
             if (time.TotalMilliseconds == 0)
             {
