@@ -24,9 +24,4 @@
     <ProjectReference Include="..\RingBufferPlus\RingBufferPlus.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Folder Include="Features\" />
-    <Folder Include="ObjectValues\" />
-  </ItemGroup>
-
 </Project>
