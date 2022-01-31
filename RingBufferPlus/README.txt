@@ -23,7 +23,7 @@ RingBufferPlus was developed in c# with target frameworks:
 
 https://fracerqueira.github.io/RingBufferPlus
 
-**Relase Notes RingBufferPlus (V1.0.0)**
+**Relase Notes RingBufferPlus (V1.0.4-rc)**
 ----------------------------------------
 
 - First public release (Jan/2022)
@@ -91,20 +91,21 @@ var build_rb = RingBuffer<MyClass>
                 .MinBuffer(2)
                 .MaxBuffer(10)
                 .AliasName("Test")
-                .AddRetryPolicyFactory(MyBuildPolicy<MyClass>())
-                .AddLinkedCurrentState(() => true)
+                .LinkedFailureState(() => true)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
                 .DefaultIntervalHealthCheck(1000)
+                .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
                 .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
+                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
-		   return 5;	
-		})
+                   return 5;	
+                })
                 .Build();
 
 build_rb.AutoScalerCallback += Ring_AutoScalerCallback;

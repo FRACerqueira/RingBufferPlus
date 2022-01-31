@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Sets the default interval to run Auto-Scaler.
+Sets the default interval to run Auto-Scaler. 
 
 When not set,  default interval is the same value of DefaultValues.IntervalScaler.
 

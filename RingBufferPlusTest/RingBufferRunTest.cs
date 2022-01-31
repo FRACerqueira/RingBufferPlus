@@ -56,14 +56,14 @@ namespace RingBufferPlusTest
             Assert.Equal(rb.Alias, arg.Metric.Alias);
             Assert.Equal(arg.OldCapacity, arg.NewCapacity);
             Assert.Equal(0, arg.Metric.AcquisitionCount);
-            Assert.Equal(10, arg.Metric.Avaliable);
+            Assert.Equal(10, arg.Metric.State.CurrentAvailable);
             Assert.Equal(rb.IntervalAutoScaler, arg.Metric.CalculationInterval);
-            Assert.Equal(10, arg.Metric.Capacity);
+            Assert.Equal(10, arg.Metric.State.CurrentCapacity);
             Assert.Equal(0, arg.Metric.ErrorCount);
-            Assert.Equal(10, arg.Metric.Maximum);
-            Assert.Equal(10, arg.Metric.Minimum);
+            Assert.Equal(10, arg.Metric.State.MaximumCapacity);
+            Assert.Equal(10, arg.Metric.State.MinimumCapacity);
             Assert.Equal(0, arg.Metric.OverloadCount);
-            Assert.Equal(0, arg.Metric.Running);
+            Assert.Equal(0, arg.Metric.State.CurrentRunning);
         }
 
         [Fact]
@@ -89,18 +89,17 @@ namespace RingBufferPlusTest
             completion.WaitOne();
             rb.StopAutoScaler();
 
-            Assert.NotNull(arg);
+            Assert.Equal(rb.Alias, arg.Metric.Alias);
             Assert.Equal(arg.OldCapacity, arg.NewCapacity);
             Assert.Equal(0, arg.Metric.AcquisitionCount);
-            Assert.Equal(rb.Alias, arg.Metric.Alias);
-            Assert.Equal(10, arg.Metric.Avaliable);
+            Assert.Equal(10, arg.Metric.State.CurrentAvailable);
             Assert.Equal(rb.IntervalAutoScaler, arg.Metric.CalculationInterval);
-            Assert.Equal(10, arg.Metric.Capacity);
+            Assert.Equal(10, arg.Metric.State.CurrentCapacity);
             Assert.Equal(0, arg.Metric.ErrorCount);
-            Assert.Equal(10, arg.Metric.Maximum);
-            Assert.Equal(10, arg.Metric.Minimum);
+            Assert.Equal(10, arg.Metric.State.MaximumCapacity);
+            Assert.Equal(10, arg.Metric.State.MinimumCapacity);
             Assert.Equal(0, arg.Metric.OverloadCount);
-            Assert.Equal(0, arg.Metric.Running);
+            Assert.Equal(0, arg.Metric.State.CurrentRunning); 
         }
 
         [Theory]

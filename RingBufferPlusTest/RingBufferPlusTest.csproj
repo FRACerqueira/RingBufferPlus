@@ -26,6 +26,7 @@
 
   <ItemGroup>
     <Folder Include="Features\" />
+    <Folder Include="ObjectValues\" />
   </ItemGroup>
 
 </Project>

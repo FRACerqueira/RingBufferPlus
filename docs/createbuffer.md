@@ -23,4 +23,3 @@ When initital capacity is less than or equal to zero.
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis)
-

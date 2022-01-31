@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis) |
 [**RingBufferMetric**](metricclass.md)
 
-## Documentation
+## Documentation 
 Defines the action/fucntion that performs the Metric-Report.
 
 ### Methods

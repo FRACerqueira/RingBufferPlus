@@ -10,7 +10,7 @@ When logging is enabled, exceptions and warnings are generated even with callbac
 
 ### RingBufferLogLevel Type
 
-Defina o nível de log padrão para setter /information/trace. Error and warning log levels are not affected.
+Set default log level to setter/information/trace. Error and warning log levels are not affected.
 
 - Trace
 - Debug

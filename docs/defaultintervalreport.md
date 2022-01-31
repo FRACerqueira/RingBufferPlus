@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Sets the default interval for Metrics-Report.
+Sets the default interval for Metrics-Report. 
 
 When not set,  default interval is the same value of DefaultValues.IntervalReport.
 

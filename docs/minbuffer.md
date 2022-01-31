@@ -17,7 +17,7 @@ When not set, MinBuffer is the same value of [CreateBuffer](createbuffer.md).
 
 ### Exception
 
-When MinBuffer is less than or equal to zero.
+When MinBuffer is less than or equal to zero. 
 
 ```csharp
   RingBufferFatalException

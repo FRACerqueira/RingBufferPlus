@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Defines the function to create an instance in the buffer.
+Defines the function to create an instance in the buffer. 
 
 ### Methods
 

@@ -47,20 +47,12 @@ namespace RingBufferPlusRabbit
                 {
                     RunPOC(cancellationToken);
                 }
-                catch (AggregateException ex) when (ex.InnerException is TaskCanceledException tex)
+                catch (Exception ex) 
                 {
-                    if (!tex.CancellationToken.IsCancellationRequested)
+                    if (!cancellationToken.IsCancellationRequested)
                     {
                         Console.WriteLine(ex);
                     }
-                }
-                catch (TaskCanceledException ex) when (ex.CancellationToken.IsCancellationRequested)
-                {
-                    //ok
-                }
-                catch (Exception ex)
-                {
-                    Console.WriteLine(ex);
                 }
                 _stoppingCts.Cancel();
             }, cancellationToken);
@@ -139,23 +131,28 @@ namespace RingBufferPlusRabbit
             Thread.CurrentThread.CurrentCulture = new CultureInfo("en-US"); ;
             Thread.CurrentThread.CurrentUICulture = new CultureInfo("en-US");
 
+            const string QueueName = "RingBufferTest";
+
             //default Connection for local rabbitmq
             var cnnfactory = new ConnectionFactory
             {
-                ClientProvidedName = "RingBuffer"
+                ClientProvidedName = "RingBuffer",
+                UseBackgroundThreadsForIO = true
             };
 
             using (var cnn = cnnfactory.CreateConnection())
             {
                 using (var md = cnn.CreateModel())
                 {
-                    md.QueueDeclare("Qtest", true, false, false);
+
+                    md.QueueDeclare(QueueName, true, false, false);
                 }
             }
 
             var build_ringCnn = RingBuffer<IConnection>
                     .CreateBuffer(3)
                     .PolicyTimeoutAccquire(RingBufferPolicyTimeout.Ignore)
+                    .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
                     .Factory((ctk) => cnnfactory.CreateConnection())
                     .HealthCheck((cnn, ctk) =>
                     {
@@ -237,7 +234,7 @@ namespace RingBufferPlusRabbit
                                     try
                                     {
                                         ctx.Current.BasicPublish(exchange: "",
-                                            routingKey: "Qtest",
+                                            routingKey: QueueName,
                                             basicProperties: props,
                                             body: messageBodyBytes);
                                     }
@@ -247,9 +244,9 @@ namespace RingBufferPlusRabbit
                                         Console.WriteLine($"{ctx.Alias} => Error: {ex}.");
                                     }
                                 }
-                                else if (!ringmodel.CurrentState.FailureState)
+                                else if (!ctx.State.FailureState)
                                 {
-                                    if (ctx.State.CurrentCapacity >= ringmodel.MaximumCapacity)
+                                    if (ctx.State.CurrentCapacity >= ctx.State.MaximumCapacity)
                                     {
                                         Console.WriteLine($"{ctx.Alias} => Error: {ctx.Error}.  Available/Running {ctx.State.CurrentAvailable}/{ctx.State.CurrentRunning}");
                                     }
@@ -294,7 +291,7 @@ namespace RingBufferPlusRabbit
 
         private int MyAutoscalerModel(RingBufferMetric arg, CancellationToken ctk)
         {
-            int newcapacity = arg.Capacity;
+            int newcapacity = arg.State.MaximumCapacity;
             if (arg.OverloadCount > 0 || arg.TimeoutCount > 0)
             {
                 if (arg.OverloadCount >= 20)
@@ -313,9 +310,9 @@ namespace RingBufferPlusRabbit
                 {
                     newcapacity++;
                 }
-                if (newcapacity > arg.Maximum)
+                if (newcapacity > arg.State.MaximumCapacity)
                 {
-                    newcapacity = arg.Maximum;
+                    newcapacity = arg.State.MaximumCapacity;
                 }
                 //reset countReduceRage
                 countReduceRage = 0;
@@ -325,19 +322,19 @@ namespace RingBufferPlusRabbit
                 if (arg.AcquisitionCount == 0)
                 {
                     newcapacity -= 5;
-                    if (newcapacity < arg.Minimum)
+                    if (newcapacity < arg.State.MinimumCapacity)
                     {
-                        newcapacity = arg.Minimum;
+                        newcapacity = arg.State.MinimumCapacity;
                     }
                 }
-                else if (LastAcquisitionCount < arg.AcquisitionCount && arg.TimeoutCount == 0 && arg.Avaliable > 1)
+                else if (LastAcquisitionCount < arg.AcquisitionCount && arg.TimeoutCount == 0 && arg.State.CurrentAvailable > 1)
                 {
                     countReduceRage++;
                     if (countReduceRage >= 2)
                     {
-                        if (arg.Avaliable > 2)
+                        if (arg.State.CurrentAvailable > 2)
                         {
-                            if (arg.Avaliable > 7)
+                            if (arg.State.CurrentAvailable > 7)
                             {
                                 newcapacity -= 5;
                             }
@@ -345,9 +342,9 @@ namespace RingBufferPlusRabbit
                             {
                                 newcapacity--;
                             }
-                            if (newcapacity < arg.Minimum)
+                            if (newcapacity < arg.State.MinimumCapacity)
                             {
-                                newcapacity = arg.Minimum;
+                                newcapacity = arg.State.MinimumCapacity;
                             }
                         }
                         countReduceRage = 0;
@@ -365,12 +362,12 @@ namespace RingBufferPlusRabbit
 
         private void Ring_TimeoutCallBack(object sender, RingBufferTimeoutEventArgs e)
         {
-            Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount} Overload = {e.Metric.OverloadCount}. Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
+            Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount} Overload = {e.Metric.OverloadCount}. Cap./Run./Aval. = {e.Metric.State.CurrentCapacity}/{e.Metric.State.CurrentRunning}/{e.Metric.State.CurrentAvailable}");
         }
 
         private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
         {
-            Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Acq./OverRate = {e.Metric.AcquisitionCount}/{RateMetric(e.Metric):P3} Cap./Run./Aval. = {e.Metric.Capacity}/{e.Metric.Running}/{e.Metric.Avaliable}");
+            Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount} Over = {e.Metric.OverloadCount} Acq./OverRate = {e.Metric.AcquisitionCount}/{RateMetric(e.Metric):P3} Cap./Run./Aval. = {e.Metric.State.CurrentCapacity}/{e.Metric.State.CurrentRunning}/{e.Metric.State.CurrentAvailable}");
         }
     }
 }

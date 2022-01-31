@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace RingBufferPlus.ObjectValues
 {
+    [ExcludeFromCodeCoverage]
     public class RingBufferValue<T> : IDisposable
     {
         private readonly Action<RingBufferValue<T>>? _turnback;
@@ -18,13 +20,12 @@ namespace RingBufferPlus.ObjectValues
             SucceededAccquire = succeeded;
             Error = error;
             Current = value;
-            HasSick = state.FailureState;
+            State = state;
             _turnback = turnback;
             _timer = new NaturalTimer();
             _timer.Start();
         }
         public RingBufferfState State { get; }
-        public bool HasSick { get; }
         public long ElapsedAccquire { get; }
         public string Alias { get; }
         public bool SucceededAccquire { get; }

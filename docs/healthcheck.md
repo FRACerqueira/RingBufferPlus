@@ -4,7 +4,7 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Defines the function to run the HealthCheck for an item in the buffer.
+Defines the function to run the HealthCheck for an item in the buffer. 
 
 Should return true when successful, otherwise false.
 

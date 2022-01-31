@@ -2,12 +2,13 @@
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**RingBufferMetric**](metricclass.md)
+[**AutoScaleCallback**](autoscalecallback.md) |
+[**Metric**](metricclass.md)
 
 ## Documentation
 Defines the function to run the AutoScaler for the buffer.
 
-Should return new  target capacity for the buffer.
+Should return new target capacity for the buffer. When resizing occurs, the [AutoScaleCallback](autoscalecallback.md) event will be triggered if configured
 
 ### Methods
 
@@ -27,5 +28,7 @@ When function is null.
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**RingBufferMetric**](metricclass.md)
+[**AutoScaleCallback**](autoscalecallback.md) |
+[**Metric**](metricclass.md)
+
 

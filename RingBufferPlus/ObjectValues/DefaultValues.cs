@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace RingBufferPlus.ObjectValues
 {
+    [ExcludeFromCodeCoverage]
     public static class DefaultValues
     {
         public static readonly TimeSpan WaitTimeAvailable = TimeSpan.FromMilliseconds(10);

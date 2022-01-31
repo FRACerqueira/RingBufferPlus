@@ -114,20 +114,21 @@ var build_rb = RingBuffer<MyClass>
                 .MinBuffer(2)
                 .MaxBuffer(10)
                 .AliasName("Test")
-                .AddRetryPolicyFactory(MyBuildPolicy<MyClass>())
-                .AddLinkedCurrentState(() => true)
+                .LinkedFailureState(() => true)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
                 .DefaultIntervalHealthCheck(1000)
+                .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
                 .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
+                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
-		   return 5;	
-		})
+                   return 5;	
+                })
                 .Build();
 
 build_rb.AutoScalerCallback += Ring_AutoScalerCallback;
@@ -165,35 +166,28 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 
 Title | Details
 --- | ---
-[CreateBuffer](createbuffer.md) |  Create new instance of IRingBuffer and sets the initial capacity of items in the buffer.
-[AliasName](aliasname.md) |  Set alias to RingBuffer.
-[MaxBuffer](maxbuffer.md) |  Sets the maximum capacity of items in the buffer.
-[MinBuffer](minbuffer.md) |  Sets the minimum capacity of items in the buffer..
+[CreateBuffer](createbuffer.md) | Create new instance of IRingBuffer and sets the initial capacity of items in the buffer.
+[AliasName](aliasname.md) | Set alias to RingBuffer.
+[MaxBuffer](maxbuffer.md) | Sets the maximum capacity of items in the buffer.
+[MinBuffer](minbuffer.md) | Sets the minimum capacity of items in the buffer..
 [PolicyTimeoutAccquire](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
-[PolicyTimeoutAccquireAsync](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
 [DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
 [DefaultIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
 [DefaultIntervalAutoScaler](defaultintervalautoscaler.md) | Sets the default interval to perform auto-scaling of buffer items.
 [DefaultIntervalReport](defaultintervalreport.md) | Set the default interval to perform the metric reporting.
-[Factory](factory.md) | Set create-function to an item in the buffer.
-[FactoryAsync](factory.md) | Set create-function to an item in the buffer.
-[HealthCheck](healthcheck.md) | Set the integrity function to a buffer item.
-[HealthCheckAsync](healthcheck.md) | Set the integrity function to a buffer item.
-[AutoScaler](autoscaler.md) | Set the auto-scaling function of buffer items.
-[AutoScalerAsync](autoscaler.md) | Set the auto-scaling function of buffer items.
-[MetricsReport](metricsreport.md) | Set action for metrics report.
-[MetricsReportAsync](metricsreport.md) | Set action for metrics report.
+[DefaultIntervalOpenCircuit](defaultitervalopencircuit.md) | Sets the default interval to wait for a new open circuit check.
+[Factory(Async)](factory.md) | Set create-function to an item in the buffer.
+[HealthCheck(Async)](healthcheck.md) | Set the integrity function to a buffer item.
+[AutoScaler(Async)](autoscaler.md) | Set the auto-scaling function of buffer items.
+[MetricsReport(Async)](metricsreport.md) | Set action for metrics report.
 [AddLogProvider](addlogprovider.md) | Set log provider and default message level.
-[AddRetryPolicyFactory](addretrypolicyfactory.md) | Set Retry Policy to factory buffer.
-[AddLinkedCurrentState](addlinkedcurrentstate.md) | Extra function to set state "HasSick" in CurrentState. 
-[AddLinkedCurrentStateAsync](addlinkedcurrentstate.md) | Extra function to set state "HasSick" in CurrentState.
+[LinkedFailureState](linkedfailurestate.md) | Extra function to set state "FailureState" in CurrentState.
 [Build](ringbufferbuild.md) | Executes and validates all commands, provides the events to be configured and the execution command.
 [ErrorCallBack](errorcallback.md) | Error return event.
 [TimeoutCallBack](timeoutcallback.md) | Timeout return event.
 [AutoScaleCallback](autoscalecallback.md) | Auto-Scaler return event.
 [Run](ringbufferrun.md) | Performs instance creation and provides command to acquire buffer item.
 [Accquire](accquire.md) | Acquire an item from the buffer.
-[AccquireAsync](accquire.md) | Acquire an item from the buffer.
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
 [CurrentState class](currentstate.md) | Ring buffer CurrentState class details.

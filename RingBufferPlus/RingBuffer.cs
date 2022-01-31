@@ -135,30 +135,34 @@ namespace RingBufferPlus
                             hassick = true;
                         }
                     }
-                    return new RingBufferfState(_runningCount, availableBuffer.Count, hassick);
+                    return new RingBufferfState(_runningCount, availableBuffer.Count, MaximumCapacity, MinimumCapacity, hassick);
                 }
             }
         }
 
-        private RingBufferfState InternalCurrentState => new RingBufferfState(_runningCount, availableBuffer.Count, false);
+        private RingBufferfState InternalCurrentState => new RingBufferfState(_runningCount, availableBuffer.Count,MaximumCapacity,MinimumCapacity, false);
 
         public RingBufferPolicyTimeout PolicyTimeout => _policytimeoutAccquire;
+
         public TimeSpan IntervalHealthCheck => _intervalHealthCheck;
         public TimeSpan IntervalAutoScaler => _intervalAutoScaler;
+        public TimeSpan IntervalReport => _intervalReport;
+        public TimeSpan TimeoutAccquire { get; private set; }
+        public TimeSpan WaitNextTry { get; private set; }
+        public TimeSpan IntervalOpenCircuit => _intervalOpenCircuit;
+
         public bool HasUserpolicyAccquire => _userpolicytimeoutAccquireFunc != null;
         public bool HasUserHealthCheck => _healthCheckFuncSync != null || _healthCheckFuncAsync != null;
         public bool HasUserAutoScaler => _userAutoScaler;
+        public bool HasLinkedFailureState => _linkedFailureStateFunc != null;
         public bool HasReport => _reportSync != null || _reportAsync != null;
-        public TimeSpan IntervalReport => _intervalReport;
-        public LogLevel DefaultLogLevel => _defaultloglevel;
         public bool HasLogging => _loggerFactory != null;
+
+        public LogLevel DefaultLogLevel => _defaultloglevel;
         public string Alias { get; private set; }
         public int InitialCapacity { get; private set; }
         public int MinimumCapacity { get; private set; }
         public int MaximumCapacity { get; private set; }
-        public TimeSpan TimeoutAccquire { get; private set; }
-        public TimeSpan WaitNextTry { get; private set; }
-        public TimeSpan IntervalOpenCircuit => _intervalOpenCircuit;
 
         #endregion
 
@@ -287,7 +291,7 @@ namespace RingBufferPlus
             var aux = RingAccquire(timeout);
             if (!aux.SucceededAccquire)
             {
-                if (!aux.HasSick)
+                if (!aux.State.FailureState)
                 {
                     if (aux.Error is RingBufferTimeoutException exception)
                     {
@@ -791,7 +795,7 @@ namespace RingBufferPlus
             IncrementTimeout();
             if (_policytimeoutAccquire == RingBufferPolicyTimeout.MaximumCapacity)
             {
-                if (metric.Capacity >= metric.Maximum && metric.Avaliable == 0)
+                if (metric.State.CurrentCapacity >= metric.State.MaximumCapacity && metric.State.CurrentAvailable == 0)
                 {
                     LogRingBuffer($"{Alias} trigger policy(MaximumCapacity) Timeout accquire : {exception.ElapsedTime}/{(long)basetime.TotalMilliseconds}");
                     TimeoutCallBack?.Invoke(this, new RingBufferTimeoutEventArgs(
@@ -907,17 +911,13 @@ namespace RingBufferPlus
 
         private RingBufferMetric CreateMetricReport()
         {
-            var sta = InternalCurrentState;
-            return new(
+            var sta = CurrentState;
+            return new(sta,
                 Alias,
                 _reportCount.TimeoutCount,
                 _reportCount.ErrorCount,
                 _reportCount.WaitCount,
                 _reportCount.AcquisitionCount,
-                sta.CurrentRunning,
-                MinimumCapacity,
-                MaximumCapacity,
-                sta.CurrentAvailable,
                 _reportCount.AcquisitionSucceeded,
                 _reportCount.AverageSucceededExecution,
                 _intervalReport);
@@ -926,15 +926,12 @@ namespace RingBufferPlus
         private RingBufferMetric CreateMetricAutoScaler(RingBufferfState sta)
         {
             return new(
+                sta,
                 Alias,
                 _autoScalercount.TimeoutCount,
                 _autoScalercount.ErrorCount,
                 _autoScalercount.WaitCount,
                 _autoScalercount.AcquisitionCount,
-                sta.CurrentRunning,
-                MinimumCapacity,
-                MaximumCapacity,
-                sta.CurrentAvailable,
                 _autoScalercount.AcquisitionCount,
                 TimeSpan.Zero,
                 _intervalAutoScaler);
@@ -1032,11 +1029,11 @@ namespace RingBufferPlus
                 }
                 var resultCapacity = RedefineCapacity(newAvaliable, sta.CurrentCapacity);
 
-                if (metric.Capacity != resultCapacity || _triggerTaskAutoScaler)
+                if (metric.State.CurrentCapacity != resultCapacity || _triggerTaskAutoScaler)
                 {
                     _triggerTaskAutoScaler = false;
-                    LogRingBuffer($"{Alias} trigger AutoScale {metric.Capacity} to {resultCapacity}");
-                    AutoScalerCallback?.Invoke(this, new RingBufferAutoScaleEventArgs(Alias, metric.Capacity, resultCapacity, metric));
+                    LogRingBuffer($"{Alias} trigger AutoScale {metric.State.CurrentCapacity} to {resultCapacity}");
+                    AutoScalerCallback?.Invoke(this, new RingBufferAutoScaleEventArgs(Alias, metric.State.CurrentCapacity, resultCapacity, metric));
                 }
                 _autoScalercount.ResetCount();
             }

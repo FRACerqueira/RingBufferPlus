@@ -99,16 +99,17 @@ var build_rb = RingBuffer<MyClass>
                 .MinBuffer(2)
                 .MaxBuffer(10)
                 .AliasName("Test")
-                .AddRetryPolicyFactory(MyBuildPolicy<MyClass>())
-                .AddLinkedCurrentState(() => true)
+                .LinkedFailureState(() => true)
                 .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
                 .DefaultTimeoutAccquire(10)
                 .DefaultIntervalAutoScaler(500)
                 .DefaultIntervalHealthCheck(1000)
+                .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
                 .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
+                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
                    return 5;	
@@ -144,6 +145,13 @@ private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs
 }
 
 ```
+
+## Inspiration notes
+
+This work was inspired by the project by [**Luis Carlos Farias**](https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer). 
+
+My thanks for your great work of bringing knowledge to the community!
+
 
 ## Supported platforms
 [**Top**](#-welcome-to-ringbufferplus)

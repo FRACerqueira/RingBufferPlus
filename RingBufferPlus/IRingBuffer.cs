@@ -28,6 +28,8 @@ namespace RingBufferPlus
         bool HasUserpolicyAccquire { get; }
         bool HasUserHealthCheck { get; }
         bool HasUserAutoScaler { get; }
+        bool HasLinkedFailureState { get; }
+
     }
 
     public interface IRunningRingBuffer<T> : IPropertiesRingBuffer, IDisposable

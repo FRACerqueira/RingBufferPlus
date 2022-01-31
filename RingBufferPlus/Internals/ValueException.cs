@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Diagnostics.CodeAnalysis;
 
 namespace RingBufferPlus.Internals
 {
+    [ExcludeFromCodeCoverage]
     internal struct ValueException<T>
     {
         public ValueException()

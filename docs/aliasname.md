@@ -25,5 +25,3 @@ When not defined, the alias is set to "Ring Buffer.[type name <T>]".
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis)
-
-

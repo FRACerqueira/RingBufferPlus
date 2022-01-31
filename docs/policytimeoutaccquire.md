@@ -21,7 +21,6 @@ Notes: _**In all policies type the timeout count is performed.**_
 
 ```csharp
    IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null)
-   IRingBuffer<T> PolicyTimeoutAccquireAsync(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, Task<bool>>? userpolicy = null)
 ``` 
 
 ### Exception
@@ -37,5 +36,3 @@ When set to "UserPolicy" and the user-function is null or when set user-function
 [**Apis**](index.md#apis) |
 [**Timeout CallBack**](timeoutcallback.md) |
 [**RingBufferMetric**](metricclass.md)
-
-
