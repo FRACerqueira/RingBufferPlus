@@ -25,23 +25,23 @@
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|.net6|AnyCPU'">
-	  <WarningLevel>5</WarningLevel>
+		<WarningLevel>5</WarningLevel>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|.net6|AnyCPU'">
-	  <WarningLevel>5</WarningLevel>
+		<WarningLevel>5</WarningLevel>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Debug|.net5|AnyCPU'">
-	  <WarningLevel>4</WarningLevel>
+		<WarningLevel>4</WarningLevel>
 	</PropertyGroup>
 
 	<PropertyGroup Condition="'$(Configuration)|$(TargetFramework)|$(Platform)'=='Release|.net5|AnyCPU'">
-	  <WarningLevel>4</WarningLevel>
+		<WarningLevel>4</WarningLevel>
 	</PropertyGroup>
 
 	<ItemGroup Condition="'$(TargetFramework)'=='.net6'">
-	  <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
 	</ItemGroup>
 	<ItemGroup Condition="'$(TargetFramework)'=='.net5'">
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="5.0.0" />
@@ -49,22 +49,17 @@
 	<ItemGroup Condition="'$(TargetFramework)'=='netstandard2.1'">
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.1.22" />
 	</ItemGroup>
-	
-	<ItemGroup>
-		<Content Include="README.txt">
-			<Pack>true</Pack>
-			<PackagePath>README.txt</PackagePath>
-		</Content>
-	</ItemGroup>
-	
 	<ItemGroup>
 		<None Include="..\docs\images\icon.png">
-		  <Pack>True</Pack>
-		  <PackagePath>\</PackagePath>
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
 		</None>
-		<None Include="..\README.md" Pack="false" />
-		<None Include="..\NugetREADME.md" Pack="true" PackagePath="\" />
+		<None Include="..\NugetREADME.md">
+			<Pack>True</Pack>
+			<PackagePath>\</PackagePath>
+		</None>
+		<None Include="..\README.md">
+			<Pack>False</Pack>
+		</None>
 	</ItemGroup>
-
-
 </Project>

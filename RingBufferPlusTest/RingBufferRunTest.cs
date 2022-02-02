@@ -33,7 +33,8 @@ namespace RingBufferPlusTest
         public void Should_have_RunOk_with_facSync_default_autoScaler()
         {
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .Build();
 
@@ -61,7 +62,7 @@ namespace RingBufferPlusTest
             Assert.Equal(10, arg.Metric.State.CurrentCapacity);
             Assert.Equal(0, arg.Metric.ErrorCount);
             Assert.Equal(10, arg.Metric.State.MaximumCapacity);
-            Assert.Equal(10, arg.Metric.State.MinimumCapacity);
+            Assert.Equal(2, arg.Metric.State.MinimumCapacity);
             Assert.Equal(0, arg.Metric.OverloadCount);
             Assert.Equal(0, arg.Metric.State.CurrentRunning);
         }
@@ -70,7 +71,8 @@ namespace RingBufferPlusTest
         public void Should_have_RunOk_with_facAsync_default_autoScaler()
         {
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .Build();
 
@@ -97,7 +99,7 @@ namespace RingBufferPlusTest
             Assert.Equal(10, arg.Metric.State.CurrentCapacity);
             Assert.Equal(0, arg.Metric.ErrorCount);
             Assert.Equal(10, arg.Metric.State.MaximumCapacity);
-            Assert.Equal(10, arg.Metric.State.MinimumCapacity);
+            Assert.Equal(2, arg.Metric.State.MinimumCapacity);
             Assert.Equal(0, arg.Metric.OverloadCount);
             Assert.Equal(0, arg.Metric.State.CurrentRunning); 
         }
@@ -110,7 +112,8 @@ namespace RingBufferPlusTest
         public void Should_have_RunOk_with_factSync_userautoScaler(int cap, int max, int min, int newtarg, int result)
         {
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(cap)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MaxBuffer(max)
                 .MinBuffer(min)
                 .Factory((_) => new MyClassTest())
@@ -147,7 +150,8 @@ namespace RingBufferPlusTest
         public void Should_have_RunOk_with_factAsync_userautoScaler(int cap, int max, int min, int newtarg, int result)
         {
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(cap)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MaxBuffer(max)
                 .MinBuffer(min)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
@@ -179,7 +183,8 @@ namespace RingBufferPlusTest
         public void Should_have_exception_width_factSync_exception()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => throw new Exception())
                 .Build()
                 .Run();
@@ -193,7 +198,8 @@ namespace RingBufferPlusTest
             {
                 var triggerException = false;
                 var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .MaxBuffer(12)
                     .Factory((_) =>
                     {
@@ -230,7 +236,8 @@ namespace RingBufferPlusTest
             {
                 var triggerException = false;
                 var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .MaxBuffer(12)
                     .FactoryAsync((_) =>
                     {
@@ -267,7 +274,8 @@ namespace RingBufferPlusTest
         {
             var cnt = 0;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MinBuffer(8)
                 .Factory((_) =>
                 {
@@ -280,7 +288,7 @@ namespace RingBufferPlusTest
                 })
                 .Build()
                 .Run(); 
-            Assert.True(brb.CurrentState.FailureState);
+            Assert.False(brb.CurrentState.FailureState);
         }
 
 
@@ -289,11 +297,12 @@ namespace RingBufferPlusTest
         {
             var cnt = 0;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MinBuffer(8)
                 .FactoryAsync((_) =>
                 {
-                    if (cnt > 3)
+                    if (cnt > 1)
                     {
                         throw new Exception();
                     }
@@ -302,7 +311,7 @@ namespace RingBufferPlusTest
                 })
                 .Build()
                 .Run();
-            Assert.True(brb.CurrentState.FailureState);
+            Assert.False(brb.CurrentState.FailureState);
         }
 
         [Fact]
@@ -310,7 +319,8 @@ namespace RingBufferPlusTest
         {
             RingBufferMetric? runmetric = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .MetricsReport((metric, _) => { runmetric = metric; })
                 .DefaultIntervalReport(100)
@@ -344,7 +354,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .Factory((_) => new MyClassTest())
                     .MetricsReport((metric, _) =>
                     {
@@ -380,7 +391,8 @@ namespace RingBufferPlusTest
         {
             RingBufferMetric? runmetric = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .MetricsReportAsync(async (metric, _) =>
                 {
@@ -418,7 +430,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .Factory((_) => new MyClassTest())
                     .MetricsReportAsync(async (metric, _) =>
                     {
@@ -452,7 +465,8 @@ namespace RingBufferPlusTest
         {
             RingBufferMetric? runmetric = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .MetricsReport((metric, _) => { runmetric = metric; })
                 .DefaultIntervalReport(100)
@@ -486,7 +500,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .MetricsReport((metric, _) =>
                 {
@@ -521,7 +536,8 @@ namespace RingBufferPlusTest
         {
             RingBufferMetric? runmetric = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .MetricsReportAsync(async (metric, _) =>
                 {
@@ -559,7 +575,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var brb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                     .MetricsReportAsync(async (metric, _) =>
                     {
@@ -595,7 +612,8 @@ namespace RingBufferPlusTest
         {
             MyClassTest? hc = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .HealthCheck((buff, _) =>
                 {
@@ -630,7 +648,8 @@ namespace RingBufferPlusTest
         {
             MyClassTest? hc = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .HealthCheck((buff, _) =>
                 {
@@ -665,7 +684,8 @@ namespace RingBufferPlusTest
         {
             MyClassTest? hc = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .HealthCheckAsync(async (buff, _) =>
                 {
@@ -700,7 +720,8 @@ namespace RingBufferPlusTest
         {
             MyClassTest? hc = null;
             var brb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .HealthCheckAsync(async (buff, _) =>
                 {

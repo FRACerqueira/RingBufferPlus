@@ -48,6 +48,7 @@ namespace RingBufferPlus
     public interface IRingBuffer<T>
     {
         IRingBuffer<T> AliasName(string value);
+        IRingBuffer<T> InitialBuffer(int value);
         IRingBuffer<T> MinBuffer(int value);
         IRingBuffer<T> MaxBuffer(int value);
         IRingBuffer<T> LinkedFailureState(Func<bool> value);

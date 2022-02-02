@@ -10,7 +10,7 @@ namespace RingBufferPlus.ObjectValues
         {
         }
 
-        internal RingBufferMetric(RingBufferState state, string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, long succeededCount, TimeSpan timeexec, TimeSpan timebase) 
+        internal RingBufferMetric(RingBufferState state, string alias, long timeoutcount, long errorcount, long overloadcount, long acquisitioncount, long succeededCount, TimeSpan timeexec, TimeSpan timebase)
         {
             State = state;
             Alias = alias;

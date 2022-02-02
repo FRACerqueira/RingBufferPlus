@@ -15,22 +15,13 @@ namespace RingBufferPlusTest
         {
         }
 
-        [Fact]
-        public void Should_have_exception_Create_when_capacity_equal_zero()
-        {
-            var ex = Record.Exception(() =>
-            {
-                var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(0);
-            });
-            Assert.NotNull(ex);
-        }
 
         [Fact]
         public void Should_have_DefautValue_width_max_min_and_not_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MaxBuffer(20)
                 .MinBuffer(8)
                 .Factory((_) => new MyClassTest())
@@ -48,12 +39,13 @@ namespace RingBufferPlusTest
         public void Should_have_DefautValue_FactoryAync()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .Build();
             Assert.Equal(0, rb.CurrentState.CurrentAvailable);
             Assert.Equal(10, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
+            Assert.Equal(2, rb.MinimumCapacity);
             Assert.Equal(0, rb.CurrentState.CurrentCapacity);
             Assert.Equal(0, rb.CurrentState.CurrentRunning);
         }
@@ -62,7 +54,8 @@ namespace RingBufferPlusTest
         public void Should_have_DefautValue_timespan_HealthCheck_not_has_HealthCheck()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
@@ -73,7 +66,8 @@ namespace RingBufferPlusTest
         public void Should_have_DefautValue_timespan_HealthCheck_has_HealthCheck()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .HealthCheck((_, _) => true)
                 .Build();
@@ -87,7 +81,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .MinBuffer(11)
                     .Build();
             });
@@ -100,7 +95,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .MaxBuffer(9)
                     .Build();
             });
@@ -113,7 +109,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .Build();
             });
             Assert.NotNull(ex);
@@ -123,14 +120,15 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_MaxScaler_with_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MaxBuffer(20)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
                 .Build();
 
             Assert.Equal(20, rb.MaximumCapacity);
-            Assert.Equal(10, rb.MinimumCapacity);
+            Assert.Equal(2, rb.MinimumCapacity);
             Assert.Equal(10, rb.InitialCapacity);
         }
 
@@ -138,7 +136,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_logprovider()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .AddLogProvider(RingBufferLogLevel.Information, new LoggerFactory())
                 .Build();
@@ -150,7 +149,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept__not_logprovider()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.False(rb.HasLogging);
@@ -163,7 +163,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_MinScaler_with_autoscaler()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .MinBuffer(5)
                 .Factory((_) => new MyClassTest())
                 .AutoScaler((_, _) => 10)
@@ -176,7 +177,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_AliasName()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .AliasName("Test")
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -257,7 +259,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_PolicyTimeoutAccquire_Sync(Tuple<RingBufferPolicyTimeout, Func<RingBufferMetric, CancellationToken, bool>?> testcase)
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -273,7 +276,8 @@ namespace RingBufferPlusTest
             var ex = Record.Exception(() =>
             {
                 var rb = RingBuffer<MyClassTest>
-                    .CreateBuffer(10)
+                    .CreateBuffer()
+                    .InitialBuffer(10)
                     .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
                     .Factory((_) => new MyClassTest())
                     .Build();
@@ -285,7 +289,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_TimeoutAccquire()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .DefaultTimeoutAccquire(TimeSpan.FromMilliseconds(100))
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -296,7 +301,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_HealthCheckSync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .HealthCheck((_, _) => true)
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -308,7 +314,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_HealthCheckSync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .HealthCheck((_, _) => true)
                 .DefaultIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
@@ -321,7 +328,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_HealthCheckASync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .HealthCheckAsync((_, _) => Task.FromResult(true))
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -333,7 +341,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_HealthCheckASync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .HealthCheck((_, _) => true)
                 .DefaultIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
@@ -346,7 +355,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_AutoScalerSync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -358,7 +368,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_AutoScalerSync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .DefaultIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())
@@ -371,7 +382,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_AutoScalerASync_defaultInterval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .AutoScalerAsync((_, _) => Task.FromResult(10))
                 .Factory((_) => new MyClassTest())
                 .Build();
@@ -383,7 +395,8 @@ namespace RingBufferPlusTest
         public void Should_have_accept_width_AutoScalerASync_Interval()
         {
             var rb = RingBuffer<MyClassTest>
-                .CreateBuffer(10)
+                .CreateBuffer()
+                .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
                 .DefaultIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())

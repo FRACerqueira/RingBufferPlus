@@ -1,5 +1,4 @@
-﻿using System;
-using System.Diagnostics.CodeAnalysis;
+﻿using System.Diagnostics.CodeAnalysis;
 
 namespace RingBufferPlus.ObjectValues
 {
@@ -23,7 +22,7 @@ namespace RingBufferPlus.ObjectValues
             _hassick = true;
         }
 
-        internal RingBufferState(int currentRunning, int currentAvailable,int max,int min, bool hasSick)
+        internal RingBufferState(int currentRunning, int currentAvailable, int max, int min, bool hasSick)
         {
             _currentRunning = currentRunning;
             _currentAvailable = currentAvailable;
