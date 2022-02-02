@@ -87,9 +87,10 @@ namespace RingBufferPlus
 
         #region Constructor
 
-        public static IRingBuffer<T> CreateBuffer()
+        public static IRingBuffer<T> CreateBuffer(int value = 2)
         {
-            return new RingBuffer<T>(2);
+            if (value <= 1) throw new RingBufferException("InitialBuffer must be greater than 1");
+            return new RingBuffer<T>(value);
         }
 
         internal RingBuffer(int value)

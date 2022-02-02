@@ -23,8 +23,12 @@ RingBufferPlus was developed in c# with target frameworks:
 
 https://fracerqueira.github.io/RingBufferPlus
 
-**Relase Notes RingBufferPlus (V1.0.4-rc)**
-----------------------------------------
+**Relase Notes RingBufferPlus (V1.0.5-rc)**
+-------------------------------------------
+- Revised for extreme overload scenarios
+
+**Relase Notes RingBufferPlus (V1.0.0-rc)**
+-------------------------------------------
 
 - First public release (Jan/2022)
 
@@ -42,7 +46,8 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateBuffer(3)
+        .CreateBuffer() //default 2
+        .MaxBuffer(10)
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -88,7 +93,7 @@ public class MyClass : IDisposable
 
 var build_rb = RingBuffer<MyClass>
                 .CreateBuffer(5)
-                .MinBuffer(2)
+                .MinBuffer(3)
                 .MaxBuffer(10)
                 .AliasName("Test")
                 .LinkedFailureState(() => true)

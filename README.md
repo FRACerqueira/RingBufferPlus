@@ -47,7 +47,7 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateBuffer(3)
+        .CreateBuffer() //default 2
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -96,7 +96,7 @@ public class MyClass : IDisposable
 
 var build_rb = RingBuffer<MyClass>
                 .CreateBuffer(5)
-                .MinBuffer(2)
+                .MinBuffer(3)
                 .MaxBuffer(10)
                 .AliasName("Test")
                 .LinkedFailureState(() => true)
