@@ -4,6 +4,8 @@ using RingBufferPlus;
 using System;
 using System.Net;
 using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
 
 namespace DotNetProbes.Controllers
 {
@@ -24,10 +26,10 @@ namespace DotNetProbes.Controllers
         [HttpGet(Name = "GetPublisher")]
         [ProducesResponseType((int)HttpStatusCode.OK)]
         [ProducesResponseType((int)HttpStatusCode.InternalServerError)]
-        public ActionResult Get()
+        public async Task<ActionResult> Get(CancellationToken cancelatiotoken)
         {
             var messageBodyBytes = Encoding.UTF8.GetBytes("Hello World!");
-            using (var ctx = _runningRingBuffer.Accquire())
+            using (var ctx = _runningRingBuffer.Accquire(cancellation: cancelatiotoken))
             {
                 if (ctx.SucceededAccquire)
                 {
@@ -43,14 +45,14 @@ namespace DotNetProbes.Controllers
                             basicProperties: props,
                             body: messageBodyBytes);
                         ctx.Current.WaitForConfirmsOrDie();
-                        return Ok();
+                        return await Task.FromResult(Ok());
                     }
                     catch (Exception ex)
                     {
                         ctx.Invalidate(ex);
                     }
                 }
-                return StatusCode(500);
+                return await Task.FromResult(StatusCode(500));
             }
         }
 

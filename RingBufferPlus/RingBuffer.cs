@@ -133,14 +133,14 @@ namespace RingBufferPlus
 
         #region IRunningRingBuffer
 
-        public RingBufferValue<T> Accquire(TimeSpan? timeout = null)
+        public RingBufferValue<T> Accquire(TimeSpan? timeout = null, CancellationToken? cancellation = null)
         {
             var localtimeout = _timeoutAccquire;
             if (timeout.HasValue)
             {
                 localtimeout = timeout.Value;
             }
-            return _managerRingBuffer.ReadBuffer(localtimeout, _idleAccquire, _policytimeoutAccquire, _userpolicytimeoutAccquireFunc);
+            return _managerRingBuffer.ReadBuffer(localtimeout, _idleAccquire, _policytimeoutAccquire, _userpolicytimeoutAccquireFunc, cancellation);
         }
 
 

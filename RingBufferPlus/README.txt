@@ -24,8 +24,9 @@ RingBufferPlus was developed in c# with target frameworks:
 https://fracerqueira.github.io/RingBufferPlus
 
 **Relase Notes RingBufferPlus (V1.0.0)**
--------------------------------------------
-- Revised manager all events async 
+----------------------------------------
+- Revised all inertnals events to async/Threads 
+- Added external CancellationToken to method Accquire
 - Refactored method names for better understanding and standardization
 - Removed console project and created demo web project. Closer view of the real world
 - Revised Test project (in progress)

@@ -33,7 +33,7 @@ namespace RingBufferPlus
 
     public interface IRunningRingBuffer<T> : IPropertiesRingBuffer, IDisposable
     {
-        RingBufferValue<T> Accquire(TimeSpan? timeout = null);
+        RingBufferValue<T> Accquire(TimeSpan? timeout = null, CancellationToken? cancellation = null);
     }
 
     public interface IBuildRingBuffer<T> : IRunningRingBuffer<T>

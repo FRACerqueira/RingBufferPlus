@@ -260,7 +260,7 @@ namespace RingBufferPlus.Features
             _autoscalerBufferThread = new Thread(async () =>
             {
                 WriteLog(DateTime.Now, $"{_alias} AutoScaler Buffer Thread Running");
-                if (warmupAutoScaler.TotalMilliseconds > 0)
+                if (warmupAutoScaler.TotalMilliseconds > 0 && !_failureState)
                 {
                     WriteLog(DateTime.Now, $"{_alias} Warmup AutoScaler ({warmupAutoScaler.TotalMilliseconds})");
                     if (NaturalTimer.Delay(warmupAutoScaler, _stoptoken))
@@ -553,11 +553,21 @@ namespace RingBufferPlus.Features
             _reportBufferThread.IsBackground = true;
             _reportBufferThread.Start();
         }
-        public RingBufferValue<T> ReadBuffer(TimeSpan timeout, TimeSpan waitNextTry, RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null)
+        public RingBufferValue<T> ReadBuffer(TimeSpan timeout, TimeSpan waitNextTry, RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null, CancellationToken? usercancellation = null)
         {
             var timer = new NaturalTimer();
-            T tmpBufferElement;
             timer.ReStart();
+            var localtoken = _stoptoken;
+            if (usercancellation.HasValue)
+            {
+                localtoken = usercancellation.Value;
+            }
+            T tmpBufferElement;
+            if (_failureState)
+            {
+                Thread.MemoryBarrier();
+                _failureState = _availableBuffer.Count + _runningCount < 2;
+            }
             if (_failureState)
             {
                 timer.Stop();
@@ -574,14 +584,27 @@ namespace RingBufferPlus.Features
             timer.ReStart();
             while (!_availableBuffer.TryDequeue(out tmpBufferElement))
             {
-                if (NaturalTimer.Delay(waitNextTry, _stoptoken))
+                if (localtoken.IsCancellationRequested || _stoptoken.IsCancellationRequested)
                 {
+                    Exception ex = new RingBufferException($"{_alias} CancellationRequested {nameof(ReadBuffer)}");
                     return new RingBufferValue<T>(
                         _alias,
                         CreateState(),
                         (long)timer.TotalMilliseconds,
                         false,
-                        null,
+                        ex,
+                        default,
+                        RenewBuffer);
+                }
+                if (NaturalTimer.Delay(waitNextTry, localtoken))
+                {
+                    Exception ex = new RingBufferException($"{_alias} CancellationRequested {nameof(ReadBuffer)}");
+                    return new RingBufferValue<T>(
+                        _alias,
+                        CreateState(),
+                        (long)timer.TotalMilliseconds,
+                        false,
+                        ex,
                         default,
                         RenewBuffer);
                 }
@@ -624,7 +647,7 @@ namespace RingBufferPlus.Features
                         {
                             try
                             {
-                                var trigger = userpolicy?.Invoke(sta, _stoptoken) ?? false;
+                                var trigger = userpolicy?.Invoke(sta, localtoken) ?? false;
                                 if (trigger)
                                 {
                                     if (!blockeventTimeout.IsAddingCompleted)
@@ -636,7 +659,7 @@ namespace RingBufferPlus.Features
                             }
                             catch (OperationCanceledException)
                             {
-                                continue;
+                                //none
                             }
                             catch (Exception pex)
                             {
@@ -675,12 +698,19 @@ namespace RingBufferPlus.Features
         public RingBufferState CreateState(bool checklinkedFailureState = true)
         {
             var localfailureState = _failureState;
+            if (localfailureState)
+            {
+                Thread.MemoryBarrier();
+                _failureState = _availableBuffer.Count + _runningCount < 2;
+                localfailureState = _failureState;
+            }
             if (!localfailureState && checklinkedFailureState)
             {
                 if (_linkedFailureState != null)
                 {
                     try
                     {
+                        Thread.MemoryBarrier();
                         localfailureState = _linkedFailureState.Invoke();
                         _failureState = localfailureState;
                     }
