@@ -26,6 +26,8 @@ Ring buffer properties.
 	-  Interval for performing the HealthCheck of a buffer item.
 - IntervalAutoScaler
 	-  Interval for performing the AutoScaler of a buffer item.
+- WarmupAutoScaler
+	-  Interval for perform the first AutoScaler run.
 - IntervalReport
 	-  Interval for performing the Metric-Report of a buffer item.
 - TimeoutAccquire

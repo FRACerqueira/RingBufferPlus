@@ -16,6 +16,7 @@ namespace RingBufferPlus
         int MaximumCapacity { get; }
         TimeSpan IntervalHealthCheck { get; }
         TimeSpan IntervalAutoScaler { get; }
+        TimeSpan WarmupAutoScaler { get; }
         TimeSpan IntervalReport { get; }
         TimeSpan TimeoutAccquire { get; }
         TimeSpan IdleAccquire { get; }

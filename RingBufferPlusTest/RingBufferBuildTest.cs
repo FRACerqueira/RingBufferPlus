@@ -365,11 +365,12 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .SetIntervalAutoScaler(444)
+                .SetIntervalAutoScaler(444,222)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasAutoScaler);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
+            Assert.Equal(222, rb.WarmupAutoScaler.TotalMilliseconds);
         }
 
         [Fact]
@@ -392,11 +393,12 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .SetIntervalAutoScaler(444)
+                .SetIntervalAutoScaler(444,222)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasAutoScaler);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
+            Assert.Equal(222, rb.WarmupAutoScaler.TotalMilliseconds);
         }
 
     }

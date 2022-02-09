@@ -84,6 +84,7 @@ namespace RingBufferPlus
         public RingBufferPolicyTimeout PolicyTimeout => _policytimeoutAccquire;
         public TimeSpan IntervalHealthCheck => _intervalHealthCheck;
         public TimeSpan IntervalAutoScaler => _intervalAutoScaler;
+        public TimeSpan WarmupAutoScaler => _warmupAutoScaler;
         public TimeSpan IntervalReport => _intervalReport;
         public TimeSpan IdleAccquire => _idleAccquire;
         public TimeSpan TimeoutAccquire => _timeoutAccquire;

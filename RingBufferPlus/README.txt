@@ -27,6 +27,7 @@ https://fracerqueira.github.io/RingBufferPlus
 ----------------------------------------
 - Revised all inertnals events to async/Threads 
 - Added external CancellationToken to method Accquire
+- Added Warmup AutoScaler to fist run.
 - Refactored method names for better understanding and standardization
 - Removed console project and created demo web project. Closer view of the real world
 - Revised Test project (in progress)
