@@ -26,7 +26,7 @@ There is a capacity that is provided to the consumer that may or may not be modi
 As there may be resources that may become unavailable and/or invalid, the health status validation functionality was added and for critical failure scenarios, a pause for a retry (broken circuit). 
 As an extra resource, a metric-report functionality was created to monitor the performance of the component.
 
-[](images/DiagramRingBufferPlus.png)
+![](images/DiagramRingBufferPlus.png)
 
 ## Install
 [**Top**](#help)
