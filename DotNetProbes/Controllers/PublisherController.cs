@@ -13,7 +13,7 @@ namespace DotNetProbes.Controllers
     {
         private readonly IRunningRingBuffer<IModel> _runningRingBuffer;
 
-        public PublisherController(/*IConnectionFactory connectionFactory*/IRunningRingBuffer<IModel> runningRingBuffer)
+        public PublisherController(IRunningRingBuffer<IModel> runningRingBuffer)
         {
             if (_runningRingBuffer == null)
             {

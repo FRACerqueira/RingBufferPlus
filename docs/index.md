@@ -184,7 +184,7 @@ Title | Details
 [SetIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
 [SetIntervalAutoScaler](defaultintervalautoscaler.md) | Sets the default interval to perform auto-scaling of buffer items.
 [SetIntervalReport](defaultintervalreport.md) | Set the default interval to perform the metric reporting.
-[SetIntervalFailureState](defaultitervalopencircuit.md) | Sets the default interval to wait for a new open circuit check.
+[SetIntervalFailureState](defaultintervalfailurestate.md) | Sets the default interval to wait for check when state is failure.
 [Factory(Async)](factory.md) | Set create-function to an item in the buffer.
 [HealthCheck(Async)](healthcheck.md) | Set the integrity function to a buffer item.
 [AutoScaler(Async)](autoscaler.md) | Set the auto-scaling function of buffer items.
