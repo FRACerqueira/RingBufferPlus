@@ -1,8 +1,8 @@
 # <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus #  MetricsReport
 
 [**Main**](index.md#help) | 
-[**Apis**](index.md#apis) |
-[**RingBufferMetric**](metricclass.md)
+[**State**](currentstate.md) | 
+[**Apis**](index.md#apis)
 
 ## Documentation 
 Defines the action/fucntion that performs the Metric-Report.
@@ -19,10 +19,11 @@ Defines the action/fucntion that performs the Metric-Report.
 When action/fucntion is null.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links
 [**Main**](index.md#help) | 
-[**Apis**](index.md#apis) |
-[**RingBufferMetric**](metricclass.md)
+[**State**](currentstate.md) | 
+[**Apis**](index.md#apis)
+

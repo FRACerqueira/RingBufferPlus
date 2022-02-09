@@ -20,7 +20,7 @@ Should return true when successful, otherwise false.
 When function is null.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

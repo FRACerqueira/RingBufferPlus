@@ -4,23 +4,23 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Sets the default interval to run Auto-Scaler. 
+Sets the default interval to run the Auto-Scaler and warm-up to perform the first run. 
 
-When not set,  default interval is the same value of DefaultValues.IntervalScaler.
+When not set, the default interval is the same as DefaultValues.IntervalScaler and the warm-up is zero.
 
 ### Methods
 
 ```csharp
-  IRingBuffer<T> DefaultIntervalAutoScaler(long mileseconds)
-  IRingBuffer<T> DefaultIntervalAutoScaler(TimeSpan value)
+  IRingBuffer<T> SetIntervalAutoScaler(long mileseconds,long? warmup = null)
+  IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value,TimeSpan? warmup = null)
 ``` 
 
 ### Exception
 
-When default interval is less than or equal to zero.
+When values interval are less than or equal to zero.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

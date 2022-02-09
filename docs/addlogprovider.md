@@ -12,14 +12,14 @@ When logging is enabled, exceptions and warnings are generated even with callbac
 
 Set default log level to setter/information/trace. Error and warning log levels are not affected.
 
-- Trace
+- Trace (Default)
 - Debug
 - Information
 
 ### Methods
 
 ```csharp
-  IRingBuffer<T> AddLogProvider(RingBufferLogLevel defaultlevel, ILoggerFactory value)
+  IRingBuffer<T> AddLogProvider(ILoggerFactory value, RingBufferLogLevel defaultlevel = = RingBufferLogLevel.Trace)
 ```
 
 ### Exception

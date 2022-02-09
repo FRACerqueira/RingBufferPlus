@@ -7,17 +7,21 @@
 
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report.
 
+[](images/DiagramRingBufferPlus.png)
+
 ## Help
 - [Install](#install)
 - [Implementation Example](#implementation-example)
 - [Apis](#apis)
-- [Properties](properties.md)
+- [Extensions](#extensions)
 - [Supported Platforms](#supported-platforms)
 
-# Documentation
+# Basic concept
 
 A ring buffer is a memory allocation scheme where memory is reused (reclaimed) when an index, incremented modulo the buffer size, writes over a previously used location.
 A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
+
+# Implemented concept
 
 ## Install
 [**Top**](#help)
@@ -45,7 +49,7 @@ dotnet add package RingBufferPlus [--prerelease]
 
 ## Implementation Example
 
-A complete usage example can be seen in the [**RingBufferPlus - RabbitMQ**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/RingBufferPlusRabbit) project. This project is an implementation of RingBufferPlus for high volume publishing to RabbitMQ queues.
+A complete usage example can be seen in the [**RingBufferPlus with RabbitMQ**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/DotNetProbes) project. This project is an implementation of RingBufferPlus for high volume publishing to RabbitMQ queues.
 
 ### **RingBufferPlus - Sample Minimum Usage**
 [**Top**](#help)
@@ -62,7 +66,8 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-	.CreateBuffer(3)
+        .CreateBuffer() //default 2 (Initial/min/max)
+        .MaxBuffer(10)
         .Factory((ctk) => new MyClass())
         .Build()
         .Run();
@@ -73,7 +78,6 @@ using (var buffer = rb.Accquire())
 }
 
 rb.Dispose();
-
 ```
 
 ## **RingBufferPlus - Sample Complex Usage**
@@ -111,20 +115,20 @@ public class MyClass : IDisposable
 
 var build_rb = RingBuffer<MyClass>
                 .CreateBuffer(5)
-                .MinBuffer(2)
+                .MinBuffer(3)
                 .MaxBuffer(10)
                 .AliasName("Test")
+                .SetPolicyTimeout(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
+                .SetTimeoutAccquire(10)
+                .SetIntervalAutoScaler(500)
+                .SetIntervalHealthCheck(1000)
+                .SetIntervalFailureState(TimeSpan.FromSeconds(30))
+                .SetIntervalReport(1000)
                 .LinkedFailureState(() => true)
-                .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
-                .DefaultTimeoutAccquire(10)
-                .DefaultIntervalAutoScaler(500)
-                .DefaultIntervalHealthCheck(1000)
-                .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
-                .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
-                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
+                .AddLogProvider(_loggerFactory,RingBufferLogLevel.Information)
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
                    return 5;	
@@ -151,14 +155,13 @@ private void Ring_ErrorCallBack(object sender, RingBufferErrorEventArgs e)
 
 private void Ring_TimeoutCallBack(object sender, RingBufferTimeoutEventArgs e)
 {
-   Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount}");
+   Console.WriteLine($"{e.Alias} => TimeOut = {e.ElapsedTime}");
 }
 
 private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
 {
-   Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount}");
+   Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.");
 }
-
 ```
 
 ## Apis
@@ -170,12 +173,12 @@ Title | Details
 [AliasName](aliasname.md) | Set alias to RingBuffer.
 [MaxBuffer](maxbuffer.md) | Sets the maximum capacity of items in the buffer.
 [MinBuffer](minbuffer.md) | Sets the minimum capacity of items in the buffer..
-[PolicyTimeoutAccquire](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
-[DefaultTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
-[DefaultIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
-[DefaultIntervalAutoScaler](defaultintervalautoscaler.md) | Sets the default interval to perform auto-scaling of buffer items.
-[DefaultIntervalReport](defaultintervalreport.md) | Set the default interval to perform the metric reporting.
-[DefaultIntervalOpenCircuit](defaultitervalopencircuit.md) | Sets the default interval to wait for a new open circuit check.
+[SetPolicyTimeout](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.
+[SetTimeoutAccquire](defaulttimeoutaccquire.md) | Sets the default timeout for acquiring items from the buffer. 
+[SetIntervalHealthCheck](defaultintervalhealthcheck.md) | Sets the default interval for performing the Integrity Check on a buffer item. 
+[SetIntervalAutoScaler](defaultintervalautoscaler.md) | Sets the default interval to perform auto-scaling of buffer items.
+[SetIntervalReport](defaultintervalreport.md) | Set the default interval to perform the metric reporting.
+[SetIntervalFailureState](defaultitervalopencircuit.md) | Sets the default interval to wait for a new open circuit check.
 [Factory(Async)](factory.md) | Set create-function to an item in the buffer.
 [HealthCheck(Async)](healthcheck.md) | Set the integrity function to a buffer item.
 [AutoScaler(Async)](autoscaler.md) | Set the auto-scaling function of buffer items.
@@ -191,6 +194,10 @@ Title | Details
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
 [CurrentState class](currentstate.md) | Ring buffer CurrentState class details.
+
+## Extensions
+[**Top**](#help)
+
 
 ## Supported platforms
 [**Top**](#help)

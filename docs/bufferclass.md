@@ -26,6 +26,7 @@ Ring buffer return class details by Accquire method.
 	-  Error that occurred when acquisition fails
 - Invalidate()
 	-  Even with success status the returned object may be in an invalid state. For this scenario, this method tells the component not to return to the Buffer when the operation is finished.
+    -  This functionality will only take effect if the Succeeded Acquire property is true.
 
 ### **Hypothetical Use**
 ```csharp

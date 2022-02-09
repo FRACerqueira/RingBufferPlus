@@ -13,8 +13,10 @@ namespace RingBufferPlus.Exceptions
         internal RingBufferTimeoutException(string sourcode, long elapsedTime, string message) : base(message)
         {
             ElapsedTime = elapsedTime;
-            Source = sourcode;
+            Alias = sourcode;
         }
+
+        public string Alias { get; }
 
         public long ElapsedTime { get; }
     }

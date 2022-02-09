@@ -3,9 +3,9 @@ namespace RingBufferPlus.ObjectValues
 {
     public enum RingBufferPolicyTimeout
     {
-        MaximumCapacity,
+        Ignore,
         EveryTime,
-        UserPolicy,
-        Ignore
+        MaximumCapacity,
+        UserPolicy
     }
 }

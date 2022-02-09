@@ -14,20 +14,19 @@ namespace RingBufferPlus
         int InitialCapacity { get; }
         int MinimumCapacity { get; }
         int MaximumCapacity { get; }
-        TimeSpan WaitNextTry { get; }
         TimeSpan IntervalHealthCheck { get; }
         TimeSpan IntervalAutoScaler { get; }
         TimeSpan IntervalReport { get; }
         TimeSpan TimeoutAccquire { get; }
-        TimeSpan IntervalOpenCircuit { get; }
-
+        TimeSpan IdleAccquire { get; }
+        TimeSpan IntervalFailureState { get; }
         RingBufferPolicyTimeout PolicyTimeout { get; }
-        bool HasLogging { get; }
         LogLevel DefaultLogLevel { get; }
+        bool HasLogging { get; }
         bool HasReport { get; }
-        bool HasUserpolicyAccquire { get; }
-        bool HasUserHealthCheck { get; }
-        bool HasUserAutoScaler { get; }
+        bool HasPolicyTimeout { get; }
+        bool HasHealthCheck { get; }
+        bool HasAutoScaler { get; }
         bool HasLinkedFailureState { get; }
 
     }
@@ -52,18 +51,17 @@ namespace RingBufferPlus
         IRingBuffer<T> MinBuffer(int value);
         IRingBuffer<T> MaxBuffer(int value);
         IRingBuffer<T> LinkedFailureState(Func<bool> value);
-        IRingBuffer<T> PolicyTimeoutAccquire(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
-        IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value);
-        IRingBuffer<T> DefaultTimeoutAccquire(long mileseconds);
-        IRingBuffer<T> DefaultIntervalHealthCheck(TimeSpan value);
-        IRingBuffer<T> DefaultIntervalHealthCheck(long mileseconds);
-        IRingBuffer<T> DefaultIntervalAutoScaler(TimeSpan value);
-        IRingBuffer<T> DefaultIntervalAutoScaler(long mileseconds);
-        IRingBuffer<T> DefaultIntervalOpenCircuit(long mileseconds);
-        IRingBuffer<T> DefaultIntervalOpenCircuit(TimeSpan value);
-
-        IRingBuffer<T> DefaultIntervalReport(TimeSpan value);
-        IRingBuffer<T> DefaultIntervalReport(long mileseconds);
+        IRingBuffer<T> SetPolicyTimeout(RingBufferPolicyTimeout policy, Func<RingBufferMetric, CancellationToken, bool>? userpolicy = null);
+        IRingBuffer<T> SetTimeoutAccquire(TimeSpan value, TimeSpan? idle = null);
+        IRingBuffer<T> SetTimeoutAccquire(long mileseconds, long? idle = null);
+        IRingBuffer<T> SetIntervalHealthCheck(TimeSpan value);
+        IRingBuffer<T> SetIntervalHealthCheck(long mileseconds);
+        IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value,TimeSpan ? warmup = null);
+        IRingBuffer<T> SetIntervalAutoScaler(long mileseconds, long? warmup = null);
+        IRingBuffer<T> SetIntervalFailureState(long mileseconds);
+        IRingBuffer<T> SetIntervalFailureState(TimeSpan value);
+        IRingBuffer<T> SetIntervalReport(TimeSpan value);
+        IRingBuffer<T> SetIntervalReport(long mileseconds);
         IRingBuffer<T> Factory(Func<CancellationToken, T> value);
         IRingBuffer<T> FactoryAsync(Func<CancellationToken, Task<T>> value);
         IRingBuffer<T> HealthCheck(Func<T, CancellationToken, bool> value);
@@ -72,7 +70,7 @@ namespace RingBufferPlus
         IRingBuffer<T> AutoScalerAsync(Func<RingBufferMetric, CancellationToken, Task<int>> autoscaler);
         IRingBuffer<T> MetricsReport(Action<RingBufferMetric, CancellationToken> report);
         IRingBuffer<T> MetricsReportAsync(Func<RingBufferMetric, CancellationToken, Task> report);
-        IRingBuffer<T> AddLogProvider(RingBufferLogLevel defaultlevel, ILoggerFactory value);
+        IRingBuffer<T> AddLogProvider(ILoggerFactory value, RingBufferLogLevel defaultlevel = RingBufferLogLevel.Trace);
         IBuildRingBuffer<T> Build();
     }
 }

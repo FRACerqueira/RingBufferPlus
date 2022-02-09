@@ -26,13 +26,9 @@ namespace RingBufferPlusTest
                 .MinBuffer(8)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.Equal(0, rb.CurrentState.CurrentAvailable);
             Assert.Equal(20, rb.MaximumCapacity);
             Assert.Equal(8, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentState.CurrentCapacity);
             Assert.Equal(10, rb.InitialCapacity);
-            Assert.Equal(0, rb.CurrentState.CurrentRunning);
-
         }
 
         [Fact]
@@ -43,11 +39,8 @@ namespace RingBufferPlusTest
                 .InitialBuffer(10)
                 .FactoryAsync((_) => Task.FromResult(new MyClassTest()))
                 .Build();
-            Assert.Equal(0, rb.CurrentState.CurrentAvailable);
             Assert.Equal(10, rb.MaximumCapacity);
             Assert.Equal(2, rb.MinimumCapacity);
-            Assert.Equal(0, rb.CurrentState.CurrentCapacity);
-            Assert.Equal(0, rb.CurrentState.CurrentRunning);
         }
 
         [Fact]
@@ -59,7 +52,7 @@ namespace RingBufferPlusTest
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.False(rb.HasUserHealthCheck);
+            Assert.False(rb.HasHealthCheck);
         }
 
         [Fact]
@@ -72,7 +65,7 @@ namespace RingBufferPlusTest
                 .HealthCheck((_, _) => true)
                 .Build();
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
-            Assert.True(rb.HasUserHealthCheck);
+            Assert.True(rb.HasHealthCheck);
         }
 
         [Fact]
@@ -139,7 +132,7 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .Factory((_) => new MyClassTest())
-                .AddLogProvider(RingBufferLogLevel.Information, new LoggerFactory())
+                .AddLogProvider(new LoggerFactory(), RingBufferLogLevel.Information)
                 .Build();
             Assert.True(rb.HasLogging);
             Assert.Equal(LogLevel.Information, rb.DefaultLogLevel);
@@ -261,11 +254,11 @@ namespace RingBufferPlusTest
             var rb = RingBuffer<MyClassTest>
                 .CreateBuffer()
                 .InitialBuffer(10)
-                .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
+                .SetPolicyTimeout(testcase.Item1, testcase.Item2)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(testcase.Item1, rb.PolicyTimeout);
-            Assert.Equal(testcase.Item2 != null, rb.HasUserpolicyAccquire);
+            Assert.Equal(testcase.Item2 != null, rb.HasPolicyTimeout);
         }
 
 
@@ -278,7 +271,7 @@ namespace RingBufferPlusTest
                 var rb = RingBuffer<MyClassTest>
                     .CreateBuffer()
                     .InitialBuffer(10)
-                    .PolicyTimeoutAccquire(testcase.Item1, testcase.Item2)
+                    .SetPolicyTimeout(testcase.Item1, testcase.Item2)
                     .Factory((_) => new MyClassTest())
                     .Build();
             });
@@ -291,10 +284,11 @@ namespace RingBufferPlusTest
             var rb = RingBuffer<MyClassTest>
                 .CreateBuffer()
                 .InitialBuffer(10)
-                .DefaultTimeoutAccquire(TimeSpan.FromMilliseconds(100))
+                .SetTimeoutAccquire(100, 10)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.Equal(TimeSpan.FromMilliseconds(100), rb.TimeoutAccquire);
+            Assert.Equal(TimeSpan.FromMilliseconds(10), rb.IdleAccquire);
         }
 
         [Fact]
@@ -306,7 +300,7 @@ namespace RingBufferPlusTest
                 .HealthCheck((_, _) => true)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserHealthCheck);
+            Assert.True(rb.HasHealthCheck);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
         }
 
@@ -317,10 +311,10 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .HealthCheck((_, _) => true)
-                .DefaultIntervalHealthCheck(333)
+                .SetIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserHealthCheck);
+            Assert.True(rb.HasHealthCheck);
             Assert.Equal(333, rb.IntervalHealthCheck.TotalMilliseconds);
         }
 
@@ -333,7 +327,7 @@ namespace RingBufferPlusTest
                 .HealthCheckAsync((_, _) => Task.FromResult(true))
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserHealthCheck);
+            Assert.True(rb.HasHealthCheck);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
         }
 
@@ -344,10 +338,10 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .HealthCheck((_, _) => true)
-                .DefaultIntervalHealthCheck(333)
+                .SetIntervalHealthCheck(333)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserHealthCheck);
+            Assert.True(rb.HasHealthCheck);
             Assert.Equal(333, rb.IntervalHealthCheck.TotalMilliseconds);
         }
 
@@ -360,7 +354,7 @@ namespace RingBufferPlusTest
                 .AutoScaler((_, _) => 10)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserAutoScaler);
+            Assert.True(rb.HasAutoScaler);
             Assert.Equal(DefaultValues.IntervalScaler, rb.IntervalAutoScaler);
         }
 
@@ -371,10 +365,10 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .DefaultIntervalAutoScaler(444)
+                .SetIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserAutoScaler);
+            Assert.True(rb.HasAutoScaler);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
         }
 
@@ -387,7 +381,7 @@ namespace RingBufferPlusTest
                 .AutoScalerAsync((_, _) => Task.FromResult(10))
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserAutoScaler);
+            Assert.True(rb.HasAutoScaler);
             Assert.Equal(DefaultValues.IntervalHealthcheck, rb.IntervalHealthCheck);
         }
 
@@ -398,10 +392,10 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .DefaultIntervalAutoScaler(444)
+                .SetIntervalAutoScaler(444)
                 .Factory((_) => new MyClassTest())
                 .Build();
-            Assert.True(rb.HasUserAutoScaler);
+            Assert.True(rb.HasAutoScaler);
             Assert.Equal(444, rb.IntervalAutoScaler.TotalMilliseconds);
         }
 

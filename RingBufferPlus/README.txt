@@ -23,14 +23,13 @@ RingBufferPlus was developed in c# with target frameworks:
 
 https://fracerqueira.github.io/RingBufferPlus
 
-**Relase Notes RingBufferPlus (V1.0.5-rc)**
+**Relase Notes RingBufferPlus (V1.0.0)**
 -------------------------------------------
-- Revised for extreme overload scenarios
-
-**Relase Notes RingBufferPlus (V1.0.0-rc)**
--------------------------------------------
-
-- First public release (Jan/2022)
+- Revised manager all events async 
+- Refactored method names for better understanding and standardization
+- Removed console project and created demo web project. Closer view of the real world
+- Revised Test project (in progress)
+- Revised documentation (in progress)
 
 **RingBufferPlus - Sample Minimum Usage**
 -----------------------------------------
@@ -46,7 +45,7 @@ public class MyClass
 }
 
 var rb = RingBuffer<MyClass>
-        .CreateBuffer() //default 2
+        .CreateBuffer() //default 2 (Initial/min/max)
         .MaxBuffer(10)
         .Factory((ctk) => new MyClass())
         .Build()
@@ -96,17 +95,17 @@ var build_rb = RingBuffer<MyClass>
                 .MinBuffer(3)
                 .MaxBuffer(10)
                 .AliasName("Test")
+                .SetPolicyTimeout(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
+                .SetTimeoutAccquire(10)
+                .SetIntervalAutoScaler(500)
+                .SetIntervalHealthCheck(1000)
+                .SetIntervalFailureState(TimeSpan.FromSeconds(30))
+                .SetIntervalReport(1000)
                 .LinkedFailureState(() => true)
-                .PolicyTimeoutAccquire(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
-                .DefaultTimeoutAccquire(10)
-                .DefaultIntervalAutoScaler(500)
-                .DefaultIntervalHealthCheck(1000)
-                .DefaultIntervalOpenCircuit(TimeSpan.FromSeconds(30))
-                .DefaultIntervalReport(1000)
                 .Factory((ctk) => New MyClass() )
                 .HealthCheck((buffer, ctk) => buffer.IsValidState)
                 .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
-                .AddLogProvider(RingBufferLogLevel.Information, _loggerFactory)
+                .AddLogProvider(_loggerFactory,RingBufferLogLevel.Information)
                 .AutoScaler((RingBufferMetric, CancellationToken) =>
                 {
                    return 5;	
@@ -133,10 +132,10 @@ private void Ring_ErrorCallBack(object sender, RingBufferErrorEventArgs e)
 
 private void Ring_TimeoutCallBack(object sender, RingBufferTimeoutEventArgs e)
 {
-   Console.WriteLine($"{e.Alias}/{e.Source} => TimeOut = {e.ElapsedTime}/{e.Timeout} Erros={e.Metric.ErrorCount}");
+   Console.WriteLine($"{e.Alias} => TimeOut = {e.ElapsedTime}");
 }
 
 private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
 {
-   Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.Error/Timeout = {e.Metric.ErrorCount}/{e.Metric.TimeoutCount}");
+   Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.");
 }

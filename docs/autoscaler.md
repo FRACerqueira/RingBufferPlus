@@ -21,8 +21,10 @@ Should return new target capacity for the buffer. When resizing occurs, the [Aut
 
 When function is null.
 
+If the user throws an exception it will be registered in the error event but it will not work in the next execution.
+
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

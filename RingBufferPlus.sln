@@ -5,8 +5,6 @@ VisualStudioVersion = 17.0.32014.148
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlus", "RingBufferPlus\RingBufferPlus.csproj", "{C5419815-EE14-4A96-8A5A-88D57A36DDD4}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusRabbit", "RingBufferPlusRabbit\RingBufferPlusRabbit.csproj", "{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusTest", "RingBufferPlusTest\RingBufferPlusTest.csproj", "{C53D3D66-0233-4F48-BA33-FF41023D91E0}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
@@ -42,8 +40,11 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Images", "Images", "{A5340B5A-0CAD-4CC0-956D-6CE07686B431}"
 	ProjectSection(SolutionItems) = preProject
+		docs\images\DiagramRingBufferPlus.png = docs\images\DiagramRingBufferPlus.png
 		docs\images\icon.png = docs\images\icon.png
 	EndProjectSection
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DotNetProbes", "DotNetProbes\DotNetProbes.csproj", "{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -55,14 +56,14 @@ Global
 		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{5FA96D7C-BD40-44C3-9B87-4F3CCFE38E30}.Release|Any CPU.Build.0 = Release|Any CPU
 		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

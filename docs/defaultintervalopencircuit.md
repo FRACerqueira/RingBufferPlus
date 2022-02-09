@@ -4,15 +4,15 @@
 [**Apis**](index.md#apis)
 
 ## Documentation
-Sets the default interval to wait for a new open circuit check.
+Sets the default interval when it enters a major fault state.
 
-When not set,  default interval is the same value of DefaultValues.IntervalOpenCircuit.
+When not set,  default interval is the same value of DefaultValues.IntervalFailureState.
 
 ### Methods
 
 ```csharp
-  IRingBuffer<T> DefaultIntervalOpenCircuit(long mileseconds)
-  IRingBuffer<T> DefaultIntervalOpenCircuit(TimeSpan value)
+  IRingBuffer<T> SetIntervalFailureState(long mileseconds)
+  IRingBuffer<T> SetIntervalFailureState(TimeSpan value)
 ``` 
 
 ### Exception
@@ -20,7 +20,7 @@ When not set,  default interval is the same value of DefaultValues.IntervalOpenC
 When default interval is less than or equal to zero.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links
