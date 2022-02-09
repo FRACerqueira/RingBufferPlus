@@ -8,19 +8,19 @@
 A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report.
 
 ## Help
+
 - [Install](#install)
-- [Functional Diagram](#functional-diagram)
 - [Implementation Example](#implementation-example)
 - [Apis](#apis)
-- [Extensions](#extensions)
 - [Supported Platforms](#supported-platforms)
 
-# Basic concept
+## Basic concept
 
 A ring buffer is a memory allocation scheme where memory is reused (reclaimed) when an index, incremented modulo the buffer size, writes over a previously used location.
 A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
 
-# Implemented concept
+### Implemented concept
+
 The implementation follows the basic principle. 
 There is a capacity that is provided to the consumer that may or may not be modified to optimize the consumption of used resources. 
 As there may be resources that may become unavailable and/or invalid, the health status validation functionality was added and for critical failure scenarios, a pause for a retry (broken circuit). 
@@ -52,12 +52,8 @@ dotnet add package RingBufferPlus [--prerelease]
 
 **_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
 
-## Functional diagram
-[**Top**](#help)
-
-![](./images/DiagramRingBufferPlus.png)
-
 ## Implementation Example
+[**Top**](#help)
 
 A complete usage example can be seen in the [**RingBufferPlus with RabbitMQ**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/DotNetProbes) project. This project is an implementation of RingBufferPlus for high volume publishing to RabbitMQ queues.
 
@@ -90,7 +86,7 @@ using (var buffer = rb.Accquire())
 rb.Dispose();
 ```
 
-## **RingBufferPlus - Sample Complex Usage**
+### **RingBufferPlus - Sample Complex Usage**
 [**Top**](#help)
 
 ```csharp
@@ -205,10 +201,6 @@ Title | Details
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
 [CurrentState class](currentstate.md) | Ring buffer CurrentState class details.
-
-## Extensions
-[**Top**](#help)
-
 
 ## Supported platforms
 [**Top**](#help)
