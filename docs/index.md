@@ -192,11 +192,11 @@ Title | Details
 [MetricsReport(Async)](metricsreport.md) | Set action for metrics report.
 [AddLogProvider](addlogprovider.md) | Set log provider and default message level.
 [LinkedFailureState](linkedfailurestate.md) | Extra function to set state "FailureState" in CurrentState.
-[Build](ringbufferbuild.md) | Executes and validates all commands, provides the events to be configured and the execution command.
+[Build](ringbufferbuild.md) | Validates all commands and provides the events to be configured.
 [ErrorCallBack](errorcallback.md) | Error return event.
 [TimeoutCallBack](timeoutcallback.md) | Timeout return event.
 [AutoScaleCallback](autoscalecallback.md) | Auto-Scaler return event.
-[Run](ringbufferrun.md) | Performs instance creation and provides command to acquire buffer item.
+[Run](ringbufferrun.md) | Runs the instance and gives the command to acquire the item from the buffer.
 [Accquire](accquire.md) | Acquire an item from the buffer.
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
