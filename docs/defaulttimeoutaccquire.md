@@ -1,26 +1,26 @@
-# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus # DefaultTimeoutAccquire
+# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus # SetTimeoutAccquire
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis)
 
 ## Documentation
-Sets the default Timeout for  accquire items in the buffer.
+Sets the default timeout for acquiring items in the buffer and the wait time between attempts.
 
-When not set,  default Timeout is the same value of DefaultValues.TimeoutAccquire.
+When not set,  default Timeout is the same value of DefaultValues.TimeoutAccquire and DefaultValues.WaitTimeAvailable.
 
 ### Methods
 
 ```csharp
-  IRingBuffer<T> DefaultTimeoutAccquire(long mileseconds)
-  IRingBuffer<T> DefaultTimeoutAccquire(TimeSpan value)
+  IRingBuffer<T> SetTimeoutAccquire(long mileseconds, long? idle = null)
+  IRingBuffer<T> SetTimeoutAccquire(TimeSpan value, TimeSpan? idle = null)
 ``` 
 
 ### Exception
 
-When default Timeout is less than or equal to zero.
+When values are less than or equal to zero.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

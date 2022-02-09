@@ -3,7 +3,7 @@
 namespace RingBufferPlus.ObjectValues
 {
     [ExcludeFromCodeCoverage]
-    public struct RingBufferState
+    public class RingBufferState
     {
         private readonly int _currentRunning;
         private readonly int _currentAvailable;
@@ -12,7 +12,7 @@ namespace RingBufferPlus.ObjectValues
         private readonly int _max;
         private readonly int _min;
 
-        public RingBufferState()
+        internal RingBufferState()
         {
             _currentRunning = 0;
             _currentAvailable = 0;

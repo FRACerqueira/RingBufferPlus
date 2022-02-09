@@ -7,12 +7,12 @@ namespace RingBufferPlus.Events
         private RingBufferErrorEventArgs()
         {
         }
-        internal RingBufferErrorEventArgs(string alias, Exception? ex)
+        internal RingBufferErrorEventArgs(string alias, Exception ex)
         {
             Alias = alias;
             Error = ex;
         }
         public string Alias { get; }
-        public Exception? Error { get; }
+        public Exception Error { get; }
     }
 }

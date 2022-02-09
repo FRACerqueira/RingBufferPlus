@@ -12,15 +12,15 @@ When not set, MaxBuffer is the same value of [CreateBuffer](createbuffer.md).
 ### Methods
 
 ```csharp
-  IRingBuffer<T> MaxScaler(int value)
+  IRingBuffer<T> MaxBuffer(int value)
 ``` 
 
 ### Exception
 
-When MaxBuffer is less than or equal to zero.
+When MaxBuffer is less than to 2.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

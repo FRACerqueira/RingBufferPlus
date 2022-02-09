@@ -19,7 +19,7 @@ When not defined, the alias is set to "Ring Buffer.[type name <T>]".
  When alias is null or empty.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

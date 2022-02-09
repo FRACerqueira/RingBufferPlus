@@ -18,7 +18,7 @@ Defines the function to create an instance in the buffer.
 When function is null.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

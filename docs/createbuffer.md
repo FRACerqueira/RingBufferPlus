@@ -6,18 +6,20 @@
 ## Documentation
 Sets the initital capacity of items in the buffer and return new instance of IRingBuffer.
 
+The properties InitialCapacity, MinimumCapacity and MaximumCapacity are given the same value.
+
 ### Methods
 
 ```csharp
-  static IRingBuffer<T> CreateBuffer(int value)
+  static IRingBuffer<T> CreateBuffer(int value = 2)
 ``` 
 
 ### Exception
 
-When initital capacity is less than or equal to zero.
+When initital capacity is less than 2.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

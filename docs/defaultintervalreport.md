@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus #  DefaultIntervalReport
+# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus #  SetIntervalReport
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis)
@@ -11,8 +11,8 @@ When not set,  default interval is the same value of DefaultValues.IntervalRepor
 ### Methods
 
 ```csharp
-  IRingBuffer<T> DefaultIntervalReport(long mileseconds)
-  IRingBuffer<T> DefaultIntervalReport(TimeSpan value)
+  IRingBuffer<T> SetIntervalReport(long mileseconds)
+  IRingBuffer<T> SetIntervalReport(TimeSpan value)
 ``` 
 
 ### Exception
@@ -20,7 +20,7 @@ When not set,  default interval is the same value of DefaultValues.IntervalRepor
 When default interval is less than or equal to zero.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links

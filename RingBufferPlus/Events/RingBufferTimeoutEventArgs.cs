@@ -9,18 +9,16 @@ namespace RingBufferPlus.Events
         private RingBufferTimeoutEventArgs()
         {
         }
-        internal RingBufferTimeoutEventArgs(string alias, string source, long elapsedTime, long timeout, RingBufferMetric metricInfo)
+        internal RingBufferTimeoutEventArgs(string alias, long elapsedtime, long timeout, RingBufferState state)
         {
             Alias = alias;
-            Source = source;
-            Metric = metricInfo;
-            ElapsedTime = elapsedTime;
+            ElapsedTime = elapsedtime;
             Timeout = timeout;
+            State = state;
         }
-        public string Source { get; }
+        public RingBufferState State { get; set; }
         public long ElapsedTime { get; }
         public long Timeout { get; }
         public string Alias { get; }
-        public RingBufferMetric Metric { get; }
     }
 }

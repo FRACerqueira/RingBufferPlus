@@ -30,21 +30,28 @@ namespace RingBufferPlus.ObjectValues
         public string Alias { get; }
         public bool SucceededAccquire { get; }
         public T Current { get; }
-        public Exception Error { get; }
+        public Exception Error { get; private set; }
 
-        internal bool SkiptTurnback { get; set; }
+        internal bool HasTurnback => _turnback != null;
+        internal bool SkipTurnback { get; set; }
         internal TimeSpan ElapsedExecute
         {
             get
             {
-                _timer.Stop();
                 return _timer.Elapsed;
             }
         }
 
-        public void Invalidate()
+        public void Invalidate(Exception? exception = null)
         {
-            SkiptTurnback = true;
+            if (!SucceededAccquire)
+            {
+                if (exception != null)
+                {
+                    Error = exception;
+                }
+                SkipTurnback = true;
+            }
         }
         protected virtual void Dispose(bool disposing)
         {
@@ -52,6 +59,7 @@ namespace RingBufferPlus.ObjectValues
             {
                 if (disposing)
                 {
+                    _timer.Stop();
                     _turnback?.Invoke(this);
                     disposedValue = true;
                 }

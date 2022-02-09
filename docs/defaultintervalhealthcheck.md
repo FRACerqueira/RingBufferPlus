@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus #  DefaultIntervalHealthCheck
+# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus #  SetIntervalHealthCheck
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis)
@@ -11,8 +11,8 @@ When not set,  default interval is the same value of DefaultValues.IntervalHealt
 ### Methods
 
 ```csharp
-  IRingBuffer<T> DefaultIntervalHealthCheck(long mileseconds)
-  IRingBuffer<T> DefaultIntervalHealthCheck(TimeSpan value)
+  IRingBuffer<T> SetIntervalHealthCheck(long mileseconds)
+  IRingBuffer<T> SetIntervalHealthCheck(TimeSpan value)
 ``` 
 
 ### Exception
@@ -20,7 +20,7 @@ When not set,  default interval is the same value of DefaultValues.IntervalHealt
 When default interval is less than or equal to zero.
 
 ```csharp
-  RingBufferFatalException
+  RingBufferException
 ``` 
 
 ### Links
