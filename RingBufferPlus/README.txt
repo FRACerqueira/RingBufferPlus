@@ -25,12 +25,12 @@ https://fracerqueira.github.io/RingBufferPlus
 
 **Relase Notes RingBufferPlus (V1.0.0)**
 ----------------------------------------
-- Revised all inertnals events to async/Threads 
-- Added external CancellationToken to method Accquire
-- Added Warmup AutoScaler to fist run.
+- Revised all internal events for async/Threads
+- Added external CancellationToken to Acquire method
+- Added Warmup AutoScaler to delay the first run.
 - Refactored method names for better understanding and standardization
-- Removed console project and created demo web project. Closer view of the real world
-- Revised Test project (in progress)
+- Console project removed and demo web project created. Closer view of the real world
+- Revised test project (in progress)
 - Revised documentation (in progress)
 
 **RingBufferPlus - Sample Minimum Usage**
