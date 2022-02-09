@@ -2,7 +2,6 @@
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Alias**](aliasname.md) |
 [current state](currentstate.md)
 
 ## Documentation
@@ -57,6 +56,6 @@ using (var ctx = ring.Accquire())
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Alias**](aliasname.md) |
 [current state](currentstate.md)
+
 

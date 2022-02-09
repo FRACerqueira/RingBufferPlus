@@ -2,7 +2,6 @@
 
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Alias**](aliasname.md) |
 [**Metric**](metricclass) 
 
 ## Documentation
@@ -24,7 +23,6 @@ When a scaling of the ring buffer capacity occurs, this event is triggered by se
 ### Links
 [**Main**](index.md#help) | 
 [**Apis**](index.md#apis) |
-[**Alias**](aliasname.md) |
 [**Metric**](metricclass) 
 
 
