@@ -11,6 +11,7 @@ A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and
 
 ## Help
 - [Install](#install)
+- [Functional Diagram](#functional-diagram)
 - [Implementation Example](#implementation-example)
 - [Apis](#apis)
 - [Extensions](#extensions)
@@ -46,6 +47,11 @@ dotnet add package RingBufferPlus [--prerelease]
 ```
 
 **_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
+
+## Functional diagram
+[**Top**](#help)
+
+![](./images/DiagramRingBufferPlus.png)
 
 ## Implementation Example
 

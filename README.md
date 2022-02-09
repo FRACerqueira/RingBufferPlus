@@ -32,9 +32,14 @@ The project in the folder **DotNetProbes** contains the samples with RabbitMQ(pu
 dotnet run --project DotNetProbes
 ```
 
+## Functional diagram
+[**Top**](#-welcome-to-ringbufferplus)
+
+![](./docs/images/DiagramRingBufferPlus.png)
+
 ## Usage
 
-## **RingBufferPlus - Sample Minimum Usage**
+### **RingBufferPlus - Sample Minimum Usage**
 [**Top**](#-welcome-to-ringbufferplus)
 
 ```csharp
@@ -63,7 +68,7 @@ using (var buffer = rb.Accquire())
 rb.Dispose();
 ```
 
-## **RingBufferPlus - Sample Complex Usage**
+### **RingBufferPlus - Sample Complex Usage**
 [**Top**](#-welcome-to-ringbufferplus)
 
 ```csharp
