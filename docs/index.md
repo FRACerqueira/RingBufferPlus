@@ -177,6 +177,7 @@ Title | Details
 --- | ---
 [CreateBuffer](createbuffer.md) | Create new instance of IRingBuffer and sets the initial capacity of items in the buffer.
 [AliasName](aliasname.md) | Set alias to RingBuffer.
+[InitialBuffer](initialbuffer.md) | Sets the initial capacity of items in the buffer.
 [MaxBuffer](maxbuffer.md) | Sets the maximum capacity of items in the buffer.
 [MinBuffer](minbuffer.md) | Sets the minimum capacity of items in the buffer..
 [SetPolicyTimeout](policytimeoutaccquire.md) | Sets the timeout policy for acquiring items from the buffer.

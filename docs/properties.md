@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus # RingBuffer Properties
+# <img align="left" width="100" height="100" src="./images/icon.png"> RingBufferPlus # Properties
 
 [**Main**](index.md#help) | 
 [**State**](currentstate.md) | 
