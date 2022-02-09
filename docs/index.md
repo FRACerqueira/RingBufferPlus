@@ -42,15 +42,6 @@ dotnet add package RingBufferPlus [--prerelease]
 ```
 
 **_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
-```
-Install-Package RingBufferPlus [-pre]
-```
-
-```
-dotnet add package RingBufferPlus [--prerelease]
-```
-
-**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
 
 ## Implementation Example
 [**Top**](#help)
