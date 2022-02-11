@@ -92,9 +92,9 @@ namespace DotNetProbes
             app.MapControllers();
 
             //warmup IConnection
-            app.Services.WarmupRingBuffer<IConnection>();
+            app.Services.WarmupRingBuffer<IConnection>(true);
             //warmup IModel
-            app.Services.WarmupRingBuffer<IModel>();
+            app.Services.WarmupRingBuffer<IModel>(true);
 
             await app.RunAsync();
         }

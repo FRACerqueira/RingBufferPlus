@@ -586,7 +586,16 @@ namespace RingBufferPlus.Features
             {
                 if (localtoken.IsCancellationRequested || _stoptoken.IsCancellationRequested)
                 {
-                    Exception ex = new RingBufferException($"{_alias} CancellationRequested {nameof(ReadBuffer)}");
+                    string source;
+                    if (_stoptoken.IsCancellationRequested)
+                    {
+                        source = "RingBuffer";
+                    }
+                    else
+                    {
+                        source = "Consumer";
+                    }
+                    var ex = new RingBufferException($"{_alias} {source} CancellationRequested {nameof(ReadBuffer)}");
                     return new RingBufferValue<T>(
                         _alias,
                         CreateState(),
@@ -598,7 +607,16 @@ namespace RingBufferPlus.Features
                 }
                 if (NaturalTimer.Delay(waitNextTry, localtoken))
                 {
-                    Exception ex = new RingBufferException($"{_alias} CancellationRequested {nameof(ReadBuffer)}");
+                    string source;
+                    if (_stoptoken.IsCancellationRequested)
+                    {
+                        source = "RingBuffer";
+                    }
+                    else
+                    {
+                        source = "Consumer";
+                    }
+                    Exception ex = new RingBufferException($"{_alias} {source} CancellationRequested {nameof(ReadBuffer)}");
                     return new RingBufferValue<T>(
                         _alias,
                         CreateState(),

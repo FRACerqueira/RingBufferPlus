@@ -25,6 +25,7 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3
 		docs\errorcallback.md = docs\errorcallback.md
 		docs\factory.md = docs\factory.md
 		docs\healthcheck.md = docs\healthcheck.md
+		docs\hostingextensions.md = docs\hostingextensions.md
 		docs\index.md = docs\index.md
 		docs\initialbuffer.md = docs\initialbuffer.md
 		docs\linkedfailurestate.md = docs\linkedfailurestate.md

@@ -192,7 +192,7 @@ Title | Details
 [Metric class](metricclass.md) | Metric class details.
 [Buffer class](bufferclass.md) | Ring buffer return class details by Accquire method.
 [CurrentState class](currentstate.md) | Ring buffer CurrentState class details.
-
+[HostingExtensions](hostingextensions.md) | Ring buffer extension for .net core dependency injection
 ## Supported platforms
 [**Top**](#help)
 
