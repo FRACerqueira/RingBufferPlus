@@ -4,9 +4,9 @@ using System.Diagnostics.CodeAnalysis;
 namespace RingBufferPlus.ObjectValues
 {
     [ExcludeFromCodeCoverage]
-    public class RingBufferMetric
+    public struct RingBufferMetric
     {
-        private RingBufferMetric()
+        public RingBufferMetric()
         {
         }
 

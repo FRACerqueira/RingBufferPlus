@@ -57,7 +57,7 @@ namespace RingBufferPlus
         IRingBuffer<T> SetTimeoutAccquire(long mileseconds, long? idle = null);
         IRingBuffer<T> SetIntervalHealthCheck(TimeSpan value);
         IRingBuffer<T> SetIntervalHealthCheck(long mileseconds);
-        IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value,TimeSpan ? warmup = null);
+        IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value, TimeSpan? warmup = null);
         IRingBuffer<T> SetIntervalAutoScaler(long mileseconds, long? warmup = null);
         IRingBuffer<T> SetIntervalFailureState(long mileseconds);
         IRingBuffer<T> SetIntervalFailureState(TimeSpan value);

@@ -65,12 +65,12 @@ namespace DotNetProbes
                 var cnnfactory = service.GetService<IConnectionFactory>();
                 return ringbuffer
                     .InitialBuffer(20)
-                    .MinBuffer(2)
-                    .SetTimeoutAccquire(5000)
+                    .MinBuffer(5)
+                    .SetTimeoutAccquire(1000)
                     .LinkedFailureState(() => rbc.CurrentState.FailureState)
                     .Factory((ctk) => CreateModel(rbc))
                     .HealthCheck((model, ctk) => HCModel(model))
-                    .SetIntervalAutoScaler(DefaultValues.IntervalScaler,TimeSpan.FromSeconds(30))
+                    .SetIntervalAutoScaler(DefaultValues.IntervalScaler, TimeSpan.FromSeconds(30))
                     .AutoScaler(MyAutoScalerModel)
                     .SetIntervalReport(TimeSpan.FromSeconds(10))
                     .MetricsReport(MyMetricReportModel)
@@ -92,9 +92,9 @@ namespace DotNetProbes
             app.MapControllers();
 
             //warmup IConnection
-            app.Services.WarmupRingBuffer<IConnection>();
+            app.Services.WarmupRingBuffer<IConnection>(true);
             //warmup IModel
-            app.Services.WarmupRingBuffer<IModel>();
+            app.Services.WarmupRingBuffer<IModel>(true);
 
             await app.RunAsync();
         }
@@ -122,6 +122,7 @@ namespace DotNetProbes
         }
 
         private static int countDowntrendModel;
+        private static int countUptrendModel;
         private static int MyAutoScalerModel(RingBufferMetric arg, CancellationToken token)
         {
             //set new capacity
@@ -131,15 +132,20 @@ namespace DotNetProbes
             {
                 newcapacity = arg.State.MinimumCapacity;
                 countDowntrendModel = 0;
+                countUptrendModel = 0;
             }
             //has any try Accquire or has any retry or has any timeout to Accquire? then increment capacity
             //OverloadCount = counter of how many times it was not possible to acquire the item on the first attempt
             else if (!arg.State.FailureState && arg.AcquisitionCount > 0 && (arg.State.CurrentAvailable < 2 || arg.OverloadCount > 0 || arg.TimeoutCount > 0))
             {
-                newcapacity++;
-                if (newcapacity > arg.State.MaximumCapacity)
+                countUptrendModel++;
+                if (countUptrendModel >= 4)
                 {
-                    newcapacity = arg.State.MaximumCapacity;
+                    newcapacity++;
+                    if (newcapacity > arg.State.MaximumCapacity)
+                    {
+                        newcapacity = arg.State.MaximumCapacity;
+                    }
                 }
                 //reset countDowntrend
                 countDowntrendModel = 0;
@@ -147,6 +153,7 @@ namespace DotNetProbes
             //has any try Accquire with not any retry or not any timeout ? then decrease capacity
             else if ((!arg.State.FailureState && arg.OverloadCount == 0 && arg.TimeoutCount == 0) || arg.AcquisitionCount == 0)
             {
+                countUptrendModel = 0;
                 //countDowntrend = number of times there was the same downtrend
                 countDowntrendModel++;
                 if (countDowntrendModel >= 4)
@@ -162,6 +169,7 @@ namespace DotNetProbes
             else
             {
                 countDowntrendModel = 0;
+                countUptrendModel = 0;
             }
             return newcapacity;
         }

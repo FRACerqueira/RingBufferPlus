@@ -16,7 +16,7 @@ namespace RingBufferPlus
         #region Private Properties
 
         private CancellationTokenSource _cts;
-        private ManagerRingBuffer<T> _managerRingBuffer;
+        private RingBufferManager<T> _managerRingBuffer;
         private ILogger _logger = null;
         private LogLevel _defaultloglevel = LogLevel.None;
         private ILoggerFactory _loggerFactory = null;
@@ -24,7 +24,7 @@ namespace RingBufferPlus
         private TimeSpan _intervalAutoScaler;
         private TimeSpan _intervalReport;
         private TimeSpan _intervalHealthCheck;
-        private TimeSpan _intervalOpenCircuit;
+        private TimeSpan _intervalFailureState;
         private TimeSpan _timeoutAccquire;
         private TimeSpan _idleAccquire;
 
@@ -48,7 +48,7 @@ namespace RingBufferPlus
 
         public static IRingBuffer<T> CreateBuffer(int value = 2)
         {
-            if (value <= 1) throw new RingBufferException("InitialBuffer must be greater than 1");
+            if (value <= 1) throw CreateException(MessagesResource.BuildErr_InitialBuffer);
             return new RingBuffer<T>(value);
         }
 
@@ -57,13 +57,12 @@ namespace RingBufferPlus
 
             _timeoutAccquire = TimeSpan.Zero;
             _idleAccquire = TimeSpan.Zero;
-            WaitNextTry = TimeSpan.Zero;
             _policytimeoutAccquire = RingBufferPolicyTimeout.EveryTime;
             _intervalAutoScaler = TimeSpan.Zero;
             _warmupAutoScaler = TimeSpan.Zero;
             _intervalHealthCheck = TimeSpan.Zero;
             _intervalReport = TimeSpan.Zero;
-            _intervalOpenCircuit = TimeSpan.Zero;
+            _intervalFailureState = TimeSpan.Zero;
             InitialCapacity = value;
             MinimumCapacity = value;
             MaximumCapacity = value;
@@ -88,8 +87,7 @@ namespace RingBufferPlus
         public TimeSpan IntervalReport => _intervalReport;
         public TimeSpan IdleAccquire => _idleAccquire;
         public TimeSpan TimeoutAccquire => _timeoutAccquire;
-        public TimeSpan WaitNextTry { get; private set; }
-        public TimeSpan IntervalFailureState => _intervalOpenCircuit;
+        public TimeSpan IntervalFailureState => _intervalFailureState;
         public bool HasPolicyTimeout => _userpolicytimeoutAccquireFunc != null;
         public bool HasHealthCheck => _healthCheckFuncSync != null || _healthCheckFuncAsync != null;
         public bool HasAutoScaler => _userAutoScaler;
@@ -125,7 +123,7 @@ namespace RingBufferPlus
             _managerRingBuffer.UsingHealthCheck(_healthCheckFuncSync, _healthCheckFuncAsync, _intervalHealthCheck);
             _managerRingBuffer.UsingRedefineCapacity(_factorySync, _factoryAsync, _intervalAutoScaler);
             _managerRingBuffer.StartCapacity(InitialCapacity);
-            _managerRingBuffer.UsingAutoScaler(_autoScaleFuncSync, _autoScaleFuncAsync, _intervalAutoScaler, _intervalOpenCircuit, _warmupAutoScaler);
+            _managerRingBuffer.UsingAutoScaler(_autoScaleFuncSync, _autoScaleFuncAsync, _intervalAutoScaler, _intervalFailureState, _warmupAutoScaler);
 
             return this;
         }
@@ -151,17 +149,15 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> LinkedFailureState(Func<bool> value)
         {
-            _linkedFailureStateFunc = value ?? throw new RingBufferException("Linked Function can't be null");
+            _linkedFailureStateFunc = value ?? throw CreateException(MessagesResource.BuildErr_LinkedFunction);
             return this;
         }
 
         public IBuildRingBuffer<T> Build()
         {
-            var defalias = false;
             if (string.IsNullOrEmpty(Alias))
             {
                 Alias = $"RingBuffer.{typeof(T).Name}";
-                defalias = true;
             }
 
             if (_loggerFactory != null)
@@ -169,58 +165,33 @@ namespace RingBufferPlus
                 _logger = _loggerFactory.CreateLogger(Alias);
             }
 
-            if (defalias)
-            {
-                defalias = true;
-                LogRingBuffer($"Create default Alias : {Alias}");
-            }
-            else
-            {
-                LogRingBuffer($"User Alias : {Alias}");
-            }
-
             if (_factorySync == null && _factoryAsync == null)
             {
-                var err = new RingBufferException("Factory can't be null");
-                LogRingBuffer($"{Alias} Fatal Error: {err}", LogLevel.Error);
+                var err = CreateException(MessagesResource.BuildErr_Factory);
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
 
             if (InitialCapacity <= 1)
             {
-                var err = new RingBufferException("Initial Capacity must be greater than 1");
-                LogRingBuffer($"{Alias} Fatal Error: {err}", LogLevel.Error);
+                var err = CreateException(MessagesResource.BuildErr_InitialBuffer); ;
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
 
             if (IdleAccquire.TotalMilliseconds == 0)
             {
                 _idleAccquire = DefaultValues.WaitTimeAvailable;
-                LogRingBuffer($"{Alias} using default Idle Accquire {IdleAccquire}");
-            }
-            else
-            {
-                LogRingBuffer($"{Alias} using user Idle Accquire {IdleAccquire}");
             }
 
             if (TimeoutAccquire.TotalMilliseconds == 0)
             {
                 _timeoutAccquire = DefaultValues.TimeoutAccquire;
-                LogRingBuffer($"{Alias} using default TimeoutAccquire {TimeoutAccquire}");
-            }
-            else
-            {
-                LogRingBuffer($"{Alias} using user TimeoutAccquire {TimeoutAccquire}");
             }
 
-            if (_intervalOpenCircuit.TotalMilliseconds == 0)
+            if (_intervalFailureState.TotalMilliseconds == 0)
             {
-                _intervalOpenCircuit = DefaultValues.IntervalFailureState;
-                LogRingBuffer($"{Alias} using default IntervalOpenCircuit {IntervalFailureState}");
-            }
-            else
-            {
-                LogRingBuffer($"{Alias} using user IntervalOpenCircuit {IntervalFailureState}");
+                _intervalFailureState = DefaultValues.IntervalFailureState;
             }
 
             if (MinimumCapacity < 0)
@@ -228,7 +199,6 @@ namespace RingBufferPlus
                 if (MinimumCapacity < 0)
                 {
                     MinimumCapacity = InitialCapacity;
-                    LogRingBuffer($"{Alias} using default MinimumCapacity {MinimumCapacity}");
                 }
             }
             if (MaximumCapacity < 0)
@@ -236,81 +206,65 @@ namespace RingBufferPlus
                 if (MaximumCapacity < 0)
                 {
                     MaximumCapacity = InitialCapacity;
-                    LogRingBuffer($"{Alias} using default MaximumCapacity {MinimumCapacity}");
                 }
             }
 
             if (MinimumCapacity > InitialCapacity)
             {
-                var err = new RingBufferException("MinimumCapacity must be less than  or equal to initial Capacity");
-                LogRingBuffer($"{Alias} Fatal Error: {err}", LogLevel.Error);
+                var err = CreateException(string.Format(MessagesResource.BuildErr_MinInit, Alias, MinimumCapacity, InitialCapacity));
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
 
             if (MaximumCapacity < InitialCapacity)
             {
-                var err = new RingBufferException("MaximumCapacity must be greater  or equal to than initial Capacity");
-                LogRingBuffer($"{Alias} Fatal Error: {err}", LogLevel.Error);
+                var err = CreateException(string.Format(MessagesResource.BuildErr_MaxInit, Alias, MaximumCapacity, InitialCapacity));
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
 
-            LogRingBuffer($"{Alias} InitialCapacity {InitialCapacity}");
-            LogRingBuffer($"{Alias} MinimumCapacity {MinimumCapacity}");
-            LogRingBuffer($"{Alias} MaximumCapacity {MaximumCapacity}");
+            if (MaximumCapacity < MinimumCapacity)
+            {
+                var err = CreateException(string.Format(MessagesResource.BuildErr_MaxMin, Alias, MaximumCapacity, MinimumCapacity));
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
+                throw err;
+            }
 
             _userAutoScaler = _autoScaleFuncSync != null || _autoScaleFuncAsync != null;
             if (!_userAutoScaler)
             {
                 _autoScaleFuncSync = (_, _) => InitialCapacity;
-                LogRingBuffer($"{Alias} using Fixed AutoScaler {InitialCapacity}");
             }
-            else
-            {
-                LogRingBuffer($"{Alias} using user AutoScaler");
-            }
-
-
-            if (WaitNextTry.TotalMilliseconds == 0)
-            {
-                WaitNextTry = DefaultValues.WaitTimeAvailable;
-                LogRingBuffer($"{Alias} using default WaitNextTry {TimeoutAccquire}");
-            }
-            else
-            {
-                LogRingBuffer($"{Alias} using user WaitNextTry {TimeoutAccquire}");
-            }
-
 
             if (_intervalReport.TotalMilliseconds == 0)
             {
                 _intervalReport = DefaultValues.IntervalReport;
-                LogRingBuffer($"{Alias} using default interval Report {_intervalReport}");
             }
-            else
-            {
-                LogRingBuffer($"{Alias} using user interval Report {_intervalReport}");
-            }
-
 
             if (_intervalHealthCheck.TotalMilliseconds == 0)
             {
                 _intervalHealthCheck = DefaultValues.IntervalHealthcheck;
-                LogRingBuffer($"{Alias} using default interval Health Check {_intervalHealthCheck}");
-            }
-            else
-            {
-                LogRingBuffer($"{Alias} using user interval Health Check {_intervalHealthCheck}");
             }
 
             if (_intervalAutoScaler.TotalMilliseconds == 0)
             {
                 _intervalAutoScaler = DefaultValues.IntervalScaler;
-                LogRingBuffer($"{Alias} using default interval Auto Scaler {_intervalAutoScaler}");
             }
-            else
+
+            LogRingBuffer(string.Format(MessagesResource.Log_Alias, Alias));
+            LogRingBuffer(string.Format(MessagesResource.Log_InitialCapacity, Alias, InitialCapacity.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_MinimumCapacity, Alias, MinimumCapacity.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_MaximumCapacity, Alias, MaximumCapacity.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_IdleAccquire, Alias, _idleAccquire.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_TimeoutAccquire, Alias, _timeoutAccquire.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_IntervalFailureState, Alias, _intervalFailureState.ToString()));
+            if (!_userAutoScaler)
             {
-                LogRingBuffer($"{Alias} using user interval Auto Scaler {_intervalAutoScaler}");
+                LogRingBuffer(string.Format(MessagesResource.Log_FixedAutoScaler, Alias, InitialCapacity.ToString()));
             }
+            LogRingBuffer(string.Format(MessagesResource.Log_IntervalReport, Alias, _intervalReport.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_IntervalHealthCheck, Alias, _intervalHealthCheck.ToString()));
+            LogRingBuffer(string.Format(MessagesResource.Log_IntervalAutoScaler, Alias, _intervalAutoScaler.ToString()));
 
             return this;
         }
@@ -329,8 +283,8 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> SetIntervalFailureState(TimeSpan value)
         {
-            if (value.TotalMilliseconds <= 0) throw new RingBufferException("Interval Open Circuit must be greater than zero");
-            _intervalOpenCircuit = value;
+            if (value.TotalMilliseconds <= 0) throw CreateException(string.Format(MessagesResource.BuildErr_IntervalFailureState, Alias));
+            _intervalFailureState = value;
             return this;
         }
 
@@ -346,11 +300,11 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> SetTimeoutAccquire(TimeSpan value, TimeSpan? idle)
         {
-            if (value.TotalMilliseconds <= 0) throw new RingBufferException("Timeout Available must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_TimeoutAccquire);
             var localidle = DefaultValues.WaitTimeAvailable;
             if (idle.HasValue)
             {
-                if (idle.Value.TotalMilliseconds <= 0) throw new RingBufferException("Idle Accquire must be greater than zero");
+                if (idle.Value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IdleAccquire);
                 localidle = idle.Value;
             }
             _timeoutAccquire = value;
@@ -360,14 +314,14 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> AliasName(string value)
         {
-            if (string.IsNullOrEmpty(value)) throw new RingBufferException("Alias can't be null");
+            if (string.IsNullOrEmpty(value)) throw CreateException(MessagesResource.BuildErr_Alias);
             Alias = value;
             return this;
         }
 
         public IRingBuffer<T> InitialBuffer(int value)
         {
-            if (value <= 1) throw new RingBufferException("InitialBuffer must be greater than 1");
+            if (value <= 1) throw CreateException(MessagesResource.BuildErr_InitialBuffer);
             InitialCapacity = value;
             if (MaximumCapacity < InitialCapacity)
             {
@@ -378,21 +332,21 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> MaxBuffer(int value)
         {
-            if (value <= 1) throw new RingBufferException("MaxAvaliable must be greater than 1");
+            if (value <= 1) throw CreateException(MessagesResource.BuildErr_MaxAvaliable);
             MaximumCapacity = value;
             return this;
         }
 
         public IRingBuffer<T> MinBuffer(int value)
         {
-            if (value <= 1) throw new RingBufferException("MinAvaliable must be greater than 1");
+            if (value <= 1) throw CreateException(MessagesResource.BuildErr_MinAvaliable);
             MinimumCapacity = value;
             return this;
         }
 
         public IRingBuffer<T> FactoryAsync(Func<CancellationToken, Task<T>> value)
         {
-            if (value is null) throw new RingBufferException("Factory can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_Factory);
             _factoryAsync = value;
             _factorySync = null;
             return this;
@@ -400,7 +354,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> Factory(Func<CancellationToken, T> value)
         {
-            if (value is null) throw new RingBufferException("Factory can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_Factory);
             _factoryAsync = null;
             _factorySync = value;
             return this;
@@ -413,21 +367,21 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> SetIntervalHealthCheck(TimeSpan value)
         {
-            if (value.TotalMilliseconds <= 0) throw new RingBufferException("Timeout HealthCheck must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IntervalHealthCheck);
             _intervalHealthCheck = value;
             return this;
         }
 
         public IRingBuffer<T> HealthCheckAsync(Func<T, CancellationToken, Task<bool>> value)
         {
-            if (value is null) throw new RingBufferException("HealthCheck can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_HealthCheck);
             _healthCheckFuncAsync = value;
             return this;
         }
 
         public IRingBuffer<T> HealthCheck(Func<T, CancellationToken, bool> value)
         {
-            if (value is null) throw new RingBufferException("HealthCheck can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_HealthCheck);
             _healthCheckFuncSync = value;
             return this;
         }
@@ -437,19 +391,19 @@ namespace RingBufferPlus
             var localwarmup = TimeSpan.Zero;
             if (warmup.HasValue)
             {
-                if (warmup <= 0) throw new RingBufferException("Interval warmup must be greater than zero");
+                if (warmup <= 0) throw CreateException(MessagesResource.BuildErr_IntervalWarmup);
                 localwarmup = TimeSpan.FromMilliseconds(warmup.Value);
             }
             return SetIntervalAutoScaler(TimeSpan.FromMilliseconds(mileseconds), localwarmup);
         }
 
-        public IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value,TimeSpan ? warmup = null)
+        public IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value, TimeSpan? warmup = null)
         {
-            if (value.TotalMilliseconds <= 0) throw new RingBufferException("Interval AutoScaler must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IntervalAutoScaler);
             var localwarmup = TimeSpan.Zero;
             if (warmup.HasValue)
             {
-                if (warmup.Value.TotalMilliseconds <= 0) throw new RingBufferException("Interval warmup must be greater than zero");
+                if (warmup.Value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IntervalWarmup);
                 localwarmup = warmup.Value;
             }
             _intervalAutoScaler = value;
@@ -459,14 +413,14 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> AutoScalerAsync(Func<RingBufferMetric, CancellationToken, Task<int>> value)
         {
-            if (value is null) throw new RingBufferException("AutoScaler can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_AutoScaler);
             _autoScaleFuncAsync = value;
             return this;
         }
 
         public IRingBuffer<T> AutoScaler(Func<RingBufferMetric, CancellationToken, int> value)
         {
-            if (value is null) throw new RingBufferException("AutoScaler can't be null");
+            if (value is null) throw CreateException(MessagesResource.BuildErr_AutoScaler);
             _autoScaleFuncSync = value;
             return this;
         }
@@ -475,11 +429,11 @@ namespace RingBufferPlus
         {
             if (policy == RingBufferPolicyTimeout.UserPolicy)
             {
-                if (userpolicy is null) throw new RingBufferException("User Policy can't be null");
+                if (userpolicy is null) throw CreateException(MessagesResource.BuildErr_PolicyNull);
             }
             else
             {
-                if (userpolicy is not null) throw new RingBufferException("User Policy must be null");
+                if (userpolicy is not null) throw CreateException(MessagesResource.BuildErr_PolicyMustBeNull);
             }
             _policytimeoutAccquire = policy;
             _userpolicytimeoutAccquireFunc = userpolicy;
@@ -493,21 +447,21 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> SetIntervalReport(TimeSpan value)
         {
-            if (value.TotalMilliseconds <= 0) throw new RingBufferException("Interval Report must be greater than zero");
+            if (value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IntervalReport);
             _intervalReport = value;
             return this;
         }
 
         public IRingBuffer<T> MetricsReport(Action<RingBufferMetric, CancellationToken> report)
         {
-            if (report is null) throw new RingBufferException("Action Report can't be null");
+            if (report is null) throw CreateException(MessagesResource.BuildErr_Report);
             _reportSync = report;
             return this;
         }
 
         public IRingBuffer<T> MetricsReportAsync(Func<RingBufferMetric, CancellationToken, Task> report)
         {
-            if (report is null) throw new RingBufferException("Action Report can't be null");
+            if (report is null) throw CreateException(MessagesResource.BuildErr_Report);
             _reportAsync = report;
             return this;
         }
@@ -515,6 +469,11 @@ namespace RingBufferPlus
         #endregion
 
         #region Private Methods
+
+        private static RingBufferException CreateException(string message, Exception innerexception = null)
+        {
+            return new RingBufferException(message, innerexception);
+        }
 
         private void LogRingBuffer(string message, LogLevel? level = null)
         {

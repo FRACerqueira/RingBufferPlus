@@ -365,7 +365,7 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .SetIntervalAutoScaler(444,222)
+                .SetIntervalAutoScaler(444, 222)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasAutoScaler);
@@ -393,7 +393,7 @@ namespace RingBufferPlusTest
                 .CreateBuffer()
                 .InitialBuffer(10)
                 .AutoScaler((_, _) => 10)
-                .SetIntervalAutoScaler(444,222)
+                .SetIntervalAutoScaler(444, 222)
                 .Factory((_) => new MyClassTest())
                 .Build();
             Assert.True(rb.HasAutoScaler);
