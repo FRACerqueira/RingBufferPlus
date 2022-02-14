@@ -71,6 +71,21 @@
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="3.1.22" />
 		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="3.1.22" />
 	</ItemGroup>
+
+	<ItemGroup>
+	  <Compile Update="MessagesResource.Designer.cs">
+	    <DesignTime>True</DesignTime>
+	    <AutoGen>True</AutoGen>
+	    <DependentUpon>MessagesResource.resx</DependentUpon>
+	  </Compile>
+	</ItemGroup>
+
+	<ItemGroup>
+	  <EmbeddedResource Update="MessagesResource.resx">
+	    <Generator>ResXFileCodeGenerator</Generator>
+	    <LastGenOutput>MessagesResource.Designer.cs</LastGenOutput>
+	  </EmbeddedResource>
+	</ItemGroup>
 	<ItemGroup>
 	  <None Update="README.txt">
 	    <CopyToOutputDirectory>Never</CopyToOutputDirectory>

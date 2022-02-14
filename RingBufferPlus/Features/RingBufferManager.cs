@@ -9,7 +9,7 @@ using System.Threading.Tasks;
 
 namespace RingBufferPlus.Features
 {
-    internal class ManagerRingBuffer<T> : IDisposable
+    internal class RingBufferManager<T> : IDisposable
     {
         private readonly string _alias;
         private readonly int _mincapacity;
@@ -24,7 +24,7 @@ namespace RingBufferPlus.Features
         private readonly object _sync = new object();
 
         private readonly Thread _renewBufferThread;
-        private readonly BlockingCollection<BackOfficeDisposedBuffer> blockrenewBuffer = new();
+        private readonly BlockingCollection<RingBufferValue<T>> blockrenewBuffer = new();
 
         private Thread _reportBufferThread;
         private Thread _healthCheckThread;
@@ -40,22 +40,13 @@ namespace RingBufferPlus.Features
         private readonly BlockingCollection<Tuple<DateTime, RingBufferAutoScaleEventArgs>> blockeventAutoScaler = new();
         private readonly BlockingCollection<Tuple<DateTime, int?>> blockAutoScalerBuffer = new();
 
-
         private volatile int _runningCount;
         private volatile bool _failureState;
         private volatile int _starting;
 
         private bool _disposedValue;
 
-        private class BackOfficeDisposedBuffer
-        {
-            public T Buffer { get; set; }
-            public bool SucceededAccquire { get; set; }
-            public bool SkipTurnback { get; set; }
-            public Exception Error { get; set; }
-        }
-
-        public ManagerRingBuffer(string alias, int min, int max, ILogger logger, LogLevel defaultloglevel, Func<bool> linkedFailureState, CancellationToken cancellationToken)
+        public RingBufferManager(string alias, int min, int max, ILogger logger, LogLevel defaultloglevel, Func<bool> linkedFailureState, CancellationToken cancellationToken)
         {
             _alias = alias;
             _mincapacity = min;
@@ -65,12 +56,12 @@ namespace RingBufferPlus.Features
             _stoptoken = cancellationToken;
             _linkedFailureState = linkedFailureState;
 
-            WriteLog(DateTime.Now, $"{_alias} RenewBuffer Thread Created ");
+            WriteLog(DateTime.Now,string.Format(MessagesResource.Log_ThreadState,_alias, "RenewBuffer","Created"));
             _renewBufferThread = new Thread(() =>
             {
                 try
                 {
-                    WriteLog(DateTime.Now, $"{_alias} RenewBuffer Thread Running");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RenewBuffer", "Running"));
                     foreach (var item in blockrenewBuffer.GetConsumingEnumerable(_stoptoken))
                     {
                         var newava = 0;
@@ -84,7 +75,7 @@ namespace RingBufferPlus.Features
                                 {
                                     newava = _availableBuffer.Count;
                                 }
-                                if (item.Buffer is IDisposable disposable)
+                                if (item.Current is IDisposable disposable)
                                 {
                                     disposable.Dispose();
                                 }
@@ -101,7 +92,7 @@ namespace RingBufferPlus.Features
                             {
                                 lock (_sync)
                                 {
-                                    _availableBuffer.Enqueue(item.Buffer);
+                                    _availableBuffer.Enqueue(item.Current);
                                     newava = _availableBuffer.Count;
                                 }
                             }
@@ -122,7 +113,7 @@ namespace RingBufferPlus.Features
                 }
                 finally
                 {
-                    WriteLog(DateTime.Now, $"{_alias} RenewBuffer Thread Stoped");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RenewBuffer", "Stoped"));
                 }
             });
             _renewBufferThread.IsBackground = true;
@@ -131,12 +122,12 @@ namespace RingBufferPlus.Features
 
         public void UsingRedefineCapacity(Func<CancellationToken, T> factorySync, Func<CancellationToken, Task<T>> factoryAsync, TimeSpan WaitNext)
         {
-            WriteLog(DateTime.Now, $"{_alias} RedefineCapacity Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RedefineCapacity", "Created"));
             _redefineCapacityThread = new Thread(async () =>
             {
                 try
                 {
-                    WriteLog(DateTime.Now, $"{_alias} RedefineCapacity Thread Running");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RedefineCapacity", "Running"));
                     foreach (var item in blockAutoScalerBuffer.GetConsumingEnumerable(_stoptoken))
                     {
                         var localmetric = CreateMetric(WaitNext);
@@ -158,11 +149,11 @@ namespace RingBufferPlus.Features
                         var diff = localtarget - oldvalue;
                         if (item.Item2.HasValue)
                         {
-                            WriteLog(item.Item1, $"{_alias} Try AutoScale({diff}) {oldvalue} to {oldvalue + diff}.");
+                            WriteLog(item.Item1, string.Format(MessagesResource.Log_TryAutoScaler, _alias, diff, oldvalue, oldvalue + diff));
                         }
                         else
                         {
-                            WriteLog(item.Item1, $"{_alias} Try AutoScale({diff}) {oldvalue} to {item.Item2}.");
+                            WriteLog(item.Item1, string.Format(MessagesResource.Log_TryAutoScaler, _alias, diff, oldvalue, item.Item2));
                         }
 
                         if (diff < 0)
@@ -248,7 +239,7 @@ namespace RingBufferPlus.Features
                 }
                 finally
                 {
-                    WriteLog(DateTime.Now, $"{_alias} RedefineCapacity Thread Stoped");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RedefineCapacity", "Stoped"));
                 }
             });
             _redefineCapacityThread.IsBackground = true;
@@ -256,13 +247,13 @@ namespace RingBufferPlus.Features
         }
         public void UsingAutoScaler(Func<RingBufferMetric, CancellationToken, int> autoscalerSync, Func<RingBufferMetric, CancellationToken, Task<int>> autoscalerAsync, TimeSpan WaitNext, TimeSpan intervalfailure, TimeSpan warmupAutoScaler)
         {
-            WriteLog(DateTime.Now, $"{_alias} AutoScaler Buffer Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "AutoScaler", "Created"));
             _autoscalerBufferThread = new Thread(async () =>
             {
-                WriteLog(DateTime.Now, $"{_alias} AutoScaler Buffer Thread Running");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "AutoScaler", "Running"));
                 if (warmupAutoScaler.TotalMilliseconds > 0 && !_failureState)
                 {
-                    WriteLog(DateTime.Now, $"{_alias} Warmup AutoScaler ({warmupAutoScaler.TotalMilliseconds})");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_AutoScalerDelay, _alias, warmupAutoScaler.TotalMilliseconds));
                     if (NaturalTimer.Delay(warmupAutoScaler, _stoptoken))
                     {
                         return;
@@ -318,7 +309,7 @@ namespace RingBufferPlus.Features
                             IncrementError();
                             if (!blockeventError.IsAddingCompleted)
                             {
-                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException($"{_alias}  Auto Scaler error", ex)));
+                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "AutoScaler"), ex))); 
                             }
                         }
                     }
@@ -331,8 +322,7 @@ namespace RingBufferPlus.Features
                         }
                     }
                 }
-                WriteLog(DateTime.Now, $"{_alias} AutoScaler Buffer Thread Stoped");
-
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "AutoScaler", "Stoped"));
             });
             _autoscalerBufferThread.IsBackground = true;
             _autoscalerBufferThread.Start();
@@ -364,16 +354,16 @@ namespace RingBufferPlus.Features
             {
                 return;
             }
-            WriteLog(DateTime.Now, $"{_alias} EventError Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventError", "Created"));
             _eventErrorThread = new Thread(() =>
             {
-                WriteLog(DateTime.Now, $"{_alias} EventError Thread Running");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventError", "Running"));
                 foreach (var item in blockeventError.GetConsumingEnumerable())
                 {
                     WriteLog(item.Item1, item.ToString(), LogLevel.Error);
                     errorCallBack?.Invoke(null, new RingBufferErrorEventArgs(_alias, item.Item2));
                 }
-                WriteLog(DateTime.Now, $"{_alias} EventError Thread Stoped");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventError", "Stoped"));
             });
             _eventErrorThread.IsBackground = true;
             _eventErrorThread.Start();
@@ -384,16 +374,16 @@ namespace RingBufferPlus.Features
             {
                 return;
             }
-            WriteLog(DateTime.Now, $"{_alias} EventTimeout Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventTimeout", "Created"));
             _eventTimeoutThread = new Thread(() =>
             {
-                WriteLog(DateTime.Now, $"{_alias} EventTimeout Thread Running");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventTimeout", "Running"));
                 foreach (var item in blockeventTimeout.GetConsumingEnumerable())
                 {
                     WriteLog(item.Item1, $"{_alias} Timeout({item.Item2.Timeout}) accquire {item.Item2.ElapsedTime}", LogLevel.Warning);
                     timeoutCallBack?.Invoke(null, item.Item2);
                 }
-                WriteLog(DateTime.Now, $"{_alias} EventTimeout Thread Stoped");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventTimeout", "Stoped"));
             });
             _eventTimeoutThread.IsBackground = true;
             _eventTimeoutThread.Start();
@@ -404,15 +394,15 @@ namespace RingBufferPlus.Features
             {
                 return;
             }
-            WriteLog(DateTime.Now, $"{_alias} EventAutoScaler Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventAutoScaler", "Created"));
             _eventAutoScalerThread = new Thread(() =>
             {
                 try
                 {
-                    WriteLog(DateTime.Now, $"{_alias} EventAutoScaler Thread Running");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventAutoScaler", "Running"));
                     foreach (var item in blockeventAutoScaler.GetConsumingEnumerable(_stoptoken))
                     {
-                        WriteLog(item.Item1, $"{_alias} AutoScaler {item.Item2.OldCapacity} to {item.Item2.NewCapacity}. Ava/Run/Err/Tout: {item.Item2.Metric.State.CurrentAvailable}/{item.Item2.Metric.State.CurrentRunning}/{item.Item2.Metric.ErrorCount}/{item.Item2.Metric.TimeoutCount}");
+                        WriteLog(item.Item1, $"{_alias} AutoScaler {item.Item2.OldCapacity} to {item.Item2.NewCapacity}. Ava/Run/Err/Tout/Retry: {item.Item2.Metric.State.CurrentAvailable}/{item.Item2.Metric.State.CurrentRunning}/{item.Item2.Metric.ErrorCount}/{item.Item2.Metric.TimeoutCount}/{item.Item2.Metric.OverloadCount}");
                         autoScaleCallBack?.Invoke(null, item.Item2);
                     }
                 }
@@ -421,7 +411,7 @@ namespace RingBufferPlus.Features
                 }
                 finally
                 {
-                    WriteLog(DateTime.Now, $"{_alias} EventAutoScaler Thread Stoped");
+                    WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "EventAutoScaler", "Stoped"));
                 }
             });
             _eventAutoScalerThread.IsBackground = true;
@@ -433,10 +423,10 @@ namespace RingBufferPlus.Features
             {
                 return;
             }
-            WriteLog(DateTime.Now, $"{_alias} HealthCheck Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "HealthCheck", "Created"));
             _healthCheckThread = new Thread(async () =>
             {
-                WriteLog(DateTime.Now, $"{_alias} HealthCheck Thread Running");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "HealthCheck", "Running"));
                 while (!_stoptoken.IsCancellationRequested)
                 {
                     if (NaturalTimer.Delay(WaitNext, _stoptoken))
@@ -491,12 +481,12 @@ namespace RingBufferPlus.Features
                             IncrementError();
                             if (!blockeventError.IsAddingCompleted)
                             {
-                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException($"{_alias} HealthCheck Error", ex)));
+                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "HealthCheck"), ex)));
                             }
                         }
                     }
                 }
-                WriteLog(DateTime.Now, $"{_alias} HealthCheck Thread Stoped");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "HealthCheck", "Stoped"));
             });
             _healthCheckThread.IsBackground = true;
             _healthCheckThread.Start();
@@ -507,10 +497,10 @@ namespace RingBufferPlus.Features
             {
                 return;
             }
-            WriteLog(DateTime.Now, $"{_alias} Report Thread Created");
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "Report", "Created"));
             _reportBufferThread = new Thread(async () =>
             {
-                WriteLog(DateTime.Now, $"{_alias} Report Thread Running");
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "Report", "Running"));
                 while (!_stoptoken.IsCancellationRequested)
                 {
                     if (reportSync == null && reportAsync == null)
@@ -543,12 +533,11 @@ namespace RingBufferPlus.Features
                         IncrementError();
                         if (!blockeventError.IsAddingCompleted)
                         {
-                            blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException($"{_alias} Report Error", ex)));
+                            blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError,_alias, "Report"), ex)));
                         }
                     }
                 }
-                WriteLog(DateTime.Now, $"{_alias} Report Thread Stoped");
-
+                WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "Report", "Stoped"));
             });
             _reportBufferThread.IsBackground = true;
             _reportBufferThread.Start();
@@ -577,7 +566,7 @@ namespace RingBufferPlus.Features
                     CreateState(),
                     (long)timer.TotalMilliseconds,
                     false,
-                    new RingBufferException($"{_alias} Failure State", null),
+                    new RingBufferException( string.Format(MessagesResource.Log_FailureState,_alias), null),
                     default,
                     RenewBuffer);
             }
@@ -595,7 +584,7 @@ namespace RingBufferPlus.Features
                     {
                         source = "Consumer";
                     }
-                    var ex = new RingBufferException($"{_alias} {source} CancellationRequested {nameof(ReadBuffer)}");
+                    var ex = new RingBufferException($"{_alias} {source} CancellationRequested");
                     return new RingBufferValue<T>(
                         _alias,
                         CreateState(),
@@ -616,7 +605,7 @@ namespace RingBufferPlus.Features
                     {
                         source = "Consumer";
                     }
-                    Exception ex = new RingBufferException($"{_alias} {source} CancellationRequested {nameof(ReadBuffer)}");
+                    Exception ex = new RingBufferException($"{_alias} {source} CancellationRequested");
                     return new RingBufferValue<T>(
                         _alias,
                         CreateState(),
@@ -637,14 +626,14 @@ namespace RingBufferPlus.Features
                             sta.State,
                             (long)timer.TotalMilliseconds,
                             false,
-                            new RingBufferException($"{_alias} Failure State", null),
+                            new RingBufferException(string.Format(MessagesResource.Log_FailureState, _alias), null),
                             default,
                             RenewBuffer);
                     }
                     else
                     {
                         IncrementTimeout();
-                        Exception ex = new RingBufferTimeoutException(nameof(ReadBuffer), (long)timer.TotalMilliseconds, $"{_alias} Timeout({timeout.TotalMilliseconds}) {nameof(ReadBuffer)}({timer.TotalMilliseconds:F0})");
+                        Exception ex = new RingBufferTimeoutException(nameof(ReadBuffer), (long)timer.TotalMilliseconds, $"{_alias} Timeout({timeout.TotalMilliseconds}) : {timer.TotalMilliseconds:F0}");
                         if (policy == RingBufferPolicyTimeout.MaximumCapacity && sta.State.CurrentCapacity == _maxcapacity)
                         {
                             if (!blockeventTimeout.IsAddingCompleted)
@@ -684,7 +673,7 @@ namespace RingBufferPlus.Features
                                 IncrementError();
                                 if (!blockeventError.IsAddingCompleted)
                                 {
-                                    blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException($"{_alias} User Policy Error", pex)));
+                                    blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError,_alias, "User Policy"), pex)));
                                 }
                             }
                         }
@@ -798,16 +787,13 @@ namespace RingBufferPlus.Features
         }
         internal void RenewBuffer(RingBufferValue<T> value)
         {
-            lock (_sync)
+            if (value.SucceededAccquire)
             {
-                if (value.SucceededAccquire)
-                {
-                    IncrementAcquisitionSucceeded(value.ElapsedExecute);
-                }
+                IncrementAcquisitionSucceeded(value.ElapsedExecute);
             }
             if (!blockrenewBuffer.IsAddingCompleted)
             {
-                blockrenewBuffer.Add(new BackOfficeDisposedBuffer() { Error = value.Error, Buffer = value.Current, SucceededAccquire = value.SucceededAccquire, SkipTurnback = value.SkipTurnback });
+                blockrenewBuffer.Add(value);
             }
         }
         internal void IncrementAcquisitionSucceeded(TimeSpan elapsedExecute)
@@ -853,11 +839,16 @@ namespace RingBufferPlus.Features
         private void EndManagerRingBuffer()
         {
             blockAutoScalerBuffer.CompleteAdding();
+            if (_redefineCapacityThread != null)
+            {
+                _redefineCapacityThread.Join();
+            }
             if (_autoscalerBufferThread != null)
             {
                 _autoscalerBufferThread.Join();
             }
             blockAutoScalerBuffer.Dispose();
+
 
             if (_healthCheckThread != null)
             {
@@ -911,7 +902,6 @@ namespace RingBufferPlus.Features
                 _eventAutoScalerThread.Join();
             }
             blockeventAutoScaler.Dispose();
-
         }
         protected virtual void Dispose(bool disposing)
         {

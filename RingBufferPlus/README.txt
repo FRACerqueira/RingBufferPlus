@@ -23,6 +23,15 @@ RingBufferPlus was developed in c# with target frameworks:
 
 https://fracerqueira.github.io/RingBufferPlus
 
+**Relase Notes RingBufferPlus (V1.0.1)**
+----------------------------------------
+- Added optional graceful shutdown (Sync. discard instance) to the Warmup Ring Buffer extension when stopping the host application.
+- Improvements to log and event messages with Resource file
+- Fixed bug graceful shutdown
+- Code cleanup
+- Test project (in progress)
+- Documentation (in progress)
+
 **Relase Notes RingBufferPlus (V1.0.0)**
 ----------------------------------------
 - Revised all internal events for async/Threads
