@@ -70,7 +70,7 @@ namespace DotNetProbes
                     .LinkedFailureState(() => rbc.CurrentState.FailureState)
                     .Factory((ctk) => CreateModel(rbc))
                     .HealthCheck((model, ctk) => HCModel(model))
-                    .SetIntervalAutoScaler(DefaultValues.IntervalScaler,TimeSpan.FromSeconds(30))
+                    .SetIntervalAutoScaler(DefaultValues.IntervalScaler, TimeSpan.FromSeconds(30))
                     .AutoScaler(MyAutoScalerModel)
                     .SetIntervalReport(TimeSpan.FromSeconds(10))
                     .MetricsReport(MyMetricReportModel)

@@ -168,7 +168,7 @@ namespace RingBufferPlus
             if (_factorySync == null && _factoryAsync == null)
             {
                 var err = CreateException(MessagesResource.BuildErr_Factory);
-                LogRingBuffer(string.Format(MessagesResource.FatalError,err.ToString()), LogLevel.Error);
+                LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
 
@@ -211,7 +211,7 @@ namespace RingBufferPlus
 
             if (MinimumCapacity > InitialCapacity)
             {
-                var err = CreateException(string.Format(MessagesResource.BuildErr_MinInit,Alias,MinimumCapacity,InitialCapacity));
+                var err = CreateException(string.Format(MessagesResource.BuildErr_MinInit, Alias, MinimumCapacity, InitialCapacity));
                 LogRingBuffer(string.Format(MessagesResource.FatalError, err.ToString()), LogLevel.Error);
                 throw err;
             }
@@ -283,7 +283,7 @@ namespace RingBufferPlus
 
         public IRingBuffer<T> SetIntervalFailureState(TimeSpan value)
         {
-            if (value.TotalMilliseconds <= 0) throw CreateException(string.Format(MessagesResource.BuildErr_IntervalFailureState,Alias));
+            if (value.TotalMilliseconds <= 0) throw CreateException(string.Format(MessagesResource.BuildErr_IntervalFailureState, Alias));
             _intervalFailureState = value;
             return this;
         }
@@ -397,7 +397,7 @@ namespace RingBufferPlus
             return SetIntervalAutoScaler(TimeSpan.FromMilliseconds(mileseconds), localwarmup);
         }
 
-        public IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value,TimeSpan ? warmup = null)
+        public IRingBuffer<T> SetIntervalAutoScaler(TimeSpan value, TimeSpan? warmup = null)
         {
             if (value.TotalMilliseconds <= 0) throw CreateException(MessagesResource.BuildErr_IntervalAutoScaler);
             var localwarmup = TimeSpan.Zero;

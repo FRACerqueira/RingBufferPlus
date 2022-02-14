@@ -56,7 +56,7 @@ namespace RingBufferPlus.Features
             _stoptoken = cancellationToken;
             _linkedFailureState = linkedFailureState;
 
-            WriteLog(DateTime.Now,string.Format(MessagesResource.Log_ThreadState,_alias, "RenewBuffer","Created"));
+            WriteLog(DateTime.Now, string.Format(MessagesResource.Log_ThreadState, _alias, "RenewBuffer", "Created"));
             _renewBufferThread = new Thread(() =>
             {
                 try
@@ -309,7 +309,7 @@ namespace RingBufferPlus.Features
                             IncrementError();
                             if (!blockeventError.IsAddingCompleted)
                             {
-                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "AutoScaler"), ex))); 
+                                blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "AutoScaler"), ex)));
                             }
                         }
                     }
@@ -533,7 +533,7 @@ namespace RingBufferPlus.Features
                         IncrementError();
                         if (!blockeventError.IsAddingCompleted)
                         {
-                            blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError,_alias, "Report"), ex)));
+                            blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "Report"), ex)));
                         }
                     }
                 }
@@ -566,7 +566,7 @@ namespace RingBufferPlus.Features
                     CreateState(),
                     (long)timer.TotalMilliseconds,
                     false,
-                    new RingBufferException( string.Format(MessagesResource.Log_FailureState,_alias), null),
+                    new RingBufferException(string.Format(MessagesResource.Log_FailureState, _alias), null),
                     default,
                     RenewBuffer);
             }
@@ -673,7 +673,7 @@ namespace RingBufferPlus.Features
                                 IncrementError();
                                 if (!blockeventError.IsAddingCompleted)
                                 {
-                                    blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError,_alias, "User Policy"), pex)));
+                                    blockeventError.Add(new Tuple<DateTime, Exception>(DateTime.Now, new RingBufferException(string.Format(MessagesResource.Log_UserfunError, _alias, "User Policy"), pex)));
                                 }
                             }
                         }
