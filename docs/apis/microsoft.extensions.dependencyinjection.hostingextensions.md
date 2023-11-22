@@ -52,6 +52,7 @@ The Handler to return the [IRingBufferService&lt;T&gt;](./ringbufferplus.iringbu
 ### <a id="methods-warmupringbuffer"/>**WarmupRingBuffer&lt;T&gt;(IHost, String, Nullable&lt;TimeSpan&gt;)**
 
 Warmup RingBuffer with full capacity ready or reaching timeout .
+ <br>If you do not use the 'Warmup Ring Buffer' command, the first access to acquire the buffer will be Warmup (not recommended)
 
 ```csharp
 public static bool WarmupRingBuffer<T>(IHost appbluild, string buffername, Nullable<TimeSpan> timeout)
@@ -71,7 +72,7 @@ The .
 The unique name to RingBuffer.
 
 `timeout` [Nullable&lt;TimeSpan&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
-The timeout for full capacity ready.
+The timeout for full capacity ready. Default value is 30 seconds.
 
 #### Returns
 

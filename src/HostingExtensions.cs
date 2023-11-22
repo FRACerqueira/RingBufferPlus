@@ -46,11 +46,12 @@ namespace Microsoft.Extensions.DependencyInjection
 
         /// <summary>
         /// Warmup RingBuffer  with full capacity ready or reaching timeout .
+        /// <br>If you do not use the 'Warmup Ring Buffer' command, the first access to acquire the buffer will be Warmup (not recommended)</br>
         /// </summary>
         /// <typeparam name="T">Type of buffer.</typeparam>
         /// <param name="appbluild">The <see cref="IHost"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
-        /// <param name="timeout">The timeout for full capacity ready.</param>
+        /// <param name="timeout">The timeout for full capacity ready. Default value is 30 seconds.</param>
         /// <returns>True if full capacity ready, otherwise false (Timeout but keeps running).</returns>
         public static bool WarmupRingBuffer<T>(this IHost appbluild, string buffername, TimeSpan? timeout = null)
         {
