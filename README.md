@@ -52,10 +52,13 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Set unique name for same buffer type
 - Set the buffer capacity
 - Set the minimum and maximum capacity (optional)
-- Set the conditions for scaling to maximum and minimum
-- Associate the logger inertface
-- Define a user role for generated errors
-- Define a user role to receive capacity change events
+    - Set the conditions for scaling to maximum and minimum (required)
+        - Automatic condition values ​​based on capacity (value not required)
+    - Define a user role to receive capacity change events (optional)
+- Associate the logger interface (optional)
+- Define a user role for generated errors (optional)
+- Invalidate the buffer when it is in an invalid state
+- Warm up to full capacity before starting application 
 - Simple and clear fluent syntax
 
 ## Installing
