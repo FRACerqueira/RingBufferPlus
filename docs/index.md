@@ -167,7 +167,7 @@ builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
 });
 
 ...
-
+//If you do not use the 'Warmup Ring Buffer' command, the first access to acquire the buffer will be Warmup (not recommended)
 app.WarmupRingBuffer<int>("Mybuffer");
 ```
 
