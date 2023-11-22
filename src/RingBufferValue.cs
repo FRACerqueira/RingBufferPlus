@@ -89,13 +89,10 @@ namespace RingBufferPlus
         /// <param name="disposing">Disposing.</param>
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
+            if (!_disposed && disposing)
             {
-                if (disposing)
-                {
-                    _disposed = true;
-                    _turnback?.Invoke(this);
-                }
+                _disposed = true;
+                _turnback?.Invoke(this);
             }
         }
 

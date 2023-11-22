@@ -23,12 +23,13 @@
 		<RepositoryUrl>https://github.com/FRACerqueira/RingBufferPlus</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageId>RingBufferPlus</PackageId>
-		<PackageReadmeFile>..\NugetREADME.md</PackageReadmeFile>
+		<PackageReadmeFile>NugetREADME.md</PackageReadmeFile>
 		<PackageProjectUrl>https://fracerqueira.github.io/RingBufferPlus</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+		<PackageVersion>2.0.0</PackageVersion>
 		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
-		<GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 	</PropertyGroup>
 
 	<ItemGroup>

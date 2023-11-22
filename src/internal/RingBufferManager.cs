@@ -115,7 +115,7 @@ namespace RingBufferPlus
 
         protected virtual void Dispose(bool disposing)
         {
-            if (!_disposed)
+            if (!_disposed && disposing)
             {
                 _disposed = true;
                 _managertoken?.Cancel();
@@ -591,19 +591,16 @@ namespace RingBufferPlus
                                 mode = ScaleMode.ToDefaultCapacity;
                                 diff = _availableBuffer.Count - newcap;
                             }
-                            if (mode.HasValue)
+                            if (mode.HasValue && !_managertoken.Token.IsCancellationRequested)
                             {
-                                if (!_managertoken.Token.IsCancellationRequested)
+                                WriteLogDebug(DateTime.Now, string.Format($"{_ringBufferOptions.Name} Scale Capacity Invoked {mode} : {newcap} and Send Metric To Report Thread"));
+                                _blockreportBuffer.Add((mode.Value, new RingBufferMetric(SourceTrigger.AutoScale, currentcap, newcap, _ringBufferOptions.Capacity, _ringBufferOptions.MinCapacity, _ringBufferOptions.MaxCapacity, item, DateTime.Now)));
+                                _currentCapacityBuffer = newcap;
+                                WriteLogDebug(DateTime.Now, string.Format($"{_ringBufferOptions.Name} Scale Capacity Send Message Create to Renew Buffer Thread"));
+                                _blockrenewBuffer.Add(new RingBufferValue<T>(diff));
+                                lock (_lockMetric)
                                 {
-                                    WriteLogDebug(DateTime.Now, string.Format($"{_ringBufferOptions.Name} Scale Capacity Invoked {mode} : {newcap} and Send Metric To Report Thread"));
-                                    _blockreportBuffer.Add((mode.Value, new RingBufferMetric(SourceTrigger.AutoScale, currentcap, newcap, _ringBufferOptions.Capacity, _ringBufferOptions.MinCapacity, _ringBufferOptions.MaxCapacity, item, DateTime.Now)));
-                                    _currentCapacityBuffer = newcap;
-                                    WriteLogDebug(DateTime.Now, string.Format($"{_ringBufferOptions.Name} Scale Capacity Send Message Create to Renew Buffer Thread"));
-                                    _blockrenewBuffer.Add(new RingBufferValue<T>(diff));
-                                    lock (_lockMetric)
-                                    {
-                                        _MetricBuffer.Clear();
-                                    }
+                                    _MetricBuffer.Clear();
                                 }
                             }
                         }
@@ -691,7 +688,7 @@ namespace RingBufferPlus
             }
             else
             {
-                if (value is IDisposable disposablevalue)
+                if (value.Current is IDisposable disposablevalue)
                 {
                     disposablevalue.Dispose();
                     WriteLogDebug(DateTime.Now, string.Format($"{_ringBufferOptions.Name} Renew Buffer Disposed Item"));
