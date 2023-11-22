@@ -1,79 +1,81 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.0.32014.148
+VisualStudioVersion = 17.8.34309.116
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlus", "RingBufferPlus\RingBufferPlus.csproj", "{C5419815-EE14-4A96-8A5A-88D57A36DDD4}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlus", "src\RingBufferPlus.csproj", "{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusTest", "RingBufferPlusTest\RingBufferPlusTest.csproj", "{C53D3D66-0233-4F48-BA33-FF41023D91E0}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusApiSample", "samples\RingBufferPlusApiSample\RingBufferPlusApiSample.csproj", "{B778C693-7F88-4D08-A0A1-50A1C3B381DE}"
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Docs", "Docs", "{02FCABD7-3766-4D73-88A2-B558CBAA069D}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlus.Tests", "tests\RingBufferPlusTest\RingBufferPlus.Tests.csproj", "{C6D56612-8FF8-4A13-911A-E9E6472683A9}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusConsoleSample", "samples\RingBufferPlusConsoleSample\RingBufferPlusConsoleSample.csproj", "{1B7056C7-528B-44DF-85FF-691CDCCD523D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "docs", "docs", "{7C2F1706-D136-4714-8D9F-E6C89B506EF7}"
 	ProjectSection(SolutionItems) = preProject
-		docs\accquire.md = docs\accquire.md
-		docs\addlogprovider.md = docs\addlogprovider.md
-		docs\aliasname.md = docs\aliasname.md
-		docs\autoscalecallback.md = docs\autoscalecallback.md
-		docs\autoscaler.md = docs\autoscaler.md
-		docs\bufferclass.md = docs\bufferclass.md
-		docs\createbuffer.md = docs\createbuffer.md
-		docs\currentstate.md = docs\currentstate.md
-		docs\defaultintervalautoscaler.md = docs\defaultintervalautoscaler.md
-		docs\defaultintervalfailurestate.md = docs\defaultintervalfailurestate.md
-		docs\defaultintervalhealthcheck.md = docs\defaultintervalhealthcheck.md
-		docs\defaultintervalreport.md = docs\defaultintervalreport.md
-		docs\defaulttimeoutaccquire.md = docs\defaulttimeoutaccquire.md
-		docs\errorcallback.md = docs\errorcallback.md
-		docs\factory.md = docs\factory.md
-		docs\healthcheck.md = docs\healthcheck.md
-		docs\hostingextensions.md = docs\hostingextensions.md
+		CODE_OF_CONDUCT.md = CODE_OF_CONDUCT.md
+		CONTRIBUTING.md = CONTRIBUTING.md
+		docapitemplate.md = docapitemplate.md
 		docs\index.md = docs\index.md
-		docs\initialbuffer.md = docs\initialbuffer.md
-		docs\linkedfailurestate.md = docs\linkedfailurestate.md
-		docs\maxbuffer.md = docs\maxbuffer.md
-		docs\metricclass.md = docs\metricclass.md
-		docs\metricsreport.md = docs\metricsreport.md
-		docs\minbuffer.md = docs\minbuffer.md
-		docs\policytimeoutaccquire.md = docs\policytimeoutaccquire.md
-		docs\properties.md = docs\properties.md
-		docs\ringbufferbuild.md = docs\ringbufferbuild.md
-		docs\ringbufferrun.md = docs\ringbufferrun.md
-		docs\timeoutcallback.md = docs\timeoutcallback.md
+		SECURITY.md = SECURITY.md
+		docs\whatsnewprev.md = docs\whatsnewprev.md
+		docs\_config.yml = docs\_config.yml
 	EndProjectSection
 EndProject
-Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Images", "Images", "{A5340B5A-0CAD-4CC0-956D-6CE07686B431}"
-	ProjectSection(SolutionItems) = preProject
-		docs\images\DiagramRingBufferPlus.png = docs\images\DiagramRingBufferPlus.png
-		docs\images\icon.png = docs\images\icon.png
-	EndProjectSection
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "RingBufferPlusBenchmarkSample", "samples\RingBufferPlusBenchmarkSample\RingBufferPlusBenchmarkSample.csproj", "{80EF80EF-5439-43BF-8049-06F4B689664A}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "DotNetProbes", "DotNetProbes\DotNetProbes.csproj", "{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}"
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "samples", "samples", "{508B503D-68BA-4EFE-A117-5A3D68912940}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{60201DA4-1447-4824-AE9D-50002A7BD716}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
+		local|Any CPU = local|Any CPU
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C5419815-EE14-4A96-8A5A-88D57A36DDD4}.Release|Any CPU.Build.0 = Release|Any CPU
-		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{C53D3D66-0233-4F48-BA33-FF41023D91E0}.Release|Any CPU.Build.0 = Release|Any CPU
-		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{CFE86C49-A96F-4B73-82E9-C9FD8272A9FD}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.local|Any CPU.ActiveCfg = local|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.local|Any CPU.Build.0 = local|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1E9222EC-EF56-4342-9FE1-DF9AD0D19D65}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.local|Any CPU.ActiveCfg = Debug|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.local|Any CPU.Build.0 = Debug|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.local|Any CPU.ActiveCfg = Debug|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.local|Any CPU.Build.0 = Debug|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.local|Any CPU.ActiveCfg = Debug|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.local|Any CPU.Build.0 = Debug|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D}.Release|Any CPU.Build.0 = Release|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.local|Any CPU.ActiveCfg = Debug|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.local|Any CPU.Build.0 = Debug|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{80EF80EF-5439-43BF-8049-06F4B689664A}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
-		{A5340B5A-0CAD-4CC0-956D-6CE07686B431} = {02FCABD7-3766-4D73-88A2-B558CBAA069D}
+		{B778C693-7F88-4D08-A0A1-50A1C3B381DE} = {508B503D-68BA-4EFE-A117-5A3D68912940}
+		{C6D56612-8FF8-4A13-911A-E9E6472683A9} = {60201DA4-1447-4824-AE9D-50002A7BD716}
+		{1B7056C7-528B-44DF-85FF-691CDCCD523D} = {508B503D-68BA-4EFE-A117-5A3D68912940}
+		{80EF80EF-5439-43BF-8049-06F4B689664A} = {508B503D-68BA-4EFE-A117-5A3D68912940}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
-		SolutionGuid = {4E82EE9E-8ED4-4F9B-820D-03B4C5E3A4A6}
+		SolutionGuid = {249B93B6-3B03-4106-B076-7C7138E875DA}
 	EndGlobalSection
 EndGlobal

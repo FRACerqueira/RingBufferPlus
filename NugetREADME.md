@@ -1,124 +1,187 @@
 # **Welcome to RingBufferPlus**
 
-A generic circular buffer (ring buffer) in C# with Auto-Scaler, Health-Check and Metrics-Report
-RingBufferPlus was developed in c# with the **netstandard2.1, .NET 5 AND .NET6** target frameworks.
+### **RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler, and Report-Metrics.**
 
-## **Official pages** :
+**RingBufferPlus** was developed in C# with the **netstandard2.1**, **.NET 6** , **.NET 7** and **.NET 8** target frameworks.
 
-#### **[Visit the RingBufferPlus official page for complete documentation](https://fracerqueira.github.io/RingBufferPlus)**
+**[Visit the official page for more documentation of RingBufferPlus](https://fracerqueira.github.io/RingBufferPlus)**
 
-## **RingBufferPlus - Sample Minimum Usage**
+## What's new in the latest version 
+### V2.0.0 
 
-```csharp
-public class MyClass
-{
-   private readonly Guid _id;
-   public MyClassTest()
-   {
-      _id = Guid.NewGuid();
-   }
-   public Guid Id => _id;
-}
+- Release G.A with .NET8 
 
-var rb = RingBuffer<MyClass>
-        .CreateBuffer() //default 2 (Initial/min/max)
-        .MaxBuffer(10)
-        .Factory((ctk) => new MyClass())
-        .Build()
-        .Run();
+## Features
 
-using (var buffer = rb.Accquire())
-{ 
-   Console.WriteLine(buffer.Id);
-}
+### Implemented concept
 
-rb.Dispose();
+The implementation follows the basic principle. The principle was expanded to have a scale capacity that may or may not be modified to optimize the consumption of the resources used.
+
+### Key Features
+
+- Set unique name for same buffer type
+- Set the buffer capacity
+- Set the minimum and maximum capacity (optional)
+- Set the conditions for scaling to maximum and minimum
+- Associate the logger inertface
+- Define a user role for generated errors
+- Define a user role to receive capacity change events
+- Simple and clear fluent syntax
+
+## Installing
+
+```
+Install-Package RingBufferPlus [-pre]
 ```
 
-## **RingBufferPlus - Sample Complex Usage**
+```
+dotnet add package RingBufferPlus [--prerelease]
+```
+
+**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
+
+## Examples
+
+See folder [**Samples**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples).
+
+```
+dotnet run --project [name of sample]
+```
+
+## Usage
+
+The **RingBufferPlus** use **fluent interface**; an object-oriented API whose design relies extensively on method chaining. Its goal is to increase code legibility. The term was coined in 2005 by Eric Evans and Martin Fowler.
+
+### Sample-Console Usage (Full features)
 
 ```csharp
-public class MyClass : IDisposable
+using var loggerFactory = LoggerFactory.Create(builder =>
 {
-   private readonly Guid _id;
-   private bool _disposedValue;
+    builder
+        .SetMinimumLevel(LogLevel.Information)
+        .AddFilter("Microsoft", LogLevel.Warning)
+        .AddFilter("System", LogLevel.Warning)
+        .AddConsole();
+});
+logger = loggerFactory.CreateLogger<Program>();
+```
 
-   public MyClassTest()
-   {
-      _id = Guid.NewGuid();
-   }
-   public bool IsValidState => true;	
-   public Guid Id => _id;
-   protected virtual void Dispose(bool disposing)
-   {
-      if (!_disposedValue)
-      {
-         if (disposing)
-         {
-           _disposedValue = true;
-         }
-      }
-   }
-   public void Dispose()
-   {
-      // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-      Dispose(disposing: true);
-      GC.SuppressFinalize(this);
-   }
+```csharp
+var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
+    .Capacity(8)
+    .Logger(logger!)
+    .Factory((cts) => { return rnd.Next(1, 10); })
+    .SwithToScaleDefinitions()
+        .MinCapacity(4)
+            // Defaut = Max  (Min = 1, Max = Capacity)
+            .ScaleWhenFreeGreaterEq()
+            // Defaut = Min  (Min = 1, Max = MinCapacity)
+            .RollbackWhenFreeLessEq()
+            // Defaut = Max-1 (Min = 1, Max = MinCapacity)
+            //.TriggerByAccqWhenFreeLessEq()
+        .MaxCapacity(20)
+            // Default = Min (Min =  1, Max = Capacity)
+            .ScaleWhenFreeLessEq()
+            // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
+            .RollbackWhenFreeGreaterEq()
+            // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
+            //.TriggerByAccqWhenFreeGreaterEq() 
+    .BuildWarmup(out var completed);
+```
+
+```csharp
+using (var buffer = rb.Accquire())
+{
+    if (bufferedItem.Successful)
+    {
+        try 
+        {
+            //do something    
+        }
+        catch
+        {
+            buffer.Invalidate();
+        }
+    }
 }
+```
 
-var build_rb = RingBuffer<MyClass>
-                .CreateBuffer(5)
-                .MinBuffer(3)
-                .MaxBuffer(10)
-                .AliasName("Test")
-                .SetPolicyTimeout(RingBufferPolicyTimeout.UserPolicy, (metric,ctk) => true)
-                .SetTimeoutAccquire(10)
-                .SetIntervalAutoScaler(500)
-                .SetIntervalHealthCheck(1000)
-                .SetIntervalFailureState(TimeSpan.FromSeconds(30))
-                .SetIntervalReport(1000)
-                .LinkedFailureState(() => true)
-                .Factory((ctk) => New MyClass() )
-                .HealthCheck((buffer, ctk) => buffer.IsValidState)
-                .MetricsReport((metric,ctk) => Console.WriteLine(metric.ErrorCount))
-                .AddLogProvider(_loggerFactory,RingBufferLogLevel.Information)
-                .AutoScaler((RingBufferMetric, CancellationToken) =>
+
+### Sample-api/webUsage
+
+```csharp
+builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
+{
+    return ringbuf
+        .Capacity(8)
+        .Factory((cts) => { return 10; })
+        .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
+        .OnError((log, error) => 
+        {
+            log?.LogError("{error}",error);
+        })
+        .Build();
+});
+```
+
+```csharp
+[ApiController]
+[Route("[controller]")]
+public class MyController(IRingBufferService<int> ringBufferService) : ControllerBase
+{
+    private readonly IRingBufferService<int> _ringBufferService = ringBufferService;
+
+    [HttpGet]
+    public ActionResult Get()
+    {
+        using (var buffer = _ringBufferService.Accquire())
+        {
+            if (bufferedItem.Successful)
+            {
+                try 
                 {
-                   return 5;	
-                })
-                .Build();
-
-build_rb.AutoScalerCallback += Ring_AutoScalerCallback;
-build_rb.ErrorCallBack += Ring_ErrorCallBack;
-build_rb.TimeoutCallBack += Ring_TimeoutCallBack;
-
-var rb = build_rb.Run(cancellationToken);
-
-using (var buffer = rb.Accquire())
-{ 
-   Console.WriteLine(buffer.Id);
-}
-
-rb.Dispose();
-
-private void Ring_ErrorCallBack(object sender, RingBufferErrorEventArgs e)
-{
-   Console.WriteLine($"{e.Alias} => Error: {e.Error?.Message ?? "Null"}.");
-}
-
-private void Ring_TimeoutCallBack(object sender, RingBufferTimeoutEventArgs e)
-{
-   Console.WriteLine($"{e.Alias} => TimeOut = {e.ElapsedTime}");
-}
-
-private void Ring_AutoScalerCallback(object sender, RingBufferAutoScaleEventArgs e)
-{
-   Console.WriteLine($"{e.Alias} => {e.OldCapacity} to {e.NewCapacity}.");
+                    //do something    
+                }
+                catch
+                {
+                    buffer.Invalidate();
+                }
+            }
+        }
+    }
 }
 ```
 
-## **License**
+## Performance
 
-This project is licensed under the [MIT License](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
+See folder [**Samples/RingBufferPlusBenchmarkSample**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/Samples/RingBufferPlusBenchmarkSample).
+
+```
+BenchmarkDotNet v0.13.10, Windows 10 (10.0.19044.3693/21H2/November2021Update)
+Intel Core i7-8565U CPU 1.80GHz (Whiskey Lake), 1 CPU, 8 logical and 4 physical cores
+.NET SDK 8.0.100
+  [Host]     : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
+  Job-IMTEVT : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
+  Dry        : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
+
+| Method            | Mean        | StdErr    | StdDev      | Min         | Q1          | Median      | Q3          | Max         | Op/s   | Rank |
+|------------------ |------------:|----------:|------------:|------------:|------------:|------------:|------------:|------------:|-------:|-----:|
+| WithRingBuffer    |    589.8 ms |  16.90 ms |   169.01 ms |    191.2 ms |    487.2 ms |    555.4 ms |    659.0 ms |  1,324.8 ms | 1.6955 |    1 |
+| WithoutRingBuffer | 15,441.5 ms | 154.39 ms | 1,543.90 ms | 13,785.4 ms | 14,562.8 ms | 15,071.1 ms | 15,981.9 ms | 24,595.2 ms | 0.0648 |    2 |
+```
+
+## Credits
+
+This work was inspired by the project by [**Luis Carlos Farias**](https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer). 
+My thanks for your great work of bringing knowledge to the community!
+
+**API documentation generated by**
+
+- [xmldoc2md](https://github.com/FRACerqueira/xmldoc2md), Copyright (c) 2022 Charles de Vandière.
+
+## License
+
+Copyright 2022 @ Fernando Cerqueira
+
+RingBufferPlus is licensed under the MIT license. See [LICENSE](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE).
 

@@ -1,0 +1,62 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+	<PropertyGroup>
+		<TargetFrameworks>net8.0;net7.0;net6.0; netstandard2.1</TargetFrameworks>
+		<LangVersion>latest</LangVersion>
+		<NeutralLanguage>en</NeutralLanguage>
+		<AssemblyName>RingBufferPlus</AssemblyName>
+		<RootNamespace>RingBufferPlus</RootNamespace>
+		<Nullable>annotations</Nullable>
+		<Configurations>Debug;Release;local</Configurations>
+		<GenerateDocumentationFile>True</GenerateDocumentationFile>
+	</PropertyGroup>
+	
+	<PropertyGroup Condition="'$(Configuration)'=='local'">
+		<CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+	</PropertyGroup>
+	
+	<PropertyGroup>
+		<Authors>Fernando Cerqueira</Authors>
+		<Description>A generic circular buffer (ring buffer) in C# with Auto-Scaler, and Report-Metrics.</Description>
+		<PackageReleaseNotes>https://github.com/FRACerqueira/RingBufferPlus/releases</PackageReleaseNotes>
+		<PackageLicenseExpression>MIT</PackageLicenseExpression>
+		<PackageTags>csharp;dotnet;dotnetcore;ringbuffer;ring-buffer;circular-buffer;rabittmq;cyclic-buffer</PackageTags>
+		<RepositoryUrl>https://github.com/FRACerqueira/RingBufferPlus</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageId>RingBufferPlus</PackageId>
+		<PackageReadmeFile>..\NugetREADME.md</PackageReadmeFile>
+		<PackageProjectUrl>https://fracerqueira.github.io/RingBufferPlus</PackageProjectUrl>
+		<PackageIcon>icon.png</PackageIcon>
+		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
+		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
+		<GeneratePackageOnBuild>False</GeneratePackageOnBuild>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+			<_Parameter1>$(AssemblyName).Tests</_Parameter1>
+		</AssemblyAttribute>
+	</ItemGroup>
+	
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.AspNetCore.Http.Abstractions" Version="2.2.0" />
+		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.0" />
+		<PackageReference Include="Microsoft.Extensions.Hosting.Abstractions" Version="8.0.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<None Include="..\README.txt" Pack="true" PackagePath="\" Link="Package\README.txt" />
+		<None Include="..\NugetREADME.md" Pack="true" PackagePath="\" Link="Package\NugetREADME.md" />
+		<None Include="..\icon.png" Pack="true" PackagePath="\" Link="Package\icon.png" />
+		<None Include="..\README.md" Pack="false" Link="Package\README.md" />
+	</ItemGroup>
+
+	<ItemGroup>
+	  <Folder Include="Package\" />
+	</ItemGroup>	
+
+	<Target Name="PostBuild" AfterTargets="PostBuildEvent" Condition="'$(Configuration)|$(TargetFramework)'=='local|net7.0'">
+		<Exec Command="xmldoc2md $(SolutionDir)src\bin\local\net7.0\RingBufferPlus.dll $(SolutionDir)docs\apis --templatefile $(SolutionDir)docapitemplate.md  --excludeinternal --index-page-name apis --back-button &quot;Back to List Api&quot; --link-back-button &quot;./apis.md&quot; --back-index-button &quot;Main&quot; --link-backindex-button &quot;../index.md#table-of-contents&quot;" />
+	</Target>
+	
+</Project>
