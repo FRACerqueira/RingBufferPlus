@@ -54,11 +54,16 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Set the minimum and maximum capacity (optional)
     - Set the conditions for scaling to maximum and minimum (required)
         - Automatic condition values ​​based on capacity (value not required)
-    - Define a user role to receive capacity change events (optional)
+    - Define a user role to receive capacity change events to log/save (optional)
+        - Executed in a separate thread asynchronously
 - Associate the logger interface (optional)
 - Define a user role for generated errors (optional)
+    - Executed in a separate thread asynchronously
 - Invalidate the buffer when it is in an invalid state
 - Warm up to full capacity before starting application 
+- Receive item from buffer with success/failure information and elapsed time for acquisition
+- Sets a time limit for acquiring the item in the buffer
+- Detailed information about operations when the minimum log is Debug
 - Simple and clear fluent syntax
 
 ## Installing
