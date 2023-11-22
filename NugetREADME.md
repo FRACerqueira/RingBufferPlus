@@ -171,6 +171,10 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
 
 ## Performance
 
+The BenchmarkDotNet test was done on the local machine, with **'RabbitMQ' (over wsl)**. The measures are **about publisher** action (Scenario where Ringbuffer makes sense and brings significant performance gains).
+
+**The gain can be much greater for real machines in production!**
+
 See folder [**Samples/RingBufferPlusBenchmarkSample**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/Samples/RingBufferPlusBenchmarkSample).
 
 ```
