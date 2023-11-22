@@ -107,6 +107,10 @@ logger = loggerFactory.CreateLogger<Program>();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
     .Logger(logger!)
+    .OnError((log, error) => 
+    {
+        log?.LogError("{error}",error);
+    })
     .Factory((cts) => { return rnd.Next(1, 10); })
     .SwithToScaleDefinitions()
         .SampleUnit(TimeSpan.FromSeconds(10), 10)
