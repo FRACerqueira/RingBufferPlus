@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RingBufferPlusBenchmarkSample": {
+      "commandName": "Project",
+      "commandLineArgs": "--role consumer --delay 5"
+    }
+  }
+}

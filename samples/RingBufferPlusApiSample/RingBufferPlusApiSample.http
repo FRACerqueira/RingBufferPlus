@@ -1,0 +1,6 @@
+@RingBufferPlusApiSample_HostAddress = http://localhost:5253
+
+GET {{RingBufferPlusApiSample_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###

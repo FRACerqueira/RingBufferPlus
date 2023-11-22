@@ -1,24 +1,22 @@
-# **Welcome to RingBufferPlus**
+ï»¿========================================================================================
+ _____   _                ____           __   __             _____   _                 
+ |  __ \ (_)              |  _ \         / _| / _|           |  __ \ | |                
+ | |__) | _  _ __    __ _ | |_) | _   _ | |_ | |_  ___  _ __ | |__) || |     _   _  ___ 
+ |  _  / | || '_ \  / _` ||  _ < | | | ||  _||  _|/ _ \| '__||  ___/ | |    | | | |/ __|
+ | | \ \ | || | | || (_| || |_) || |_| || |  | | |  __/| |   | |     | |____| |_| |\__ \
+ |_|  \_\|_||_| |_| \__, ||____/  \__,_||_|  |_|  \___||_|   |_|     |______|\__,_||___/
+                     __/ |                                                              
+                    |___/                                                               
 
-### **RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler, and Report-Metrics.**
+========================================================================================
 
-**RingBufferPlus** was developed in C# with the **netstandard2.1**, **.NET 6** , **.NET 7** and **.NET 8** target frameworks.
+Welcome to RingBufferPlus
+-------------------------
 
-**[Visit the official page for more documentation of RingBufferPlus](https://fracerqueira.github.io/RingBufferPlus)**
+RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler, and Report-Metrics.
 
-## What's new in the latest version 
-### V2.0.0 
-
-- Release G.A with .NET8 
-
-## Features
-
-### Implemented concept
-
-The implementation follows the basic principle. The principle was expanded to have a scale capacity that may or may not be modified to optimize the consumption of the resources used.
-
-### Key Features
-
+Features
+--------
 - Set unique name for same buffer type
 - Set the buffer capacity
 - Set the minimum and maximum capacity (optional)
@@ -28,33 +26,32 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Define a user role to receive capacity change events
 - Simple and clear fluent syntax
 
-## Installing
+Visit the official page for more documentation : 
+https://fracerqueira.github.io/RingBufferPlus
 
-```
-Install-Package RingBufferPlus [-pre]
-```
+PipeAndFilter was developed in C# with target frameworks:
 
-```
-dotnet add package RingBufferPlus [--prerelease]
-```
+- netstandard2.1
+- .NET 6
+- .NET 7
+- .NET 8
 
-**_Note:  [-pre]/[--prerelease] usage for pre-release versions_**
+*** What's new in V2.0.0 ***
+----------------------------
 
-## Examples
+- Release G.A with .NET8 
 
-See folder [**Samples**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples).
+**Examples**
+------------
+See folder:
+https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples
 
-```
-dotnet run --project [name of sample]
-```
+**Usage**
+---------
 
-## Usage
+Sample-Console Usage (Full features)
+====================================
 
-The **RingBufferPlus** use **fluent interface**; an object-oriented API whose design relies extensively on method chaining. Its goal is to increase code legibility. The term was coined in 2005 by Eric Evans and Martin Fowler.
-
-### Sample-Console Usage (Full features)
-
-```csharp
 using var loggerFactory = LoggerFactory.Create(builder =>
 {
     builder
@@ -64,9 +61,9 @@ using var loggerFactory = LoggerFactory.Create(builder =>
         .AddConsole();
 });
 logger = loggerFactory.CreateLogger<Program>();
-```
 
-```csharp
+... 
+
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
     .Logger(logger!)
@@ -92,9 +89,9 @@ var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
             // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
             //.TriggerByAccqWhenFreeGreaterEq() 
     .BuildWarmup(out var completed);
-```
 
-```csharp
+...
+
 using (var buffer = rb.Accquire())
 {
     if (bufferedItem.Successful)
@@ -109,12 +106,10 @@ using (var buffer = rb.Accquire())
         }
     }
 }
-```
 
+Sample-Sample-api/webUsage
+==========================
 
-### Sample-api/webUsage
-
-```csharp
 builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
 {
     return ringbuf
@@ -131,9 +126,9 @@ builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
 ...
 
 app.WarmupRingBuffer<int>("Mybuffer");
-```
 
-```csharp
+...
+
 [ApiController]
 [Route("[controller]")]
 public class MyController(IRingBufferService<int> ringBufferService) : ControllerBase
@@ -159,38 +154,9 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
         }
     }
 }
-```
 
-## Performance
-
-See folder [**Samples/RingBufferPlusBenchmarkSample**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/Samples/RingBufferPlusBenchmarkSample).
-
-```
-BenchmarkDotNet v0.13.10, Windows 10 (10.0.19044.3693/21H2/November2021Update)
-Intel Core i7-8565U CPU 1.80GHz (Whiskey Lake), 1 CPU, 8 logical and 4 physical cores
-.NET SDK 8.0.100
-  [Host]     : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
-  Job-IMTEVT : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
-  Dry        : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
-
-| Method            | Mean        | StdErr    | StdDev      | Min         | Q1          | Median      | Q3          | Max         | Op/s   | Rank |
-|------------------ |------------:|----------:|------------:|------------:|------------:|------------:|------------:|------------:|-------:|-----:|
-| WithRingBuffer    |    589.8 ms |  16.90 ms |   169.01 ms |    191.2 ms |    487.2 ms |    555.4 ms |    659.0 ms |  1,324.8 ms | 1.6955 |    1 |
-| WithoutRingBuffer | 15,441.5 ms | 154.39 ms | 1,543.90 ms | 13,785.4 ms | 14,562.8 ms | 15,071.1 ms | 15,981.9 ms | 24,595.2 ms | 0.0648 |    2 |
-```
-
-## Credits
-
-This work was inspired by the project by [**Luis Carlos Farias**](https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer). 
-My thanks for your great work of bringing knowledge to the community!
-
-**API documentation generated by**
-
-- [xmldoc2md](https://github.com/FRACerqueira/xmldoc2md), Copyright (c) 2022 Charles de Vandière.
-
-## License
+**License**
+-----------
 
 Copyright 2022 @ Fernando Cerqueira
-
-RingBufferPlus is licensed under the MIT license. See [LICENSE](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE).
-
+RingBufferPlus project is licensed under the  the MIT license.
