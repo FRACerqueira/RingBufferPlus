@@ -72,6 +72,11 @@ var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Logger(logger!)
     .Factory((cts) => { return rnd.Next(1, 10); })
     .SwithToScaleDefinitions()
+        .SampleUnit(TimeSpan.FromSeconds(10), 10)
+        .ReportScale((mode, log, metric, _) =>
+        {
+            log.LogInformation($"{connectionRingBuffer!.Name} Report:  [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity} ({metric.Capacity}/{metric.MinCapacity}/{metric.MaxCapacity}) : {metric.FreeResource}");
+        })
         .MinCapacity(4)
             // Defaut = Max  (Min = 1, Max = Capacity)
             .ScaleWhenFreeGreaterEq()
@@ -122,6 +127,10 @@ builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
         })
         .Build();
 });
+
+...
+
+app.WarmupRingBuffer<int>("Mybuffer");
 ```
 
 ```csharp
