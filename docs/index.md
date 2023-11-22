@@ -40,7 +40,7 @@ A ring buffer makes a bounded queue when separate indices are used for inserting
 
 The implementation follows the basic principle. The principle was expanded to have a scale capacity that may or may not be modified to optimize the consumption of the resources used.
 
-![](./docs/images/RingBufferPlusFeature.png)
+![](./images/RingBufferPlusFeature.png)
 
 ### Key Features
 [**Top**](#table-of-contents)
@@ -107,6 +107,10 @@ logger = loggerFactory.CreateLogger<Program>();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
     .Logger(logger!)
+    .OnError((log, error) => 
+    {
+        log?.LogError("{error}",error);
+    })
     .Factory((cts) => { return rnd.Next(1, 10); })
     .SwithToScaleDefinitions()
         .SampleUnit(TimeSpan.FromSeconds(10), 10)

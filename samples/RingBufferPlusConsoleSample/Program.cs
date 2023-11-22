@@ -25,7 +25,11 @@ namespace RingBufferPlusConsoleSample
                 .Capacity(8)
                 .Logger(logger!)
                 .Factory((cts) => { return rnd.Next(1, 10); })
-                .SwithToScaleDefinitions()
+                .OnError((log, error) =>
+                {
+                     log?.LogError("{error}", error);
+                })
+               .SwithToScaleDefinitions()
                     .MinCapacity(4)
                         // Defaut = Max  (Min = 1, Max = Capacity)
                         .ScaleWhenFreeGreaterEq()

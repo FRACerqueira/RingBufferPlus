@@ -76,6 +76,10 @@ var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
     .Logger(logger!)
     .Factory((cts) => { return rnd.Next(1, 10); })
+    .OnError((log, error) => 
+    {
+        log?.LogError("{error}",error);
+    })
     .SwithToScaleDefinitions()
         .SampleUnit(TimeSpan.FromSeconds(10), 10)
         .ReportScale((mode, log, metric, _) =>
