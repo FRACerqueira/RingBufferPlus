@@ -21,7 +21,7 @@ namespace RingBufferPlus
         /// <br>Executes asynchronously.</br>
         /// </summary>
         /// <param name="report">The handler to action.</param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferSlaveCapacity{T}"/>.</returns>
         IRingBufferSlaveCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report = null);
 
 
@@ -29,14 +29,14 @@ namespace RingBufferPlus
         /// Minimum capacity.
         /// </summary>
         /// <param name="value">The minimal buffer. Value mus be greater or equal 1</param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferSlaveCapacity{T}"/>.</returns>
         IRingBufferSlaveCapacity<T> MinCapacity(int value);
 
         /// <summary>
         /// Maximum capacity.
         /// </summary>
         /// <param name="value">The maximum buffer.Value mus be greater or equal <see cref="IRingBuffer{T}.Capacity(int)"/></param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferSlaveCapacity{T}"/>.</returns>
         IRingBufferSlaveCapacity<T> MaxCapacity(int value);
 
         /// <summary>
