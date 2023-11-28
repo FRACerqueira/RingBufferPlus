@@ -27,7 +27,7 @@
 		<PackageProjectUrl>https://fracerqueira.github.io/RingBufferPlus</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-		<PackageVersion>2.0.0</PackageVersion>
+		<PackageVersion>3.0.0</PackageVersion>
 		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 	</PropertyGroup>
