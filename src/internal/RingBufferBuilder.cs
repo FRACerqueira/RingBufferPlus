@@ -10,7 +10,7 @@ using Microsoft.Extensions.Logging;
 namespace RingBufferPlus
 {
 
-    internal class RingBufferBuilder<T>(string uniquename, ILoggerFactory? loggerFactory, CancellationToken? cancellation) : IRingBuffer<T>,IRingBufferScaleCapacity<T>, IRingBufferScaleMax<T>, IRingBufferScaleMin<T>, IRingBufferOptions<T>
+    internal class RingBufferBuilder<T>(string uniquename, ILoggerFactory? loggerFactory, CancellationToken? cancellation) : IRingBuffer<T>,IRingBufferMasterCapacity<T>, IRingBufferScaleMax<T>, IRingBufferScaleMin<T>, IRingBufferSlaveCapacity<T>, IRingBufferOptions<T>, IRingBufferCallback
     {
         private readonly ILoggerFactory? _loggerFactory = loggerFactory;
         private readonly CancellationToken _apptoken = cancellation??CancellationToken.None;
@@ -26,6 +26,8 @@ namespace RingBufferPlus
         public int MinCapacity { get; private set; } = 2;
 
         public int MaxCapacity { get; private set; } = 2;
+
+        public Func<T, bool> FactoryHealth { get; private set; }
 
         public Func<CancellationToken, T> FactoryHandler { get; private set; }
 
@@ -61,9 +63,29 @@ namespace RingBufferPlus
 
         public TimeSpan AccquireTimeout { get; private set; } = TimeSpan.FromSeconds(30);
 
+        public IRingBufferSwith SwithFrom { get; private set; }
+        public IRingBufferSwith SwithTo { get; private set; }
+
+        #endregion
+
+        #region IRingBufferCallback
+
+        public SemaphoreSlim SemaphoremasterSlave => null;
+
+        public void CallBackMaster(IRingBufferSwith value)
+        { 
+            //none
+        }
+
+        string IRingBufferCallback.Name => Name;
+
+        public bool IsSlave { get; private set; }
+
+
         #endregion
 
         #region IRingBuffer
+
 
         IRingBuffer<T> IRingBuffer<T>.Logger(ILogger value)
         {
@@ -113,6 +135,12 @@ namespace RingBufferPlus
             return this;
         }
 
+        IRingBuffer<T> IRingBuffer<T>.FactoryHealth(Func<T, bool> value)
+        {
+            FactoryHealth = value;
+            return this;
+        }
+
         IRingBuffer<T> IRingBuffer<T>.Factory(Func<CancellationToken, T> value, TimeSpan? timeout, TimeSpan? idleRetryError)
         {
 #if NETSTANDARD2_1
@@ -144,11 +172,33 @@ namespace RingBufferPlus
         }
 
 
-        IRingBufferScaleCapacity<T> IRingBuffer<T>.SwithToScaleDefinitions()
+        IRingBufferMasterCapacity<T> IRingBuffer<T>.MasterScale(IRingBufferSwith ringBuffer)
         {
+#if NETSTANDARD2_1
+            if (ringBuffer is null)
+            {
+                throw new ArgumentNullException(nameof(ringBuffer));
+            }
+#else
+            ArgumentNullException.ThrowIfNull(ringBuffer);
+#endif
+            if(!((IRingBufferCallback)ringBuffer).IsSlave)
+            {
+                throw new InvalidOperationException("ringBuffer parameter not slave");
+            }
+            SwithTo = ringBuffer;
+            IsSlave = false;
+            SwithFrom = null;
             return this;
         }
 
+        IRingBufferSlaveCapacity<T> IRingBuffer<T>.SlaveScale()
+        {
+            SwithTo = null;
+            SwithFrom = null;
+            IsSlave = true;
+            return this;
+        }
 
         IRingBufferService<T> IRingBuffer<T>.Build()
         {
@@ -159,50 +209,42 @@ namespace RingBufferPlus
 
         #region IRingBufferScaleCapacity
 
-        IRingBufferService<T> IRingBufferScaleCapacity<T>.BuildWarmup(out bool fullcapacity, TimeSpan? timeout)
+        IRingBufferService<T> IRingBufferMasterCapacity<T>.BuildWarmup(out bool fullcapacity, TimeSpan? timeout)
         {
             return SharedBuildWarmup(out fullcapacity, timeout);
         }
 
-        IRingBufferService<T> IRingBufferScaleCapacity<T>.Build()
+        IRingBufferService<T> IRingBufferMasterCapacity<T>.Build()
         {
             return SharedBuild();
         }
 
-        IRingBufferScaleMax<T> IRingBufferScaleCapacity<T>.MaxCapacity(int value)
+        IRingBufferScaleMax<T> IRingBufferMasterCapacity<T>.MaxCapacity(int value)
         {
             ShareMaxCapacity(value); 
             return this;
         }
 
-        IRingBufferScaleMin<T> IRingBufferScaleCapacity<T>.MinCapacity(int value)
+        IRingBufferScaleMin<T> IRingBufferMasterCapacity<T>.MinCapacity(int value)
         {
             ShareMinCapacity(value);
             return this;
         }
 
 
-        IRingBufferScaleCapacity<T> IRingBufferScaleCapacity<T>.ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        IRingBufferMasterCapacity<T> IRingBufferMasterCapacity<T>.ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
         {
-#if NETSTANDARD2_1
-            if (report is null)
-            {
-                throw new ArgumentNullException(nameof(report));
-            }
-#else
-            ArgumentNullException.ThrowIfNull(report);
-#endif            
-            ReportHandler = report;
+            SharedReport(report);
             return this;
         }
 
-        IRingBufferScaleCapacity<T> IRingBufferScaleCapacity<T>.SampleUnit(int? value)
+        IRingBufferMasterCapacity<T> IRingBufferMasterCapacity<T>.SampleUnit(int? value)
         {
             SharedSampleUnit(ScaleCapacityDelay, value);
             return this;
         }
 
-        IRingBufferScaleCapacity<T> IRingBufferScaleCapacity<T>.SampleUnit(TimeSpan? baseunit,  int? value)
+        IRingBufferMasterCapacity<T> IRingBufferMasterCapacity<T>.SampleUnit(TimeSpan? baseunit,  int? value)
         {
             SharedSampleUnit(baseunit, value);
             return this;
@@ -233,10 +275,10 @@ namespace RingBufferPlus
 
         IRingBufferScaleMax<T> IRingBufferScaleMax<T>.ScaleWhenFreeLessEq(int? value)
         {
-            var localvalue = value ?? 1;
-            if (localvalue < 1)
+            var localvalue = value ?? 2;
+            if (localvalue < 2)
             {
-                throw new ArgumentException($"The value({localvalue}) must be greater or equal 1");
+                throw new ArgumentException($"The value({localvalue}) must be greater or equal 2");
             }
             if (localvalue > Capacity)
             {
@@ -312,9 +354,9 @@ namespace RingBufferPlus
         IRingBufferScaleMin<T> IRingBufferScaleMin<T>.ScaleWhenFreeGreaterEq(int? value)
         {
             var localvalue = value ?? Capacity;
-            if (localvalue < 1)
+            if (localvalue < 2)
             {
-                throw new ArgumentException($"The value({localvalue}) must be greater than or equal to 1", nameof(value));
+                throw new ArgumentException($"The value({localvalue}) must be greater than or equal to 2", nameof(value));
             }
             if (localvalue > Capacity)
             {
@@ -328,10 +370,10 @@ namespace RingBufferPlus
 
         IRingBufferScaleMin<T> IRingBufferScaleMin<T>.TriggerByAccqWhenFreeLessEq(int? value)
         {
-            var localvalue = value ?? MinCapacity-1;
-            if (localvalue < 1)
+            var localvalue = value ?? MinCapacity;
+            if (localvalue < 2)
             {
-                throw new ArgumentException($"The value must be greater than or equal to 1", nameof(value));
+                throw new ArgumentException($"The value must be greater than or equal to 2", nameof(value));
             }
             if (localvalue > MinCapacity)
             {
@@ -363,6 +405,39 @@ namespace RingBufferPlus
 
         #endregion
 
+        #region IRingBufferScaleFromCapacity
+
+        IRingBufferSlaveCapacity<T> IRingBufferSlaveCapacity<T>.ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        {
+            SharedReport(report);
+            return this;
+        }
+
+        IRingBufferSlaveCapacity<T> IRingBufferSlaveCapacity<T>.MinCapacity(int value)
+        {
+            ShareMinCapacity(value);
+            return this;
+        }
+
+        IRingBufferSlaveCapacity<T> IRingBufferSlaveCapacity<T>.MaxCapacity(int value)
+        {
+            ShareMaxCapacity(value);
+            return this;
+        }
+
+        IRingBufferService<T> IRingBufferSlaveCapacity<T>.Build()
+        {
+            return SharedBuild();
+        }
+
+        IRingBufferService<T> IRingBufferSlaveCapacity<T>.BuildWarmup(out bool fullcapacity, TimeSpan? timeout)
+        {
+            return SharedBuildWarmup(out fullcapacity, timeout);
+        }
+
+        #endregion
+
+
         private void SharedSampleUnit(TimeSpan? baseunit, int? value)
         {
             var localvalue = value ?? 60;
@@ -381,10 +456,6 @@ namespace RingBufferPlus
 
         private void ShareMaxCapacity(int value)
         {
-            if (value < 2)
-            {
-                throw new ArgumentException("MaxCapacity must be greater than or equal to 2", nameof(value));
-            }
             if (value < Capacity)
             {
                 throw new ArgumentException($"MaxCapacity must be greater than or equal to Capacity({Capacity})", nameof(value));
@@ -397,9 +468,9 @@ namespace RingBufferPlus
 
         private void ShareMinCapacity(int value)
         {
-            if (value < 2)
+            if (value < 1)
             {
-                throw new ArgumentException("MinCapacity must be greater than or equal to 2", nameof(value));
+                throw new ArgumentException("MinCapacity must be greater than or equal to 1", nameof(value));
             }
             if (value > Capacity)
             {
@@ -409,6 +480,19 @@ namespace RingBufferPlus
             ScaleToMinGreaterEq = null;
             MinRollbackWhenFreeLessEq = null;
             MinTriggerByAccqWhenFreeGreaterEq  = null;   
+        }
+
+        private void SharedReport(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        {
+#if NETSTANDARD2_1
+            if (report is null)
+            {
+                throw new ArgumentNullException(nameof(report));
+            }
+#else
+            ArgumentNullException.ThrowIfNull(report);
+#endif            
+            ReportHandler = report;
         }
 
         private RingBufferManager<T> SharedBuild()
@@ -423,32 +507,38 @@ namespace RingBufferPlus
             }
             if (MaxCapacity != Capacity)
             {
-                if (!ScaleToMaxLessEq.HasValue)
+                if (SwithTo != null)
                 {
-                    throw new RingBufferException(Name, "MaxCapacity : ScaleWhenFreeLessEq is null");
-                }
-                if (!MaxTriggerByAccqWhenFreeGreaterEq.HasValue && !MaxRollbackWhenFreeGreaterEq.HasValue)
-                {
-                    throw new RingBufferException(Name, "MaxCapacity : TriggerByAccqWhenFreeGreaterEq or RollbackWhenFreeGreaterEq is null");
-                }
-                if (!HasScaleCapacity)
-                {
-                    HasScaleCapacity = MaxRollbackWhenFreeGreaterEq.HasValue;
+                    if (!ScaleToMaxLessEq.HasValue)
+                    {
+                        throw new RingBufferException(Name, "MaxCapacity : ScaleWhenFreeLessEq is null");
+                    }
+                    if (!MaxTriggerByAccqWhenFreeGreaterEq.HasValue && !MaxRollbackWhenFreeGreaterEq.HasValue)
+                    {
+                        throw new RingBufferException(Name, "MaxCapacity : TriggerByAccqWhenFreeGreaterEq or RollbackWhenFreeGreaterEq is null");
+                    }
+                    if (!HasScaleCapacity)
+                    {
+                        HasScaleCapacity = MaxRollbackWhenFreeGreaterEq.HasValue;
+                    }
                 }
             }
             if (MinCapacity != Capacity)
-            {
-                if (!ScaleToMinGreaterEq.HasValue)
+            { 
+                if (SwithTo != null)
                 {
-                    throw new RingBufferException(Name, "MaxCapacity : ScaleWhenFreeGreaterEq is null");
-                }
-                if (!MinTriggerByAccqWhenFreeGreaterEq .HasValue && !MinRollbackWhenFreeLessEq.HasValue)
-                {
-                    throw new RingBufferException(Name, "MinCapacity: TriggerByAccqWhenFreeGreaterEq or  RollbackWhenFreeGreaterEq is null");
-                }
-                if (!HasScaleCapacity)
-                {
-                    HasScaleCapacity = MinRollbackWhenFreeLessEq.HasValue;
+                    if (!ScaleToMinGreaterEq.HasValue)
+                    {
+                        throw new RingBufferException(Name, "MaxCapacity : ScaleWhenFreeGreaterEq is null");
+                    }
+                    if (!MinTriggerByAccqWhenFreeGreaterEq.HasValue && !MinRollbackWhenFreeLessEq.HasValue)
+                    {
+                        throw new RingBufferException(Name, "MinCapacity: TriggerByAccqWhenFreeGreaterEq or  RollbackWhenFreeGreaterEq is null");
+                    }
+                    if (!HasScaleCapacity)
+                    {
+                        HasScaleCapacity = MinRollbackWhenFreeLessEq.HasValue;
+                    }
                 }
             }
             return new RingBufferManager<T>(this, _apptoken);

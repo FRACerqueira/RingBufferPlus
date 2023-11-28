@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferScaleCapacity<T> 
+# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferScaleFromCapacity<T> 
 
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
@@ -7,14 +7,14 @@
 
 [**Back to List Api**](./apis.md)
 
-# IRingBufferScaleCapacity&lt;T&gt;
+# IRingBufferScaleFromCapacity&lt;T&gt;
 
 Namespace: RingBufferPlus
 
 Represents the scale capacity commands to RingBufferPlus.
 
 ```csharp
-public interface IRingBufferScaleCapacity<T>
+public interface IRingBufferScaleFromCapacity<T>
 ```
 
 #### Type Parameters
@@ -61,7 +61,7 @@ The Timeout to Warmup has full capacity. Default value is 30 seconds.
 Maximum capacity.
 
 ```csharp
-IRingBufferScaleMax<T> MaxCapacity(int value)
+IRingBufferScaleFromCapacity<T> MaxCapacity(int value)
 ```
 
 #### Parameters
@@ -78,7 +78,7 @@ The maximum buffer.Value mus be greater or equal [IRingBuffer&lt;T&gt;.Capacity(
 Minimum capacity.
 
 ```csharp
-IRingBufferScaleMin<T> MinCapacity(int value)
+IRingBufferScaleFromCapacity<T> MinCapacity(int value)
 ```
 
 #### Parameters
@@ -96,53 +96,13 @@ Extension point when capacity was changed.
  <br>Executes asynchronously.
 
 ```csharp
-IRingBufferScaleCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+IRingBufferScaleFromCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
 ```
 
 #### Parameters
 
 `report` [Action&lt;ScaleMode, ILogger, RingBufferMetric, CancellationToken&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-4)<br>
 The handler to action.
-
-#### Returns
-
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
-
-### <a id="methods-sampleunit"/>**SampleUnit(Nullable&lt;TimeSpan&gt;, Nullable&lt;Int32&gt;)**
-
-Sampling unit for return buffer-free resource (Average colledted samples).
- <br>baseunit/value must be greater or equal than 100ms.
-
-```csharp
-IRingBufferScaleCapacity<T> SampleUnit(Nullable<TimeSpan> baseunit, Nullable<Int32> value)
-```
-
-#### Parameters
-
-`baseunit` [Nullable&lt;TimeSpan&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
-The [TimeSpan](https://docs.microsoft.com/en-us/dotnet/api/system.timespan) interval to colleted samples.Default baseunit is 60 seconds.
-
-`value` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
-Number of samples collected.Default value is baseunit/10. Default value is 60.
-
-#### Returns
-
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
-
-### <a id="methods-sampleunit"/>**SampleUnit(Nullable&lt;Int32&gt;)**
-
-Sampling unit for return buffer-free resource (Average colledted samples).
- <br>baseunit/value must be greater or equal than 100ms.<br>Base unit = The interval to colledted samples. Default is 60 seconds.
-
-```csharp
-IRingBufferScaleCapacity<T> SampleUnit(Nullable<Int32> value)
-```
-
-#### Parameters
-
-`value` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
-Number of samples collected.Default value is baseunit/10. Default value is 60.
- <br>Base unit = The interval to colledted samples. Default is 60 seconds.
 
 #### Returns
 

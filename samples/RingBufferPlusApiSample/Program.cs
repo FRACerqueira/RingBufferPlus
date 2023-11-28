@@ -19,19 +19,8 @@ namespace RingBufferPlusApiSample
                 return ringbuf
                         .Capacity(8)
                         .Factory((cts) => { return 10; })
-                        .AccquireTimeout(TimeSpan.FromSeconds(10))
-                        .OnError((log, error) => 
-                        {
-                            log?.LogError("{error}",error);
-                        })
-                        .SwithToScaleDefinitions()
+                        .MasterScale()
                             .SampleUnit(TimeSpan.FromSeconds(60),60)
-                            .ReportScale((mode, loger, metric, cts) =>
-                            {
-                                #pragma warning disable CA2254 // Template should be a static expression
-                                loger.LogInformation($"Report [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity} ({metric.Capacity}/{metric.MinCapacity}/{metric.MaxCapacity}) : {metric.FreeResource}");
-                                #pragma warning restore CA2254 // Template should be a static expression
-                            })
                             .MinCapacity(4)
                                 // Defaut = Max  (Min = 1, Max = Capacity)
                                 .ScaleWhenFreeGreaterEq()

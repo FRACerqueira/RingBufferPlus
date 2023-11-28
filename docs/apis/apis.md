@@ -19,11 +19,15 @@
 
 - [IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md)
 
+- [IRingBufferScaleFromCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalefromcapacity-1.md)
+
 - [IRingBufferScaleMax&lt;T&gt;](./ringbufferplus.iringbufferscalemax-1.md)
 
 - [IRingBufferScaleMin&lt;T&gt;](./ringbufferplus.iringbufferscalemin-1.md)
 
 - [IRingBufferService&lt;T&gt;](./ringbufferplus.iringbufferservice-1.md)
+
+- [IRingBufferSwith](./ringbufferplus.iringbufferswith.md)
 
 - [RingBuffer&lt;T&gt;](./ringbufferplus.ringbuffer-1.md)
 

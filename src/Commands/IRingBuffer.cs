@@ -33,6 +33,13 @@ namespace RingBufferPlus
         IRingBuffer<T> Factory(Func<CancellationToken,T> value, TimeSpan? timeout = null, TimeSpan? idleRetryError = null);
 
         /// <summary>
+        /// Health before accquire buffer.
+        /// </summary>
+        /// <param name="value">The handler to factory Health.</param>
+        /// <returns><see cref="IRingBuffer{T}"/>.</returns>
+        IRingBuffer<T> FactoryHealth(Func<T,bool> value);
+
+        /// <summary>
         /// The Logger
         /// <br>Default value is ILoggerFactory.Create (if any) with category euqal name of ring buffer</br>
         /// </summary>
@@ -46,7 +53,6 @@ namespace RingBufferPlus
         /// <param name="value">The timeout for acquiring a value from the buffer.</param>
         /// <returns><see cref="IRingBuffer{T}"/>.</returns>
         IRingBuffer<T> AccquireTimeout(TimeSpan value);
-
 
         /// <summary>
         /// Extension point to log a error.
@@ -71,10 +77,17 @@ namespace RingBufferPlus
         IRingBufferService<T> BuildWarmup(out bool fullcapacity, TimeSpan? timeout = null);
 
         /// <summary>
-        /// Swith to scale definitions commands.
+        /// Swith to scale definitions commands (self) or other ring buffer.
         /// </summary>
-        /// <returns><see cref="IRingBufferScaleCapacity{T}"/>.</returns>
-        IRingBufferScaleCapacity<T> SwithToScaleDefinitions();
+        /// <param name="ringBuffer">The slave Ring buffer.</param>
+        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        IRingBufferMasterCapacity<T> MasterScale(IRingBufferSwith? ringBuffer = null);
+
+        /// <summary>
+        /// Swith to scale definitions from other ring buffer.
+        /// </summary>
+        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        IRingBufferSlaveCapacity<T> SlaveScale();
 
     }
 }

@@ -77,18 +77,6 @@ public bool Successful { get; }
 
 ## Constructors
 
-### <a id="constructors-.ctor"/>**RingBufferValue(Int32)**
-
-Create empty RingBufferValue.
-
-```csharp
-public RingBufferValue(int diffCapacity)
-```
-
-#### Parameters
-
-`diffCapacity` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-
 ### <a id="constructors-.ctor"/>**RingBufferValue(String, TimeSpan, Boolean, T, Action&lt;RingBufferValue&lt;T&gt;&gt;)**
 
 Create RingBufferValue.

@@ -114,6 +114,23 @@ The delay time for retrying when a build fails. Default value is 5 seconds.
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
+### <a id="methods-factoryhealth"/>**FactoryHealth(Func&lt;T, Boolean&gt;)**
+
+Health before accquire buffer.
+
+```csharp
+IRingBuffer<T> FactoryHealth(Func<T, Boolean> value)
+```
+
+#### Parameters
+
+`value` Func&lt;T, Boolean&gt;<br>
+The handler to factory Health.
+
+#### Returns
+
+[IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
+
 ### <a id="methods-logger"/>**Logger(ILogger)**
 
 The Logger
@@ -131,6 +148,23 @@ IRingBuffer<T> Logger(ILogger value)
 #### Returns
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
+
+### <a id="methods-masterscale"/>**MasterScale(IRingBufferSwith)**
+
+Swith to scale definitions commands (self) or other ring buffer.
+
+```csharp
+IRingBufferScaleCapacity<T> MasterScale(IRingBufferSwith ringBuffer)
+```
+
+#### Parameters
+
+`ringBuffer` [IRingBufferSwith](./ringbufferplus.iringbufferswith.md)<br>
+The slave Ring buffer.
+
+#### Returns
+
+[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
 
 ### <a id="methods-onerror"/>**OnError(Action&lt;ILogger, RingBufferException&gt;)**
 
@@ -150,12 +184,12 @@ he handler to log error.
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
-### <a id="methods-swithtoscaledefinitions"/>**SwithToScaleDefinitions()**
+### <a id="methods-slavescale"/>**SlaveScale()**
 
-Swith to scale definitions commands.
+Swith to scale definitions from other ring buffer.
 
 ```csharp
-IRingBufferScaleCapacity<T> SwithToScaleDefinitions()
+IRingBufferScaleFromCapacity<T> SlaveScale()
 ```
 
 #### Returns

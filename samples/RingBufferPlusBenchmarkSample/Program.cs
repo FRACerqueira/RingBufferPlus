@@ -1,4 +1,10 @@
-﻿using System.CommandLine;
+﻿// ***************************************************************************************
+// Original source code : Copyright 2020 Luis Carlos Farias.
+// https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer
+// Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
+// ***************************************************************************************
+
+using System.CommandLine;
 using System.CommandLine.Builder;
 using System.CommandLine.Parsing;
 using BenchmarkDotNet.Running;

@@ -14,14 +14,14 @@ Namespace: RingBufferPlus
 Represents the commands to RingBufferPlus service.
 
 ```csharp
-public interface IRingBufferService<T> : System.IDisposable
+public interface IRingBufferService<T> : IRingBufferSwith, System.IDisposable
 ```
 
 #### Type Parameters
 
 `T`<br>
 
-Implements [IDisposable](https://docs.microsoft.com/en-us/dotnet/api/system.idisposable)
+Implements [IRingBufferSwith](./ringbufferplus.iringbufferswith.md), [IDisposable](https://docs.microsoft.com/en-us/dotnet/api/system.idisposable)
 
 ## Properties
 
@@ -242,18 +242,6 @@ The [CancellationToken](https://docs.microsoft.com/en-us/dotnet/api/system.threa
 #### Returns
 
 [RingBufferValue&lt;T&gt;](./ringbufferplus.ringbuffervalue-1.md).
-
-### <a id="methods-counters"/>**Counters(Action&lt;Int32, Int32, Int32&gt;)**
-
-Action to read read counters (available/unavailable/for creation)
-
-```csharp
-void Counters(Action<Int32, Int32, Int32> counters)
-```
-
-#### Parameters
-
-`counters` [Action&lt;Int32, Int32, Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-3)<br>
 
 
 - - -

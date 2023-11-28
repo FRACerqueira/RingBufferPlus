@@ -1,4 +1,10 @@
-﻿using System.Text;
+﻿// ***************************************************************************************
+// Original source code : Copyright 2020 Luis Carlos Farias.
+// https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer
+// Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
+// ***************************************************************************************
+
+using System.Text;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RingBufferPlus;
@@ -15,18 +21,33 @@ namespace RingBufferPlusBenchmarkSample
         private static ILogger? applogger;
 
         static IModel? ModelFactory(CancellationToken cancellation)
-            {
+        {
             IModel? model = null;
             while (!cancellation.IsCancellationRequested)
             {
                 using var connectionWrapper = connectionRingBuffer!.Accquire();
-                if (connectionWrapper.Successful && connectionWrapper.Current.IsOpen)
+                try
                 {
-                    model = connectionWrapper.Current.CreateModel();
-                    model.QueueDeclare("log", false, false, false);
-                    break;
+                    if (connectionWrapper.Successful)
+                    {
+                        if (connectionWrapper.Current.IsOpen)
+                        {
+                            model = connectionWrapper.Current.CreateModel();
+                            if (model.IsOpen)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            connectionWrapper.Invalidate();
+                        }
+                    }
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(100));
+                catch 
+                {
+                }
+                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
             }
             return model;
         }
@@ -47,25 +68,24 @@ namespace RingBufferPlusBenchmarkSample
             };
 
             connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
-                .Capacity(5)
+                .Capacity(2)
                 .Logger(applogger!)
-                .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
+                .AccquireTimeout(TimeSpan.FromMilliseconds(500))
                 .OnError((log, error) =>
                     {
                         log?.LogError("{error}", error);
                     })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .SwithToScaleDefinitions()
-                    .SampleUnit(TimeSpan.FromSeconds(10), 10)
+                .FactoryHealth((item) => item.IsOpen)
+                .SlaveScale()
                     .ReportScale((mode, log, metric, _) =>
                     {
                         #pragma warning disable CA2254 // Template should be a static expression
-                        log.LogInformation($"{connectionRingBuffer!.Name} Report:  [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity} ({metric.Capacity}/{metric.MinCapacity}/{metric.MaxCapacity}) : {metric.FreeResource}");
+                        log.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
                         #pragma warning restore CA2254 // Template should be a static expression
                     })
-                    .MinCapacity(2)
-                        .ScaleWhenFreeGreaterEq()
-                        .RollbackWhenFreeLessEq()
+                    .MaxCapacity(10)
+                    .MinCapacity(1)
                 .BuildWarmup(out completedCnn);
 
             modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
@@ -76,16 +96,16 @@ namespace RingBufferPlusBenchmarkSample
                         log?.LogError("{error}", error);
                     })
                 .Factory((cts) => ModelFactory(cts)!)
-                .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
-                .SwithToScaleDefinitions()
+                .FactoryHealth((item) => item.IsOpen)
+                .MasterScale(connectionRingBuffer)
                     .SampleUnit(TimeSpan.FromSeconds(10), 10)
                     .ReportScale((mode,log,metric,_) => 
                     {
                         #pragma warning disable CA2254 // Template should be a static expression
-                        log.LogInformation($"{modelRingBuffer!.Name} Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity} ({metric.Capacity}/{metric.MinCapacity}/{metric.MaxCapacity}) : {metric.FreeResource}");
+                        log.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
                         #pragma warning restore CA2254 // Template should be a static expression
                     })
-                    .MaxCapacity(20)
+                    .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()
                         .RollbackWhenFreeGreaterEq()
                     .MinCapacity(2)
@@ -131,12 +151,6 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer ScaleToMax({connectionRingBuffer!.ScaleToMax})");
             Console.WriteLine($"Ring Buffer RollbackFromMax({connectionRingBuffer!.RollbackFromMax})");
             Console.WriteLine($"Ring Buffer TriggerFromMax({connectionRingBuffer!.TriggerFromMax})");
-            connectionRingBuffer.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
             Console.WriteLine();
 
             #endregion
@@ -161,12 +175,6 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer ScaleToMax({modelRingBuffer.ScaleToMax})");
             Console.WriteLine($"Ring Buffer RollbackFromMax({modelRingBuffer.RollbackFromMax})");
             Console.WriteLine($"Ring Buffer TriggerFromMax({modelRingBuffer.TriggerFromMax})");
-            modelRingBuffer.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
             Console.WriteLine();
 
             #endregion
@@ -175,7 +183,7 @@ namespace RingBufferPlusBenchmarkSample
             Thread.Sleep(TimeSpan.FromSeconds(delaysec));
             Console.WriteLine($"Running");
 
-            var dtref = DateTime.Now.AddSeconds(60);
+            var dtref = DateTime.Now.AddSeconds(120);
             for (int i = 0; i < threadCount; i++)
             {
                 Thread thread = new(() =>
@@ -184,9 +192,9 @@ namespace RingBufferPlusBenchmarkSample
                     {
                         if (DateTime.Now > dtref)
                         {
-                            Console.WriteLine($"wait 30 seconds idle");
-                            Thread.Sleep(TimeSpan.FromSeconds(30));
-                            dtref = DateTime.Now.AddSeconds(60);
+                            Console.WriteLine($"wait 120 seconds idle");
+                            Thread.Sleep(TimeSpan.FromSeconds(120));
+                            dtref = DateTime.Now.AddSeconds(120);
                         }
                         using var bufferedItem = modelRingBuffer!.Accquire();
                         if (bufferedItem.Successful)

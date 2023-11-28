@@ -1,4 +1,10 @@
-﻿using BenchmarkDotNet.Analysers;
+﻿// ***************************************************************************************
+// Original source code : Copyright 2020 Luis Carlos Farias.
+// https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer
+// Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
+// ***************************************************************************************
+
+using BenchmarkDotNet.Analysers;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
@@ -29,13 +35,28 @@ namespace RingBufferPlusBenchmarkSample
             while (!cancellation.IsCancellationRequested)
             {
                 using var connectionWrapper = connectionRingBuffer!.Accquire();
-                if (connectionWrapper.Successful && connectionWrapper.Current.IsOpen)
+                try
                 {
-                    model = connectionWrapper.Current.CreateModel();
-                    model.QueueDeclare("log", false, false, false);
-                    break;
+                    if (connectionWrapper.Successful)
+                    {
+                        if (connectionWrapper.Current.IsOpen)
+                        {
+                            model = connectionWrapper.Current.CreateModel();
+                            if (model.IsOpen)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            connectionWrapper.Invalidate();
+                        }
+                    }
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(100));
+                catch
+                {
+                }
+                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
             }
             return model;
         }
@@ -84,7 +105,11 @@ namespace RingBufferPlusBenchmarkSample
                     log?.LogError("{error}", error);
                 })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
+                .FactoryHealth((item) => item.IsOpen)
+                .AccquireTimeout(TimeSpan.FromMilliseconds(500))
+                .SlaveScale()
+                    .MaxCapacity(10)
+                    .MinCapacity(1)
                 .BuildWarmup(out _);
 
             modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
@@ -95,7 +120,15 @@ namespace RingBufferPlusBenchmarkSample
                     log?.LogError("{error}", error);
                 })
                 .Factory((cts) => ModelFactory(cts)!)
-                .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
+                .FactoryHealth((item) => item.IsOpen)
+                .MasterScale(connectionRingBuffer)
+                    .SampleUnit(TimeSpan.FromSeconds(10), 10)
+                    .MaxCapacity(50)
+                        .ScaleWhenFreeLessEq()
+                        .RollbackWhenFreeGreaterEq()
+                    .MinCapacity(2)
+                        .ScaleWhenFreeGreaterEq()
+                        .RollbackWhenFreeLessEq()
                 .BuildWarmup(out _);
         }
 
@@ -144,7 +177,7 @@ namespace RingBufferPlusBenchmarkSample
             return 0;
         }
 
-        [Benchmark(Baseline = true)]
+        [Benchmark]
         public int WithoutRingBuffer()
         {
             string queueName = $"WithoutRingBuffer-{Guid.NewGuid():D}";

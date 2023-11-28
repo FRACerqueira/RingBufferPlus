@@ -105,7 +105,7 @@ IRingBufferScaleMin<T> ScaleWhenFreeGreaterEq(Nullable<Int32> value)
 
 `value` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
 Number to free resource. 
- <br>Defaut = Max. (Min = 1, Max = Capacity).
+ <br>Defaut = Max. (Min = 2, Max = Capacity).
 
 #### Returns
 
@@ -124,7 +124,7 @@ IRingBufferScaleMin<T> TriggerByAccqWhenFreeLessEq(Nullable<Int32> value)
 
 `value` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
 Number to trigger.
- <br>Defaut = Max-1 (Min = 1, Max = MinCapacity).
+ <br>Defaut = Max-1 (Min = 2, Max = MinCapacity).
 
 #### Returns
 

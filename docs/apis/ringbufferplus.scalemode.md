@@ -24,9 +24,10 @@ Implements [IComparable](https://docs.microsoft.com/en-us/dotnet/api/system.icom
 
 | Name | Value | Description |
 | --- | --: | --- |
-| ToMinCapacity | 0 | Scale to minimal capacity. |
-| ToMaxCapacity | 1 | Scale to maximum capacity. |
-| ToDefaultCapacity | 2 | Scale to default capacity. |
+| None | 0 | Current Scale |
+| ToMinCapacity | 1 | Scale to minimal capacity. |
+| ToMaxCapacity | 2 | Scale to maximum capacity. |
+| ToDefaultCapacity | 3 | Scale to default capacity. |
 
 
 - - -

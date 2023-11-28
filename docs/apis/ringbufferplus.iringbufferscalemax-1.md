@@ -105,7 +105,7 @@ IRingBufferScaleMax<T> ScaleWhenFreeLessEq(Nullable<Int32> value)
 
 `value` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
 Number to trigger.
- <br>The free resource collected must be less than or equal to value.<br>Default = Min (Min =  1, Max = Capacity).
+ <br>The free resource collected must be less than or equal to value.<br>Default = Min (Min =  2, Max = Capacity).
 
 #### Returns
 

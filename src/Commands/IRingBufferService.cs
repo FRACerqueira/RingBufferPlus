@@ -12,17 +12,12 @@ namespace RingBufferPlus
     /// Represents the commands to RingBufferPlus service.
     /// </summary>
     /// <typeparam name="T"></typeparam>
-    public interface IRingBufferService<T> : IDisposable
+    public interface IRingBufferService<T> : IRingBufferSwith, IDisposable
     {
         /// <summary>
         /// Unique name to RingBuffer.
         /// </summary>
         string Name { get; }
-
-        /// <summary>
-        /// Action to read read counters (available/unavailable/for creation)
-        /// </summary>
-        void Counters(Action<int, int, int> counters);
 
         /// <summary>
         /// Default capacity of ring buffer.

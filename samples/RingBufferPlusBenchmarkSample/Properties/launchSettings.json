@@ -2,7 +2,14 @@
   "profiles": {
     "RingBufferPlusBenchmarkSample": {
       "commandName": "Project",
-      "commandLineArgs": "--role consumer --delay 5"
+      "commandLineArgs": "--role publisher --delay 10"
+    },
+    "Docker": {
+      "commandName": "Docker"
+    },
+    "WSL": {
+      "commandName": "WSL2",
+      "distributionName": ""
     }
   }
 }

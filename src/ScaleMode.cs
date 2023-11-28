@@ -11,6 +11,10 @@ namespace RingBufferPlus
     public enum ScaleMode
     {
         /// <summary>
+        /// Current Scale 
+        /// </summary>
+        None,
+        /// <summary>
         /// Scale to minimal capacity.
         /// </summary>
         ToMinCapacity,

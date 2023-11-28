@@ -4,6 +4,10 @@
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 
+### V2.0.0 (Deprecate!)
+[**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
+
+- Release G.A with .NET8 
 
 ### V1.0.1 (Deprecate!)
 [**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)

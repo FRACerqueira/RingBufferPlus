@@ -3,24 +3,21 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 
+using System.Threading;
+
 namespace RingBufferPlus
 {
     /// <summary>
-    /// Represents Source Trigger.
+    /// Represents the salve commands to RingBufferPlus service.
     /// </summary>
-    public enum SourceTrigger
+    public interface IRingBufferSwith
     {
         /// <summary>
-        /// Source is scale capacity thread.
+        /// Swith to new capacity in slave RingBuffer
         /// </summary>
-        AutoScale,
-        /// <summary>
-        /// Source is accquire command.
-        /// </summary>
-        Accquire,
-        /// <summary>
-        /// Source is Master-Slave
-        /// </summary>
-        MasterSlave
+        /// <param name="scaleMode"></param>
+        /// <returns>True if scale changed, otherwise false</returns>
+        bool SwithTo(ScaleMode scaleMode);
+
     }
 }
