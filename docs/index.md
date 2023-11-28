@@ -109,18 +109,6 @@ The **RingBufferPlus** use **fluent interface**; an object-oriented API whose de
 ### Sample-Console Usage (Minimal features with auto-scale)
 
 ```csharp
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder
-        .SetMinimumLevel(LogLevel.Information)
-        .AddFilter("Microsoft", LogLevel.Warning)
-        .AddFilter("System", LogLevel.Warning)
-        .AddConsole();
-});
-logger = loggerFactory.CreateLogger<Program>();
-```
-
-```csharp
 Random rnd = new();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)

@@ -77,17 +77,6 @@ https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples
 
 Sample-Console Usage (Minimal features with auto-scale)
 -------------------------------------------------------
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder
-        .SetMinimumLevel(LogLevel.Information)
-        .AddFilter("Microsoft", LogLevel.Warning)
-        .AddFilter("System", LogLevel.Warning)
-        .AddConsole();
-});
-logger = loggerFactory.CreateLogger<Program>();
-
-...
 
 Random rnd = new();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
