@@ -479,17 +479,11 @@ namespace RingBufferPlus
                                         var diff = _currentCapacityBuffer - _availableBuffer.Count;
                                         RemoveBuffer(_currentCapacityBuffer);    
                                         await TryLoadBufferAsync(diff);
-                                        if (diff != 0)
-                                        {
-                                            if (_swithFrom is not null)
-                                            {
-                                                if (((IRingBufferCallback)_swithFrom).SemaphoremasterSlave.CurrentCount == 0)
-                                                {
-                                                    var master = ((IRingBufferCallback)_swithFrom).Name;
-                                                    WriteLogDebug(DateTime.Now, $"{Name}: From Master({master}) SemaphoremasterSlave Release");
-                                                    ((IRingBufferCallback)_swithFrom).SemaphoremasterSlave.Release();
-                                                }
-                                            }
+                                        if (diff != 0 && _swithFrom is not null && ((IRingBufferCallback)_swithFrom).SemaphoremasterSlave.CurrentCount == 0)
+                                        { 
+                                            var master = ((IRingBufferCallback)_swithFrom).Name;
+                                            WriteLogDebug(DateTime.Now, $"{Name}: From Master({master}) SemaphoremasterSlave Release");
+                                            ((IRingBufferCallback)_swithFrom).SemaphoremasterSlave.Release();
                                         }
                                     }
                                 }
