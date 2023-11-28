@@ -50,14 +50,14 @@ namespace RingBufferPlus
         /// Minimum capacity.
         /// </summary>
         /// <param name="value">The minimal buffer. Value mus be greater or equal 1</param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferScaleMin{T}"/>.</returns>
         IRingBufferScaleMin<T> MinCapacity(int value);
 
         /// <summary>
         /// Maximum capacity.
         /// </summary>
         /// <param name="value">The maximum buffer.Value mus be greater or equal <see cref="IRingBuffer{T}.Capacity(int)"/></param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferScaleMax{T}"/>.</returns>
         IRingBufferScaleMax<T> MaxCapacity(int value);
 
         /// <summary>

@@ -86,7 +86,7 @@ namespace RingBufferPlus
         /// <summary>
         /// Swith to scale definitions from other ring buffer.
         /// </summary>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
+        /// <returns><see cref="IRingBufferSlaveCapacity{T}"/>.</returns>
         IRingBufferSlaveCapacity<T> SlaveScale();
 
     }
