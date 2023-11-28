@@ -25,11 +25,7 @@ namespace RingBufferPlusConsoleSample
                 .Capacity(8)
                 .Logger(logger!)
                 .Factory((cts) => { return rnd.Next(1, 10); })
-                .OnError((log, error) =>
-                {
-                     log?.LogError("{error}", error);
-                })
-               .SwithToScaleDefinitions()
+                .MasterScale()
                     .MinCapacity(4)
                         // Defaut = Max  (Min = 1, Max = Capacity)
                         .ScaleWhenFreeGreaterEq()
@@ -79,24 +75,10 @@ namespace RingBufferPlusConsoleSample
                 buffer3.Invalidate();
             }
 
-            rb.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
-
             Console.WriteLine("Press anykey to stop/close ring buffer");
             Console.ReadKey();
 
             cts.Cancel();
-
-            rb.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
 
             Console.WriteLine("Press anykey to end");
             Console.ReadKey();

@@ -11,23 +11,29 @@
 ========================================================================================
 
 Welcome to RingBufferPlus
--------------------------
+=========================
 
-RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler, and Report-Metrics.
+RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler.
 
 Features
---------
+========
+
+- Conscious use of resources
 - Set unique name for same buffer type
 - Set the buffer capacity
+- Set buffer integrity (validate if the buffer is valid)
+    - Verified with each acquiring
 - Set the minimum and maximum capacity (optional)
     - Set the conditions for scaling to maximum and minimum (required)
         - Automatic condition values ​​based on capacity (value not required)
-    - Define a user role to receive capacity change events to log/save (optional)
-        - Executed in a separate thread asynchronously
+- Set master-slave (2 Ring Buffer with synchronization)
+    - Master controls slave scale
+- Event with scale change information
+    - Executed in a separate thread asynchronously
 - Associate the logger interface (optional)
 - Define a user role for generated errors (optional)
     - Executed in a separate thread asynchronously
-- Invalidate the buffer when it is in an invalid state
+- Command to Invalidate the buffer when it is in an invalid state
 - Warm up to full capacity before starting application 
 - Receive item from buffer with success/failure information and elapsed time for acquisition
 - Sets a time limit for acquiring the item in the buffer
@@ -44,62 +50,46 @@ PipeAndFilter was developed in C# with target frameworks:
 - .NET 7
 - .NET 8
 
-*** What's new in V2.0.0 ***
-----------------------------
+*** What's new in V3.0.0 ***
+============================
 
-- Release G.A with .NET8 
+- Added command 'FactoryHealth'
+    - Check health item before accquire buffer.
+- Renamed Method 'SwithToScaleDefinitions' to 'MasterScale'
+- Added master-slave feature(2 Ring Buffer with synchronization)
+    - Added command set 'SlaveScale' to set report handler, Minimum and maximum capacity
+- Added 'MasterSlave' enum item in SourceTrigger
+- Added 'None' enum item in ScaleMode
+- Revised to have greater performance without 'lock'
+- Removed Method 'Counters'
+    - data was not relevant and inaccurate
+- Revised 'RingBufferMetric' 
+    - Now only propreties 'Trigger', 'FromCapacity', 'ToCapacity' and 'MetricDate'
 
 **Examples**
-------------
+============
+
 See folder:
 https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples
 
 **Usage**
----------
+=========
 
-Sample-Console Usage (Full features)
-====================================
+Sample-Console Usage (Minimal features with auto-scale)
+-------------------------------------------------------
 
-using var loggerFactory = LoggerFactory.Create(builder =>
-{
-    builder
-        .SetMinimumLevel(LogLevel.Information)
-        .AddFilter("Microsoft", LogLevel.Warning)
-        .AddFilter("System", LogLevel.Warning)
-        .AddConsole();
-});
-logger = loggerFactory.CreateLogger<Program>();
-
-... 
-
+Random rnd = new();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
-    .Logger(logger!)
     .Factory((cts) => { return rnd.Next(1, 10); })
-    .OnError((log, error) => 
-    {
-        log?.LogError("{error}",error);
-    })
-    .SwithToScaleDefinitions()
+    .MasterScale()
         .SampleUnit(TimeSpan.FromSeconds(10), 10)
-        .ReportScale((mode, log, metric, _) =>
-        {
-            log.LogInformation($"{connectionRingBuffer!.Name} Report:  [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity} ({metric.Capacity}/{metric.MinCapacity}/{metric.MaxCapacity}) : {metric.FreeResource}");
-        })
         .MinCapacity(4)
-            // Defaut = Max  (Min = 1, Max = Capacity)
             .ScaleWhenFreeGreaterEq()
-            // Defaut = Min  (Min = 1, Max = MinCapacity)
             .RollbackWhenFreeLessEq()
-            // Defaut = Max-1 (Min = 1, Max = MinCapacity)
-            //.TriggerByAccqWhenFreeLessEq()
         .MaxCapacity(20)
-            // Default = Min (Min =  1, Max = Capacity)
             .ScaleWhenFreeLessEq()
-            // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
             .RollbackWhenFreeGreaterEq()
-            // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
-            //.TriggerByAccqWhenFreeGreaterEq() 
     .BuildWarmup(out var completed);
 
 ...
@@ -119,19 +109,14 @@ using (var buffer = rb.Accquire())
     }
 }
 
-Sample-Sample-api/webUsage
-==========================
+Sample-api/web Usage (Minimal features without auto-scale)
+----------------------------------------------------------
 
 builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
 {
     return ringbuf
         .Capacity(8)
         .Factory((cts) => { return 10; })
-        .AccquireTimeout(TimeSpan.FromMilliseconds(1500))
-        .OnError((log, error) => 
-        {
-            log?.LogError("{error}",error);
-        })
         .Build();
 });
 
@@ -168,8 +153,47 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
     }
 }
 
+Sample-Console Master-Slave feature using RabbitMq (basic usage)
+----------------------------------------------------------------
+
+For more details see https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample.
+
+connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
+    .Capacity(2)
+    .Logger(applogger!)
+    .AccquireTimeout(TimeSpan.FromMilliseconds(500))
+    .OnError((log, error) =>
+        {
+            log?.LogError("{error}", error);
+        })
+    .Factory((cts) => ConnectionFactory.CreateConnection())
+    .FactoryHealth((item) => item.IsOpen)
+    .SlaveScale()
+        .MaxCapacity(10)
+        .MinCapacity(1)
+    .BuildWarmup(out completedCnn);
+
+modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
+    .Capacity(10)
+    .Logger(applogger!)
+    .OnError((log, error) =>
+        {
+            log?.LogError("{error}", error);
+        })
+    .Factory((cts) => ModelFactory(cts))
+    .FactoryHealth((item) => item.IsOpen)
+    .MasterScale(connectionRingBuffer)
+        .SampleUnit(TimeSpan.FromSeconds(10), 10)
+        .MaxCapacity(50)
+            .ScaleWhenFreeLessEq()
+            .RollbackWhenFreeGreaterEq()
+        .MinCapacity(2)
+            .ScaleWhenFreeGreaterEq()
+            .RollbackWhenFreeLessEq()
+    .BuildWarmup(out completedChanels);
+
 **License**
------------
+===========
 
 Copyright 2022 @ Fernando Cerqueira
 RingBufferPlus project is licensed under the  the MIT license.

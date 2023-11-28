@@ -25,11 +25,12 @@ namespace RingBufferPlus
         /// <summary>
         /// Create empty RingBufferValue.
         /// </summary>
-        public RingBufferValue(int diffCapacity)
+        internal RingBufferValue(int diffCapacity, ScaleMode scaleMode)
         {
             IsScaleCapacity = true;
             Current = default;
             DiffCapacity = diffCapacity;
+            ScaleMode = scaleMode;
         }
 
         /// <summary>
@@ -110,6 +111,7 @@ namespace RingBufferPlus
         internal bool SkipTurnback { get; set; }
         internal bool IsScaleCapacity { get; set; }
         internal int DiffCapacity { get; }
+        internal ScaleMode ScaleMode { get; }
 
     }
 }

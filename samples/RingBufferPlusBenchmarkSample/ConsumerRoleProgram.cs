@@ -1,5 +1,10 @@
-﻿using System.Text;
-using BenchmarkDotNet.Engines;
+﻿// ***************************************************************************************
+// Original source code : Copyright 2020 Luis Carlos Farias.
+// https://github.com/luizcarlosfaria/Oragon.Common.RingBuffer
+// Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
+// ***************************************************************************************
+
+using System.Text;
 using Microsoft.Extensions.Logging;
 using RabbitMQ.Client;
 using RabbitMQ.Client.Events;
@@ -103,12 +108,7 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer ScaleToMax({connectionRingBuffer!.ScaleToMax})");
             Console.WriteLine($"Ring Buffer RollbackFromMax({connectionRingBuffer!.RollbackFromMax})");
             Console.WriteLine($"Ring Buffer TriggerFromMax({connectionRingBuffer!.TriggerFromMax})");
-            connectionRingBuffer.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
+
             Console.WriteLine();
 
             #endregion
@@ -117,7 +117,7 @@ namespace RingBufferPlusBenchmarkSample
 
 
             Console.WriteLine($"Ring Buffer {modelRingBuffer!.Name}");
-            Console.WriteLine($"Ring Buffer Warmup({completedCnn})");
+            Console.WriteLine($"Ring Buffer Warmup({completedChanels})");
             Console.WriteLine($"Ring Buffer Capacity({modelRingBuffer.Capacity})");
             Console.WriteLine($"Ring Buffer MinCapacity({modelRingBuffer.MinCapacity})");
             Console.WriteLine($"Ring Buffer MaxCapacity({modelRingBuffer.MaxCapacity})");
@@ -133,12 +133,7 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer ScaleToMax({modelRingBuffer.ScaleToMax})");
             Console.WriteLine($"Ring Buffer RollbackFromMax({modelRingBuffer.RollbackFromMax})");
             Console.WriteLine($"Ring Buffer TriggerFromMax({modelRingBuffer.TriggerFromMax})");
-            modelRingBuffer.Counters((available, unavailable, forcreation) =>
-            {
-                Console.WriteLine($"Ring Buffer Available({available})");
-                Console.WriteLine($"Ring Buffer Unavailable({unavailable})");
-                Console.WriteLine($"Ring Buffer ToCreating({forcreation})");
-            });
+
             Console.WriteLine();
 
             #endregion

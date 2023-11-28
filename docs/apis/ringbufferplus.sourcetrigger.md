@@ -26,6 +26,7 @@ Implements [IComparable](https://docs.microsoft.com/en-us/dotnet/api/system.icom
 | --- | --: | --- |
 | AutoScale | 0 | Source is scale capacity thread. |
 | Accquire | 1 | Source is accquire command. |
+| MasterSlave | 2 | Source is Master-Slave |
 
 
 - - -

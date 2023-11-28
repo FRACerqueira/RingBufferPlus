@@ -21,48 +21,12 @@ Inheritance [Object](https://docs.microsoft.com/en-us/dotnet/api/system.object) 
 
 ## Properties
 
-### <a id="properties-capacity"/>**Capacity**
-
-Default capacity of ring buffer.
-
-```csharp
-public int Capacity { get; }
-```
-
-#### Property Value
-
-[Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-
-### <a id="properties-freeresource"/>**FreeResource**
-
-Free resource capacity of ring buffer.
-
-```csharp
-public int FreeResource { get; }
-```
-
-#### Property Value
-
-[Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-
 ### <a id="properties-fromcapacity"/>**FromCapacity**
 
 Current capacity.
 
 ```csharp
 public int FromCapacity { get; }
-```
-
-#### Property Value
-
-[Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-
-### <a id="properties-maxcapacity"/>**MaxCapacity**
-
-Maximum capacity of ring buffer.
-
-```csharp
-public int MaxCapacity { get; }
 ```
 
 #### Property Value
@@ -80,18 +44,6 @@ public DateTime MetricDate { get; }
 #### Property Value
 
 [DateTime](https://docs.microsoft.com/en-us/dotnet/api/system.datetime)<br>
-
-### <a id="properties-mincapacity"/>**MinCapacity**
-
-Minimum capacity of ring buffer.
-
-```csharp
-public int MinCapacity { get; }
-```
-
-#### Property Value
-
-[Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
 
 ### <a id="properties-tocapacity"/>**ToCapacity**
 
@@ -127,12 +79,12 @@ Create empty Metric of RingBufferPlus.
 RingBufferMetric()
 ```
 
-### <a id="constructors-.ctor"/>**RingBufferMetric(SourceTrigger, Int32, Int32, Int32, Int32, Int32, Int32, DateTime)**
+### <a id="constructors-.ctor"/>**RingBufferMetric(SourceTrigger, Int32, Int32)**
 
 Create Metric of RingBufferPlus.
 
 ```csharp
-RingBufferMetric(SourceTrigger source, int fromcapacity, int tocapacity, int capacity, int mincapacity, int maxcapacity, int freeresource, DateTime dateref)
+RingBufferMetric(SourceTrigger source, int fromcapacity, int tocapacity)
 ```
 
 #### Parameters
@@ -145,21 +97,6 @@ Current capacity.
 
 `tocapacity` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
 New capacity trigger.
-
-`capacity` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-Default capacity.
-
-`mincapacity` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-Minimum capacity.
-
-`maxcapacity` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-Maximum capacity.
-
-`freeresource` [Int32](https://docs.microsoft.com/en-us/dotnet/api/system.int32)<br>
-Free resource value trigger.
-
-`dateref` [DateTime](https://docs.microsoft.com/en-us/dotnet/api/system.datetime)<br>
-Date of metric.
 
 
 - - -

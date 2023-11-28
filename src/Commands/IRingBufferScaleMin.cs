@@ -19,7 +19,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="value">
         /// Number to free resource. 
-        /// <br>Defaut = Max. (Min = 1, Max = Capacity).</br>
+        /// <br>Defaut = Max. (Min = 2, Max = Capacity).</br>
         /// </param>
         /// <returns><see cref="IRingBufferScaleMin{T}"/>.</returns>
         IRingBufferScaleMin<T> ScaleWhenFreeGreaterEq(int? value = null);
@@ -31,7 +31,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="value">
         /// Number to trigger.
-        /// <br>Defaut = Max-1 (Min = 1, Max = MinCapacity).</br>
+        /// <br>Defaut = Max-1 (Min = 2, Max = MinCapacity).</br>
         /// </param>
         /// <returns><see cref="IRingBufferScaleMin{T}"/>.</returns>
         IRingBufferScaleMin<T> TriggerByAccqWhenFreeLessEq(int? value = null);

@@ -21,7 +21,7 @@ namespace RingBufferPlus
         /// <param name="value">
         /// Number to trigger.
         /// <br>The free resource collected must be less than or equal to value.</br>
-        /// <br>Default = Min (Min =  1, Max = Capacity).</br>
+        /// <br>Default = Min (Min =  2, Max = Capacity).</br>
         /// </param>
         /// <returns><see cref="IRingBufferScaleMax{T}"/></returns>
         IRingBufferScaleMax<T> ScaleWhenFreeLessEq(int? value = null);
