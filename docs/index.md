@@ -14,7 +14,8 @@
 - [Features](#features)
 - [Installing](#installing)
 - [Examples](#examples)
-- [Usage](#usage)
+- [Generic Usage](#generic-usage)
+- [RabbitMQ Usage](#rabbitmq-usage)
 - [Performance](#performance)
 - [Credits](#credits)
 - [License](#license)
@@ -22,21 +23,19 @@
 
 ## What's new in the latest version 
 
-### V3.0.0 
+### V3.1.0 
 [**Top**](#table-of-contents)
 
-- Added command 'FactoryHealth'
-    - Check health item before accquire buffer.
-- Renamed Method 'SwithToScaleDefinitions' to 'MasterScale'
-- Added master-slave feature(2 Ring Buffer with synchronization)
-    - Added command set 'SlaveScale' to set report handler, Minimum and maximum capacity
-- Added 'MasterSlave' enum item in SourceTrigger
-- Added 'None' enum item in ScaleMode
-- Revised to have greater performance without 'lock'
-- Removed Method 'Counters'
-    - data was not relevant and inaccurate
-- Revised 'RingBufferMetric' 
-    - Now only propreties 'Trigger', 'FromCapacity', 'ToCapacity' and 'MetricDate'
+- Release with G.A
+- Removed command 'FactoryHealth'
+    - Check health not generic!.
+- Upscaling does not need to remove the buffer
+    - better performance and availability  
+- Downscaling needs to remove all buffering
+    - Performance penalty
+    - Ensure consistency and relationship between Master and slave
+- Created recovery state functionality
+    - start/restart under fault conditions
 
 ## Features
 
@@ -57,14 +56,21 @@ The implementation follows the basic principle. The principle was expanded to ha
 ### Key Features
 [**Top**](#table-of-contents)
 
+**Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal.
+
+**Under low usage conditions**, The RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.
+
 - Conscious use of resources
 - Set unique name for same buffer type
 - Set the buffer capacity
-- Set buffer integrity (validate if the buffer is valid)
-    - Verified with each acquiring
 - Set the minimum and maximum capacity (optional)
     - Set the conditions for scaling to maximum and minimum (required)
         - Automatic condition values ​​based on capacity (value not required)
+    - Upscaling does not need to remove the buffer
+        - better performance and availability  
+    - Downscaling needs to remove all buffering
+        - Performance penalty
+        - Ensure consistency and relationship between Master and slave
 - Set master-slave (2 Ring Buffer with synchronization)
     - Master controls slave scale
 - Event with scale change information
@@ -76,8 +82,9 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Warm up to full capacity before starting application 
 - Receive item from buffer with success/failure information and elapsed time for acquisition
 - Sets a time limit for acquiring the item in the buffer
-- Detailed information about operations when the minimum log is Debug
+- Detailed information about operations when the minimum log is Debug/Trace
 - Simple and clear fluent syntax
+
 
 ## Installing
 [**Top**](#table-of-contents)
@@ -101,7 +108,7 @@ See folder [**Samples**](https://github.com/FRACerqueira/RingBufferPlus/tree/mai
 dotnet run --project [name of sample]
 ```
 
-## Usage
+## Generic Usage
 [**Top**](#table-of-contents)
 
 The **RingBufferPlus** use **fluent interface**; an object-oriented API whose design relies extensively on method chaining. Its goal is to increase code legibility. The term was coined in 2005 by Eric Evans and Martin Fowler.
@@ -187,10 +194,23 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
 }
 ```
 
+## RabbitMQ Usage
+[**Top**](#table-of-contents)
+
+RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** when RinbufferPlus uses AutoScale.
+
+_**If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RinbufferPlus control)**_
 ### Sample-Console Master-Slave feature using RabbitMq (basic usage)
-[**Top**](#table-of-contents) 
 
 For more details see [**Complete-Samples**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample).
+
+```csharp
+ConnectionFactory = new ConnectionFactory()
+{
+    ...
+    AutomaticRecoveryEnabled = false
+};
+```
 
 ```csharp
 connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
@@ -202,7 +222,6 @@ connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
             log?.LogError("{error}", error);
         })
     .Factory((cts) => ConnectionFactory.CreateConnection())
-    .FactoryHealth((item) => item.IsOpen)
     .SlaveScale()
         .MaxCapacity(10)
         .MinCapacity(1)
@@ -216,7 +235,6 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
             log?.LogError("{error}", error);
         })
     .Factory((cts) => ModelFactory(cts))
-    .FactoryHealth((item) => item.IsOpen)
     .MasterScale(connectionRingBuffer)
         .SampleUnit(TimeSpan.FromSeconds(10), 10)
         .MaxCapacity(50)
@@ -228,14 +246,26 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
     .BuildWarmup(out completedChanels);
 ```
 
-## Performance
+### Performance
 [**Top**](#table-of-contents)
 
-The BenchmarkDotNet test was done on the local machine, with **'RabbitMQ' (over wsl)**. The measures are **about publisher** action (Scenario where Ringbuffer makes sense and brings significant performance gains).
+The BenchmarkDotNet test **(5 x 1000 publish)** was done on the **local machine**, with **'RabbitMQ' (over wsl)**. The measures are **about publisher** action (Scenario where Ringbuffer makes sense and brings significant performance gains).
 
 **The gain can be much greater for real machines in production!**
 
 See folder [**Samples/RingBufferPlusBenchmarkSample**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/Samples/RingBufferPlusBenchmarkSample).
+
+### _Notes for WithRingBufferScaler_
+
+    - Default(02 connections and 10 channel) to Maximum(10 connections and 50 channel)
+
+### _Notes for WithRingBuffer_
+
+    - No Scale : Default = 10 connections and 50 channel
+
+
+
+### Result
 
 ```
 BenchmarkDotNet v0.13.10, Windows 10 (10.0.19044.3693/21H2/November2021Update)
@@ -244,15 +274,15 @@ Intel Core i7-8565U CPU 1.80GHz (Whiskey Lake), 1 CPU, 8 logical and 4 physical 
   [Host]     : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
   Job-IMTEVT : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
   Dry        : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
-+------------------ +-------:+-----:+------------:+----------:+------------:+-------------:+------------:+------------:+------------:+------------+|
-| Method            | Op/s   | Rank | Mean        | StdErr    | StdDev      | Min          | Q1          | Median      | Q3          | Max         |
-|------------------ |-------:|-----:|------------:|----------:|------------:|-------------:|------------:|------------:|------------:|------------:|
-| WithRingBuffer    | 6.8218 |    1 |    146.6 ms |   0.00 ms |     0.00 ms |    146.59 ms |    146.6 ms |    146.6 ms |    146.6 ms |    146.6 ms |
-| WithRingBuffer    | 1.9411 |    2 |    515.2 ms | 101.72 ms | 1,017.24 ms |     72.76 ms |    300.1 ms |    439.2 ms |    508.2 ms | 10,426.5 ms |
-| WithoutRingBuffer | 0.0676 |    3 | 14,797.6 ms | 133.34 ms | 1,333.36 ms | 13,306.95 ms | 14,061.5 ms | 14,497.3 ms | 15,098.1 ms | 21,286.4 ms |
-| WithoutRingBuffer | 0.0662 |    4 | 15,109.9 ms |   0.00 ms |     0.00 ms | 15,109.93 ms | 15,109.9 ms | 15,109.9 ms | 15,109.9 ms |115,109.9 ms |
-+------------------ +-------:+-----:+------------:+----------:+------------:+-------------:+------------:+------------:+------------:+------------+|
++--------------------- +--------------+-------------+-------------+--------------+-------------+--------------+--------------+--------------+--------+------|
+| Method               | Mean         | StdErr      | StdDev      | Min          | Q1          | Median       | Q3           | Max          | Op/s   | Rank |
+|--------------------- |-------------:|-------------|------------:|-------------:|-------------|-------------:|-------------:|-------------:|--------|-----:|
+| WithRingBufferScaler |     139.5 ms |    33.83 ms |    58.59 ms |     98.14 ms |    105.9 ms |     113.7 ms |     160.1 ms |     206.5 ms | 7.1707 |    1 |
+| WithRingBuffer       |     382.3 ms |    54.54 ms |    94.47 ms |    315.67 ms |    328.2 ms |     340.7 ms |     415.6 ms |     490.4 ms | 2.6160 |    2 |
+| WithoutRingBuffer    | 102,481.5 ms | 2,885.96 ms | 4,998.62 ms | 98,981.44 ms | 99,619.2 ms | 100,256.9 ms | 104,231.6 ms | 108,206.3 ms | 0.0098 |    3 |
++--------------------- +--------------+-------------+-------------+--------------+-------------+--------------+--------------+--------------+--------+------|
 ```
+
 
 ## Credits
 [**Top**](#table-of-contents)

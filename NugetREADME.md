@@ -7,21 +7,19 @@
 **[Visit the official page for more documentation of RingBufferPlus](https://fracerqueira.github.io/RingBufferPlus)**
 
 ## What's new in the latest version 
-### V3.0.0 
+### V3.1.0 
 [**Top**](#table-of-contents)
 
-- Added command 'FactoryHealth'
-    - Check health item before accquire buffer.
-- Renamed Method 'SwithToScaleDefinitions' to 'MasterScale'
-- Added master-slave feature(2 Ring Buffer with synchronization)
-    - Added command set 'SlaveScale' to set report handler, Minimum and maximum capacity
-- Added 'MasterSlave' enum item in SourceTrigger
-- Added 'None' enum item in ScaleMode
-- Revised to have greater performance without 'lock'
-- Removed Method 'Counters'
-    - data was not relevant and inaccurate
-- Revised 'RingBufferMetric' 
-    - Now only propreties 'Trigger', 'FromCapacity', 'ToCapacity' and 'MetricDate'
+- Release with G.A
+- Removed command 'FactoryHealth'
+    - Check health not generic!.
+- Upscaling does not need to remove the buffer
+    - better performance and availability  
+- Downscaling needs to remove all buffering
+    - Performance penalty
+    - Ensure consistency and relationship between Master and slave
+- Created recovery state functionality
+    - start/restart under fault conditions
 
 ## Features
 
@@ -31,14 +29,21 @@ The implementation follows the basic principle. The principle was expanded to ha
 
 ### Key Features
 
+**Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal.
+
+**Under low usage conditions**, The RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.
+
 - Conscious use of resources
 - Set unique name for same buffer type
 - Set the buffer capacity
-- Set buffer integrity (validate if the buffer is valid)
-    - Verified with each acquiring
 - Set the minimum and maximum capacity (optional)
     - Set the conditions for scaling to maximum and minimum (required)
         - Automatic condition values ​​based on capacity (value not required)
+    - Upscaling does not need to remove the buffer
+        - better performance and availability  
+    - Downscaling needs to remove all buffering
+        - Performance penalty
+        - Ensure consistency and relationship between Master and slave
 - Set master-slave (2 Ring Buffer with synchronization)
     - Master controls slave scale
 - Event with scale change information
@@ -50,8 +55,9 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Warm up to full capacity before starting application 
 - Receive item from buffer with success/failure information and elapsed time for acquisition
 - Sets a time limit for acquiring the item in the buffer
-- Detailed information about operations when the minimum log is Debug
+- Detailed information about operations when the minimum log is Debug/Trace
 - Simple and clear fluent syntax
+
 
 ## Installing
 

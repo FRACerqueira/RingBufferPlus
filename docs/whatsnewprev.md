@@ -4,12 +4,28 @@
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 
-### V2.0.0 (Deprecate!)
+### V3.0.0 (Deprecate! CRITICAL BUGS)
 [**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
 
-- Release G.A with .NET8 
+- Added command 'FactoryHealth'
+    - Check health item before accquire buffer.
+- Renamed Method 'SwithToScaleDefinitions' to 'MasterScale'
+- Added master-slave feature(2 Ring Buffer with synchronization)
+    - Added command set 'SlaveScale' to set report handler, Minimum and maximum capacity
+- Added 'MasterSlave' enum item in SourceTrigger
+- Added 'None' enum item in ScaleMode
+- Revised to have greater performance without 'lock'
+- Removed Method 'Counters'
+    - data was not relevant and inaccurate
+- Revised 'RingBufferMetric' 
+    - Now only propreties 'Trigger', 'FromCapacity', 'ToCapacity' and 'MetricDate'
 
-### V1.0.1 (Deprecate!)
+### V2.0.0 (Deprecate! CRITICAL BUGS)
+[**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
+
+- Release with .NET8 
+
+### V1.0.1 (Deprecate! CRITICAL BUGS)
 [**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
 
 - Internal Release
@@ -18,7 +34,8 @@
 - Fixed bug graceful shutdown
 - Code cleanup
 
-### V1.0.0 (Deprecate!)
+### V1.0.0 (Deprecate! CRITICAL BUGS)
 [**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
 
 - Internal Release
+

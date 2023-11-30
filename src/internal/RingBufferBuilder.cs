@@ -27,8 +27,6 @@ namespace RingBufferPlus
 
         public int MaxCapacity { get; private set; } = 2;
 
-        public Func<T, bool> FactoryHealth { get; private set; }
-
         public Func<CancellationToken, T> FactoryHandler { get; private set; }
 
         public TimeSpan FactoryTimeout { get; private set; } = TimeSpan.FromSeconds(10);
@@ -135,12 +133,6 @@ namespace RingBufferPlus
             return this;
         }
 
-        IRingBuffer<T> IRingBuffer<T>.FactoryHealth(Func<T, bool> value)
-        {
-            FactoryHealth = value;
-            return this;
-        }
-
         IRingBuffer<T> IRingBuffer<T>.Factory(Func<CancellationToken, T> value, TimeSpan? timeout, TimeSpan? idleRetryError)
         {
 #if NETSTANDARD2_1
@@ -174,19 +166,14 @@ namespace RingBufferPlus
 
         IRingBufferMasterCapacity<T> IRingBuffer<T>.MasterScale(IRingBufferSwith ringBuffer)
         {
-#if NETSTANDARD2_1
-            if (ringBuffer is null)
+            if (ringBuffer is not null)
             {
-                throw new ArgumentNullException(nameof(ringBuffer));
+                if (!((IRingBufferCallback)ringBuffer).IsSlave)
+                {
+                    throw new InvalidOperationException("ringBuffer parameter not slave");
+                }
+                SwithTo = ringBuffer;
             }
-#else
-            ArgumentNullException.ThrowIfNull(ringBuffer);
-#endif
-            if(!((IRingBufferCallback)ringBuffer).IsSlave)
-            {
-                throw new InvalidOperationException("ringBuffer parameter not slave");
-            }
-            SwithTo = ringBuffer;
             IsSlave = false;
             SwithFrom = null;
             return this;

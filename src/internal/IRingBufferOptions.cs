@@ -16,7 +16,6 @@ namespace RingBufferPlus
         int Capacity { get; }
         int MinCapacity { get; }
         int MaxCapacity { get; }
-        Func<T, bool> FactoryHealth { get; }
         Func<CancellationToken, T> FactoryHandler { get; }
         TimeSpan FactoryTimeout { get; }
         TimeSpan FactoryIdleRetryError { get; }

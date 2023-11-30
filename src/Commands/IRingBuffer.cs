@@ -33,13 +33,6 @@ namespace RingBufferPlus
         IRingBuffer<T> Factory(Func<CancellationToken,T> value, TimeSpan? timeout = null, TimeSpan? idleRetryError = null);
 
         /// <summary>
-        /// Health before accquire buffer.
-        /// </summary>
-        /// <param name="value">The handler to factory Health.</param>
-        /// <returns><see cref="IRingBuffer{T}"/>.</returns>
-        IRingBuffer<T> FactoryHealth(Func<T,bool> value);
-
-        /// <summary>
         /// The Logger
         /// <br>Default value is ILoggerFactory.Create (if any) with category euqal name of ring buffer</br>
         /// </summary>

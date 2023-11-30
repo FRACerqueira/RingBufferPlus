@@ -30,24 +30,15 @@ namespace RingBufferPlusBenchmarkSample
                 {
                     if (connectionWrapper.Successful)
                     {
-                        if (connectionWrapper.Current.IsOpen)
-                        {
-                            model = connectionWrapper.Current.CreateModel();
-                            if (model.IsOpen)
-                            {
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            connectionWrapper.Invalidate();
-                        }
+                        model = connectionWrapper.Current.CreateModel();
+                        //model.ConfirmSelect();
+                        break;
                     }
                 }
                 catch 
                 {
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
+                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(2));
             }
             return model;
         }
@@ -62,7 +53,7 @@ namespace RingBufferPlusBenchmarkSample
                 UserName = "guest",
                 Password = "guest",
                 VirtualHost = "EnterpriseLog",
-                AutomaticRecoveryEnabled = true,
+                AutomaticRecoveryEnabled = false,
                 RequestedHeartbeat = TimeSpan.FromMinutes(1),
                 ClientProvidedName = "PublisherRoleProgram"
             };
@@ -73,16 +64,13 @@ namespace RingBufferPlusBenchmarkSample
                 .AccquireTimeout(TimeSpan.FromMilliseconds(500))
                 .OnError((log, error) =>
                     {
-                        log?.LogError("{error}", error);
+                        log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .FactoryHealth((item) => item.IsOpen)
                 .SlaveScale()
                     .ReportScale((mode, log, metric, _) =>
                     {
-                        #pragma warning disable CA2254 // Template should be a static expression
                         log.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
-                        #pragma warning restore CA2254 // Template should be a static expression
                     })
                     .MaxCapacity(10)
                     .MinCapacity(1)
@@ -93,17 +81,14 @@ namespace RingBufferPlusBenchmarkSample
                 .Logger(applogger!)
                 .OnError((log, error) =>
                     {
-                        log?.LogError("{error}", error);
+                        log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ModelFactory(cts)!)
-                .FactoryHealth((item) => item.IsOpen)
                 .MasterScale(connectionRingBuffer)
                     .SampleUnit(TimeSpan.FromSeconds(10), 10)
                     .ReportScale((mode,log,metric,_) => 
                     {
-                        #pragma warning disable CA2254 // Template should be a static expression
                         log.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
-                        #pragma warning restore CA2254 // Template should be a static expression
                     })
                     .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()
@@ -183,7 +168,7 @@ namespace RingBufferPlusBenchmarkSample
             Thread.Sleep(TimeSpan.FromSeconds(delaysec));
             Console.WriteLine($"Running");
 
-            var dtref = DateTime.Now.AddSeconds(120);
+            var dtref = DateTime.Now.AddSeconds(12000);
             for (int i = 0; i < threadCount; i++)
             {
                 Thread thread = new(() =>
@@ -192,8 +177,8 @@ namespace RingBufferPlusBenchmarkSample
                     {
                         if (DateTime.Now > dtref)
                         {
-                            Console.WriteLine($"wait 120 seconds idle");
-                            Thread.Sleep(TimeSpan.FromSeconds(120));
+                            Console.WriteLine($"wait 90 seconds idle");
+                            Thread.Sleep(TimeSpan.FromSeconds(90));
                             dtref = DateTime.Now.AddSeconds(120);
                         }
                         using var bufferedItem = modelRingBuffer!.Accquire();

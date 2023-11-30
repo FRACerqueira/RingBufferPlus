@@ -11,7 +11,7 @@
 
 Namespace: RingBufferPlus
 
-Represents the commands to RingBufferPlus service.
+Represents the salve commands to RingBufferPlus service.
 
 ```csharp
 public interface IRingBufferSwith
@@ -21,7 +21,7 @@ public interface IRingBufferSwith
 
 ### <a id="methods-swithto"/>**SwithTo(ScaleMode)**
 
-Swith to new capacity
+Swith to new capacity in slave RingBuffer
 
 ```csharp
 bool SwithTo(ScaleMode scaleMode)

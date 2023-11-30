@@ -16,17 +16,21 @@ using BenchmarkDotNet.Loggers;
 using RabbitMQ.Client;
 using RingBufferPlus;
 using Microsoft.Extensions.Logging;
+using BenchmarkDotNet.Toolchains.InProcess.Emit;
+using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 
 namespace RingBufferPlusBenchmarkSample
 {
     [Config(typeof(Config))]
-    [SimpleJob(RunStrategy.ColdStart, RuntimeMoniker.Net80)]
     [RankColumn]
     public class BenchmarkProgram
     {
         private static ConnectionFactory? ConnectionFactory;
         private static IRingBufferService<IModel>? modelRingBuffer;
         private static IRingBufferService<IConnection>? connectionRingBuffer;
+        private static ConnectionFactory? ConnectionFactory1;
+        private static IRingBufferService<IModel>? modelRingBuffer1;
+        private static IRingBufferService<IConnection>? connectionRingBuffer1;
         ReadOnlyMemory<byte> message;
 
         static IModel? ModelFactory(CancellationToken cancellation)
@@ -60,19 +64,57 @@ namespace RingBufferPlusBenchmarkSample
             }
             return model;
         }
+        static IModel? ModelFactory1(CancellationToken cancellation)
+        {
+            IModel? model = null;
+            while (!cancellation.IsCancellationRequested)
+            {
+                using var connectionWrapper = connectionRingBuffer1!.Accquire();
+                try
+                {
+                    if (connectionWrapper.Successful)
+                    {
+                        if (connectionWrapper.Current.IsOpen)
+                        {
+                            model = connectionWrapper.Current.CreateModel();
+                            if (model.IsOpen)
+                            {
+                                break;
+                            }
+                        }
+                        else
+                        {
+                            connectionWrapper.Invalidate();
+                        }
+                    }
+                }
+                catch
+                {
+                }
+                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
+            }
+            return model;
+        }
 
 
         private class Config : ManualConfig
         {
             public Config()
             {
-                AddJob(Job.Dry);
+                AddJob(Job.LongRun
+                        .WithLaunchCount(1)
+                        .WithIterationCount(3)
+                        .WithWarmupCount(3)
+                        .WithToolchain(new InProcessNoEmitToolchain(timeout: TimeSpan.FromHours(1),true))
+                        .WithStrategy(RunStrategy.Throughput));
                 AddLogger(ConsoleLogger.Default);
                 AddColumn(TargetMethodColumn.Method);
                 AddColumn(StatisticColumn.AllStatistics);
                 AddExporter(RPlotExporter.Default, CsvExporter.Default);
                 AddAnalyser(EnvironmentAnalyser.Default);
+                WithOptions(ConfigOptions.DisableOptimizationsValidator);
                 UnionRule = ConfigUnionRule.AlwaysUseLocal;
+
             }
         }
 
@@ -80,11 +122,10 @@ namespace RingBufferPlusBenchmarkSample
         {
         }
 
-        [GlobalSetup]
-        public void GlobalSetup()
+        [GlobalSetup(Target = "WithoutRingBuffer")]
+        public void GlobalSetupWithoutRingBuffer()
         {
             message = new ReadOnlyMemory<byte>(System.Text.Encoding.UTF8.GetBytes("0"));
-
             ConnectionFactory = new ConnectionFactory()
             {
                 Port = 8087,
@@ -92,36 +133,69 @@ namespace RingBufferPlusBenchmarkSample
                 UserName = "guest",
                 Password = "guest",
                 VirtualHost = "EnterpriseLog",
-                AutomaticRecoveryEnabled = true,
+                AutomaticRecoveryEnabled = false,
+                RequestedHeartbeat = TimeSpan.FromMinutes(1),
+                ClientProvidedName = "PublisherRoleProgram"
+            };
+        }
+
+        [GlobalSetup(Target = "WithRingBuffer")]
+        public void GlobalSetupRingBuffer()
+        {
+            message = new ReadOnlyMemory<byte>(System.Text.Encoding.UTF8.GetBytes("0"));
+            ConnectionFactory = new ConnectionFactory()
+            {
+                Port = 8087,
+                HostName = "localhost",
+                UserName = "guest",
+                Password = "guest",
+                VirtualHost = "EnterpriseLog",
+                AutomaticRecoveryEnabled = false,
                 RequestedHeartbeat = TimeSpan.FromMinutes(1),
                 ClientProvidedName = "PublisherRoleProgram"
             };
 
             connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
-                .Capacity(5)
-                .Logger(Program.logger!)
-                .OnError((log, error) =>
-                {
-                    log?.LogError("{error}", error);
-                })
+                .Capacity(10)
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .FactoryHealth((item) => item.IsOpen)
+                .AccquireTimeout(TimeSpan.FromMilliseconds(500))
+                .BuildWarmup(out _);
+
+            modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
+                .Capacity(50)
+                .Factory((cts) => ModelFactory(cts)!)
+                .BuildWarmup(out _);
+        }
+
+        [GlobalSetup(Target = "WithRingBufferScaler")]
+        public void GlobalSetupScaler()
+        {
+            message = new ReadOnlyMemory<byte>(System.Text.Encoding.UTF8.GetBytes("0"));
+            ConnectionFactory1 = new ConnectionFactory()
+            {
+                Port = 8087,
+                HostName = "localhost",
+                UserName = "guest",
+                Password = "guest",
+                VirtualHost = "EnterpriseLog",
+                AutomaticRecoveryEnabled = false,
+                RequestedHeartbeat = TimeSpan.FromMinutes(1),
+                ClientProvidedName = "PublisherRoleProgram"
+            };
+
+            connectionRingBuffer1 = RingBuffer<IConnection>.New("RabbitCnn")
+                .Capacity(2)
+                .Factory((cts) => ConnectionFactory1.CreateConnection())
                 .AccquireTimeout(TimeSpan.FromMilliseconds(500))
                 .SlaveScale()
                     .MaxCapacity(10)
                     .MinCapacity(1)
                 .BuildWarmup(out _);
 
-            modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
-                .Capacity(20)
-                .Logger(Program.logger!)
-                .OnError((log, error) =>
-                {
-                    log?.LogError("{error}", error);
-                })
-                .Factory((cts) => ModelFactory(cts)!)
-                .FactoryHealth((item) => item.IsOpen)
-                .MasterScale(connectionRingBuffer)
+            modelRingBuffer1 = RingBuffer<IModel>.New("RabbitChanels")
+                .Capacity(10)
+                .Factory((cts) => ModelFactory1(cts)!)
+                .MasterScale(connectionRingBuffer1)
                     .SampleUnit(TimeSpan.FromSeconds(10), 10)
                     .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()
@@ -132,23 +206,22 @@ namespace RingBufferPlusBenchmarkSample
                 .BuildWarmup(out _);
         }
 
-        [GlobalCleanup]
+        [GlobalCleanup()]
         public static void GlobalCleanup()
         {
-            modelRingBuffer!.Dispose();
-            connectionRingBuffer!.Dispose();
+            modelRingBuffer?.Dispose();
+            connectionRingBuffer?.Dispose();
+            modelRingBuffer1?.Dispose();
+            connectionRingBuffer1?.Dispose();
         }
 
-        public static void CreateQueue(IModel model, string queueName) =>
-            model.QueueDeclare(queueName, true, false, false, null);
-
-        private static void Send(RingBufferValue<IModel>? rb, IModel channel,string queuename, ReadOnlyMemory<byte> message)
+        private static void Send(RingBufferValue<IModel>? rb, IModel channel,ReadOnlyMemory<byte> message)
         {
             var props = channel.CreateBasicProperties();
             props.DeliveryMode = 1;
             try
             {
-                channel.BasicPublish("", queuename, false, props, message);
+                channel.BasicPublish("", "log", false, props, message);
             }
             catch (Exception)
             {
@@ -160,42 +233,42 @@ namespace RingBufferPlusBenchmarkSample
         }
 
         [Benchmark]
-        public int WithRingBuffer()
-        {
-            string queueName = $"WithRingBuffer-{Guid.NewGuid():D}";
-            using (var accquisiton = modelRingBuffer!.Accquire())
-            {
-                CreateQueue(accquisiton.Current, queueName);
-            }
-
-            for (var i = 0; i < 5; i++)
-                for (var j = 0; j < 1000; j++)
-                    using (var accquisiton = modelRingBuffer.Accquire())
-                    {
-                        Send(accquisiton, accquisiton.Current, queueName, message);
-                    }
-            return 0;
-        }
-
-        [Benchmark]
         public int WithoutRingBuffer()
         {
-            string queueName = $"WithoutRingBuffer-{Guid.NewGuid():D}";
-            using (var connection = ConnectionFactory!.CreateConnection())
-            {
-                using var model = connection.CreateModel();
-                CreateQueue(model, queueName);
-            }
-
             for (var i = 0; i < 5; i++)
                 using (var connection = ConnectionFactory!.CreateConnection())
                 {
                     for (var j = 0; j < 1000; j++)
                         using (var model = connection.CreateModel())
                         {
-                            Send(null, model, queueName, message);
+                            Send(null, model, message);
                         }
                 }
+            return 0;
+        }
+
+        [Benchmark]
+        public int WithRingBuffer()
+        {
+            for (var i = 0; i < 5; i++)
+                for (var j = 0; j < 1000; j++)
+                    using (var accquisiton = modelRingBuffer!.Accquire())
+                    {
+                        Send(accquisiton, accquisiton.Current,message);
+                    }
+            return 0;
+        }
+
+
+        [Benchmark]
+        public int WithRingBufferScaler()
+        {
+            for (var i = 0; i < 3; i++)
+                for (var j = 0; j < 500; j++)
+                    using (var accquisiton = modelRingBuffer1!.Accquire())
+                    {
+                        Send(accquisiton, accquisiton.Current, message);
+                    }
             return 0;
         }
     }    
