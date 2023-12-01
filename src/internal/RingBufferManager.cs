@@ -126,7 +126,7 @@ namespace RingBufferPlus
                 _blockRetryFactoryBuffer?.Dispose();
                 _blockScaleBuffer?.Dispose();
                 _blockreportBuffer?.Dispose();
-                _bufferHealthThread.Dispose();
+                _bufferHealthThread?.Dispose();
 
                 if (_availableBuffer is not null)
                 {
@@ -249,7 +249,6 @@ namespace RingBufferPlus
             }
 
             //try Accquire buffer && 
-            TimeSpan elapsed = TimeSpan.Zero;
             while (!localcancellation.IsCancellationRequested)
             {
 
@@ -306,27 +305,24 @@ namespace RingBufferPlus
                     if (sw.Elapsed > AccquireTimeout)
                     {
                         sw.Stop();
-                        if (!_recoveryBuffer && _currentCapacity != 0)
+                        if (!_recoveryBuffer && _currentCapacity != 0 && fullavailable == 0)
                         {
-                            if (fullavailable == 0)
+                            lock (_lockAccquire)
                             {
-                                lock (_lockAccquire)
-                                {
-                                    _recoveryBuffer = true;
-                                }
-                                WriteLogWarning(DateTime.Now, $"{Name} with State RecoveryBuffer");
-                                _blockexceptionsBuffer.Add(new RingBufferException(Name, $"{Name} with State RecoveryBuffer"));
-                                var mode = ScaleMode.ToDefaultCapacity;
-                                if (ScaleCapacity && _currentCapacity == MaxCapacity)
-                                {
-                                    mode = ScaleMode.ToMaxCapacity;
-                                }
-                                else if (ScaleCapacity && _currentCapacity == MinCapacity)
-                                {
-                                    mode = ScaleMode.ToMinCapacity;
-                                }
-                                _blockrenewBuffer.Add(new RingBufferValue<T>(mode));
+                                _recoveryBuffer = true;
                             }
+                            WriteLogWarning(DateTime.Now, $"{Name} with State RecoveryBuffer");
+                            _blockexceptionsBuffer.Add(new RingBufferException(Name, $"{Name} with State RecoveryBuffer"));
+                            var mode = ScaleMode.ToDefaultCapacity;
+                            if (ScaleCapacity && _currentCapacity == MaxCapacity)
+                            {
+                                mode = ScaleMode.ToMaxCapacity;
+                            }
+                            else if (ScaleCapacity && _currentCapacity == MinCapacity)
+                            {
+                                mode = ScaleMode.ToMinCapacity;
+                            }
+                            _blockrenewBuffer.Add(new RingBufferValue<T>(mode));
                         }
                         WriteLogDebug(DateTime.Now, $"{Name} Accquire timeout {sw.Elapsed}");
                         //Send error
@@ -533,118 +529,22 @@ namespace RingBufferPlus
                 {
                     foreach (var item in _blockrenewBuffer.GetConsumingEnumerable(_managertoken.Token))
                     {
-                        if (item.Successful || item.IsScaleCapacity)
+                        if (item.SkipTurnback || item.IsScaleCapacity)
                         {
-                            if (item.SkipTurnback || item.IsScaleCapacity)
+                            if (item.SkipTurnback)
                             {
-                                if (item.SkipTurnback)
+                                if (item.Current is not null && item.Current is IDisposable disposable)
                                 {
-                                    if (item.Current is not null && item.Current is IDisposable disposable)
-                                    {
-                                        disposable.Dispose();
-                                    }
-                                    lock (_lockAccquire)
-                                    {
-                                        _counterBuffer--;
-                                        //when the scale down sync occurs, the counters are reset
-                                        if (_counterBuffer < 0)
-                                        {
-                                            _counterBuffer = 0;
-                                        }
-                                        _counterAccquire--;
-                                        //when the scale down sync occurs, the counters are reset
-                                        if (_counterAccquire < 0)
-                                        {
-                                            _counterAccquire = 0;
-                                        }
-                                    }
-                                    //create a new item
-                                    TryLoadBufferAsync(1);
+                                    disposable.Dispose();
                                 }
-                                else if (item.IsScaleCapacity)
-                                {
-                                    var newcap = _currentCapacity;
-                                    switch (item.ScaleMode)
-                                    {
-                                        case ScaleMode.ToDefaultCapacity:
-                                            newcap = Capacity;
-                                            break;
-                                        case ScaleMode.ToMinCapacity:
-                                            newcap = MinCapacity;
-                                            break;
-                                        case ScaleMode.ToMaxCapacity:
-                                            newcap = MaxCapacity;
-                                            break;
-                                    }
-
-                                    WriteLogTrace(DateTime.Now, $"{Name} Master SemaphoremasterSlave Block");
-                                    SemaphoremasterSlave.Wait();
-                                    WriteLogTrace(DateTime.Now, $"{Name} Master SemaphoremasterSlave Block done");
-
-                                    if (_slaveBuffer is not null && item.ScaleMode != ScaleMode.ReNew)
-                                    {
-                                        var slavename = ((IRingBufferCallback)_slaveBuffer).Name;
-                                        WriteLogDebug(DateTime.Now, $"{Name} Master invoke  SwithTo to Slave({slavename}) with scale: {item.ScaleMode}");
-                                        if (_slaveBuffer.SwithTo(item.ScaleMode))
-                                        {
-                                            WriteLogTrace(DateTime.Now, $"{Name} Master wait SemaphoremasterSlave Release from {slavename}");
-                                            SemaphoremasterSlave.Wait();
-                                            WriteLogTrace(DateTime.Now, $"{Name} Master done SemaphoremasterSlave Release from {slavename}");
-                                        }
-                                        else
-                                        {
-                                            WriteLogTrace(DateTime.Now, $"{Name} Slave({slavename}) already has {item.ScaleMode}");
-                                        }
-                                    }
-                                    var diff = newcap - _currentCapacity;
-                                    if ((item.ScaleMode != ScaleMode.ReNew && diff < 0))
-                                    {
-                                        lock (_lockAccquire)
-                                        {
-                                            lock (_lockMetric)
-                                            {
-                                                _runningScale = true;
-                                            }
-                                            //nenew all buffer and resert counts
-                                            RemoveAllBuffer();
-                                            TryLoadBufferAsync(newcap);
-                                        }
-                                    }
-                                    else
-                                    {
-                                        lock (_lockAccquire)
-                                        {
-                                            diff = newcap - (_counterBuffer + _counterAccquire);
-                                        }
-                                        if (diff > 0)
-                                        {
-                                            lock (_lockMetric)
-                                            {
-                                                _runningScale = true;
-                                            }
-                                            TryLoadBufferAsync(diff);
-                                        }
-                                    }
-                                    lock (_MetricBuffer)
-                                    {
-                                        _MetricBuffer.Clear();
-                                        _currentCapacity = newcap;
-                                        _runningScale = false;
-                                    }
-
-                                    if (SemaphoremasterSlave.CurrentCount == 0)
-                                    {
-                                        SemaphoremasterSlave.Release();
-                                        WriteLogTrace(DateTime.Now, $"{Name} Masater SemaphoremasterSlave Block done, already has {item.ScaleMode} in slave");
-                                    }
-                                }
-                            }
-                            else
-                            {
                                 lock (_lockAccquire)
                                 {
-                                    _availableBuffer.Enqueue(item.Current);
-                                    _counterBuffer++;
+                                    _counterBuffer--;
+                                    //when the scale down sync occurs, the counters are reset
+                                    if (_counterBuffer < 0)
+                                    {
+                                        _counterBuffer = 0;
+                                    }
                                     _counterAccquire--;
                                     //when the scale down sync occurs, the counters are reset
                                     if (_counterAccquire < 0)
@@ -652,8 +552,101 @@ namespace RingBufferPlus
                                         _counterAccquire = 0;
                                     }
                                 }
-                                WriteLogDebug(DateTime.Now, $"{Name} Renew Rehydrated Buffer");
+                                //create a new item
+                                TryLoadBufferAsync(1);
                             }
+                            else if (item.IsScaleCapacity)
+                            {
+                                var newcap = _currentCapacity;
+                                switch (item.ScaleMode)
+                                {
+                                    case ScaleMode.ToDefaultCapacity:
+                                        newcap = Capacity;
+                                        break;
+                                    case ScaleMode.ToMinCapacity:
+                                        newcap = MinCapacity;
+                                        break;
+                                    case ScaleMode.ToMaxCapacity:
+                                        newcap = MaxCapacity;
+                                        break;
+                                }
+
+                                WriteLogTrace(DateTime.Now, $"{Name} Master SemaphoremasterSlave Block");
+                                SemaphoremasterSlave.Wait();
+                                WriteLogTrace(DateTime.Now, $"{Name} Master SemaphoremasterSlave Block done");
+
+                                if (_slaveBuffer is not null && item.ScaleMode != ScaleMode.ReNew)
+                                {
+                                    var slavename = ((IRingBufferCallback)_slaveBuffer).Name;
+                                    WriteLogDebug(DateTime.Now, $"{Name} Master invoke  SwithTo to Slave({slavename}) with scale: {item.ScaleMode}");
+                                    if (_slaveBuffer.SwithTo(item.ScaleMode))
+                                    {
+                                        WriteLogTrace(DateTime.Now, $"{Name} Master wait SemaphoremasterSlave Release from {slavename}");
+                                        SemaphoremasterSlave.Wait();
+                                        WriteLogTrace(DateTime.Now, $"{Name} Master done SemaphoremasterSlave Release from {slavename}");
+                                    }
+                                    else
+                                    {
+                                        WriteLogTrace(DateTime.Now, $"{Name} Slave({slavename}) already has {item.ScaleMode}");
+                                    }
+                                }
+                                var diff = newcap - _currentCapacity;
+                                if ((item.ScaleMode != ScaleMode.ReNew && diff < 0))
+                                {
+                                    lock (_lockAccquire)
+                                    {
+                                        lock (_lockMetric)
+                                        {
+                                            _runningScale = true;
+                                        }
+                                        //nenew all buffer and resert counts
+                                        RemoveAllBuffer();
+                                        TryLoadBufferAsync(newcap);
+                                    }
+                                }
+                                else
+                                {
+                                    lock (_lockAccquire)
+                                    {
+                                        diff = newcap - (_counterBuffer + _counterAccquire);
+                                    }
+                                    if (diff > 0)
+                                    {
+                                        lock (_lockMetric)
+                                        {
+                                            _runningScale = true;
+                                        }
+                                        TryLoadBufferAsync(diff);
+                                    }
+                                }
+                                lock (_MetricBuffer)
+                                {
+                                    _MetricBuffer.Clear();
+                                    _currentCapacity = newcap;
+                                    _runningScale = false;
+                                }
+
+                                if (SemaphoremasterSlave.CurrentCount == 0)
+                                {
+                                    SemaphoremasterSlave.Release();
+                                    WriteLogTrace(DateTime.Now, $"{Name} Masater SemaphoremasterSlave Block done, already has {item.ScaleMode} in slave");
+                                }
+                            }
+                        }
+                        else if (item.Successful)
+                        {
+                            lock (_lockAccquire)
+                            {
+                                _availableBuffer.Enqueue(item.Current);
+                                _counterBuffer++;
+                                _counterAccquire--;
+                                //when the scale down sync occurs, the counters are reset
+                                if (_counterAccquire < 0)
+                                {
+                                    _counterAccquire = 0;
+                                }
+                            }
+                            WriteLogDebug(DateTime.Now, $"{Name} Renew Rehydrated Buffer");
                         }
                     }
                 }
@@ -721,7 +714,7 @@ namespace RingBufferPlus
                         _managertoken.Token.WaitHandle.WaitOne(diff);
                         if (!_managertoken.Token.IsCancellationRequested)
                         {
-                            WriteLogInfo(DateTime.Now, $"{Name} Retry Factory Send Message Create to Renew Buffer Thread");
+                            WriteLogDebug(DateTime.Now, $"{Name} Retry Factory Send Message Create to Renew Buffer Thread");
                             _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleMode.ReNew));
                         }
                     }
@@ -969,14 +962,13 @@ namespace RingBufferPlus
                                 if (value is not null && value is IDisposable disposablevalue)
                                 {
                                     disposablevalue.Dispose();
-                                    WriteLogWarning(DateTime.Now, $"{Name} TryLoadBufferAsync Disposed Item (Timeout)");
                                 }
                             }
                             else
                             {
                                 if (value is null)
                                 {
-                                    WriteLogWarning(DateTime.Now, $"{Name} TryLoadBufferAsync Send Factory to Retry");
+                                    WriteLogDebug(DateTime.Now, $"{Name} TryLoadBufferAsync Send Factory to Retry");
                                     _blockRetryFactoryBuffer.Add(DateTime.Now.Add(FactoryIdleRetry));
                                 }
                                 else

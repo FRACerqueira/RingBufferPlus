@@ -28,6 +28,7 @@ namespace RingBufferPlus
         internal RingBufferValue(ScaleMode scaleMode)
         {
             IsScaleCapacity = true;
+            Successful = false;
             Current = default;
             ScaleMode = scaleMode;
         }
