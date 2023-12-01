@@ -167,7 +167,7 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Wait... {delaysec}sec. to start {threadCount} thread"); 
             Thread.Sleep(TimeSpan.FromSeconds(delaysec));
 
-            var dtref = DateTime.Now.AddSeconds(12000);
+            var dtref = DateTime.Now.AddSeconds(120);
             for (int i = 0; i < threadCount; i++)
             {
                 Thread thread = new(() =>
