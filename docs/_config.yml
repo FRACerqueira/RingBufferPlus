@@ -1,4 +1,4 @@
-description: A generic circular buffer (ring buffer) in C# with Auto-Scaler.
+description: A generic circular buffer (ring buffer) in C# with auto-scaler.
 show_downloads: false
 google_analytics:
 theme: jekyll-theme-cayman

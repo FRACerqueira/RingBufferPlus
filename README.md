@@ -4,7 +4,7 @@
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 
-### **RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler.**
+### **RingBufferPlus A generic circular buffer (ring buffer) in C# with auto-scaler.**
 
 **RingBufferPlus** was developed in C# with the **netstandard2.1**, **.NET 6** , **.NET 7** and **.NET 8** target frameworks.
 
@@ -16,9 +16,9 @@
 - [Features](#features)
 - [Installing](#installing)
 - [Examples](#examples)
-- [Generic Usage](#generic-usage)
-- [RabbitMQ Usage](#rabbitmq-usage)
-- [Performance](#performance)
+- [**Generic Usage**](#generic-usage)
+- [**RabbitMQ Usage**](#rabbitmq-usage)
+- [**Performance**](#performance)
 - [Code of Conduct](#code-of-conduct)
 - [Contributing](#contributing)
 - [Credits](#credits)
@@ -279,13 +279,27 @@ Intel Core i7-8565U CPU 1.80GHz (Whiskey Lake), 1 CPU, 8 logical and 4 physical 
   [Host]     : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
   Job-IMTEVT : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
   Dry        : .NET 8.0.0 (8.0.23.53103), X64 RyuJIT AVX2
-+--------------------- +--------------+-------------+-------------+--------------+-------------+--------------+--------------+--------------+--------+------|
-| Method               | Mean         | StdErr      | StdDev      | Min          | Q1          | Median       | Q3           | Max          | Op/s   | Rank |
-|--------------------- |-------------:|-------------|------------:|-------------:|-------------|-------------:|-------------:|-------------:|--------|-----:|
-| WithRingBufferScaler |     139.5 ms |    33.83 ms |    58.59 ms |     98.14 ms |    105.9 ms |     113.7 ms |     160.1 ms |     206.5 ms | 7.1707 |    1 |
-| WithRingBuffer       |     382.3 ms |    54.54 ms |    94.47 ms |    315.67 ms |    328.2 ms |     340.7 ms |     415.6 ms |     490.4 ms | 2.6160 |    2 |
-| WithoutRingBuffer    | 102,481.5 ms | 2,885.96 ms | 4,998.62 ms | 98,981.44 ms | 99,619.2 ms | 100,256.9 ms | 104,231.6 ms | 108,206.3 ms | 0.0098 |    3 |
-+--------------------- +--------------+-------------+-------------+--------------+-------------+--------------+--------------+--------------+--------+------|
++--------------------- +-------------+-----------+-------------+-------------+-------------+-------------+-------------+-------------+--------+------|
+| Method               | Mean        | StdErr    | StdDev      | Min         | Q1          | Median      | Q3          | Max         | Op/s   | Rank |
+|--------------------- |-------------|-----------|-------------|-------------|-------------|-------------|-------------|-------------|--------|------|
+| WithRingBuffer       |    422.8 ms |  51.41 ms |    89.05 ms |    323.6 ms |    386.4 ms |    449.1 ms |    472.5 ms |    495.8 ms | 2.3649 |    1 |
+| WithRingBufferScaler |    537.9 ms |  81.06 ms |   140.40 ms |    392.1 ms |    470.8 ms |    549.5 ms |    610.8 ms |    672.2 ms | 1.8591 |    2 |
+| WithoutRingBuffer    | 84,961.4 ms | 752.59 ms | 1,303.52 ms | 84,198.0 ms | 84,208.8 ms | 84,219.6 ms | 85,343.1 ms | 86,466.5 ms | 0.0118 |    3 |
++--------------------- +-------------+-----------+-------------+-------------+-------------+-------------+-------------+-------------+--------+------|
+Legends
+-------
+Mean   : Arithmetic mean of all measurements
+StdErr : Standard error of all measurements
+StdDev : Standard deviation of all measurements
+Min    : Minimum
+Q1     : Quartile 1 (25th percentile)
+Median : Value separating the higher half of all measurements (50th percentile)
+Q3     : Quartile 3 (75th percentile)
+Max    : Maximum
+Op/s   : Operation per second
+Rank   : Relative position of current benchmark mean among all benchmarks (Arabic style)
+1 ms   : 1 Millisecond (0.001 sec)
+
 ```
 
 ## Code of Conduct

@@ -13,7 +13,7 @@
 Welcome to RingBufferPlus
 =========================
 
-RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler.
+RingBufferPlus A generic circular buffer (ring buffer) in C# with auto-scaler.
 
 Key Features
 ============

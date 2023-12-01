@@ -156,11 +156,13 @@ namespace RingBufferPlusBenchmarkSample
             connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
                 .Capacity(10)
                 .Factory((cts) => ConnectionFactory.CreateConnection())
+                .BufferHealth((buffer) => buffer.IsOpen)
                 .AccquireTimeout(TimeSpan.FromMilliseconds(500))
                 .BuildWarmup(out _);
 
             modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
                 .Capacity(50)
+                .BufferHealth((buffer) => buffer.IsOpen)
                 .Factory((cts) => ModelFactory(cts)!)
                 .BuildWarmup(out _);
         }
@@ -193,6 +195,7 @@ namespace RingBufferPlusBenchmarkSample
             modelRingBuffer1 = RingBuffer<IModel>.New("RabbitChanels")
                 .Capacity(10)
                 .Factory((cts) => ModelFactory1(cts)!)
+                .BufferHealth((buffer) => buffer.IsOpen)
                 .MasterScale(connectionRingBuffer1!)
                     .SampleUnit(TimeSpan.FromSeconds(10), 10)
                     .MaxCapacity(50)
@@ -261,8 +264,8 @@ namespace RingBufferPlusBenchmarkSample
         [Benchmark]
         public int WithRingBufferScaler()
         {
-            for (var i = 0; i < 3; i++)
-                for (var j = 0; j < 500; j++)
+            for (var i = 0; i < 5; i++)
+                for (var j = 0; j < 1000; j++)
                     using (var accquisiton = modelRingBuffer1!.Accquire())
                     {
                         Send(accquisiton, accquisiton.Current, message);
