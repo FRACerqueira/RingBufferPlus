@@ -43,7 +43,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="report">The handler to action.</param>
         /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
-        IRingBufferMasterCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report = null);
+        IRingBufferMasterCapacity<T> ReportScale(Action<RingBufferMetric, ILogger?, CancellationToken?> report = null);
 
 
         /// <summary>

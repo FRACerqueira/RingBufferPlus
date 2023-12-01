@@ -41,6 +41,26 @@ The timeout for acquiring a value from the buffer.
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
+### <a id="methods-bufferhealth"/>**BufferHealth(Func&lt;T, Boolean&gt;, Nullable&lt;TimeSpan&gt;)**
+
+Check buffer health with each acquisition or after timeout
+
+```csharp
+IRingBuffer<T> BufferHealth(Func<T, Boolean> value, Nullable<TimeSpan> timeout)
+```
+
+#### Parameters
+
+`value` Func&lt;T, Boolean&gt;<br>
+The handler to health.
+
+`timeout` [Nullable&lt;TimeSpan&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
+The timeout for checking buffer integrity when there is no acquisition. Default value is 30 seconds
+
+#### Returns
+
+[IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
+
 ### <a id="methods-build"/>**Build()**
 
 Validate and generate RingBufferPlus to service mode.
@@ -132,17 +152,17 @@ IRingBuffer<T> Logger(ILogger value)
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
-### <a id="methods-masterscale"/>**MasterScale(IRingBufferSwith)**
+### <a id="methods-masterscale"/>**MasterScale(IRingBufferPlus)**
 
 Swith to scale definitions commands (self) or other ring buffer.
 
 ```csharp
-IRingBufferMasterCapacity<T> MasterScale(IRingBufferSwith ringBuffer)
+IRingBufferMasterCapacity<T> MasterScale(IRingBufferPlus ringBuffer)
 ```
 
 #### Parameters
 
-`ringBuffer` [IRingBufferSwith](./ringbufferplus.iringbufferswith.md)<br>
+`ringBuffer` [IRingBufferPlus](./ringbufferplus.iringbufferplus.md)<br>
 The slave Ring buffer.
 
 #### Returns

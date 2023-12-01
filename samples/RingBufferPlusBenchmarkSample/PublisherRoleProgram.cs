@@ -31,7 +31,6 @@ namespace RingBufferPlusBenchmarkSample
                     if (connectionWrapper.Successful)
                     {
                         model = connectionWrapper.Current.CreateModel();
-                        //model.ConfirmSelect();
                         break;
                     }
                 }
@@ -68,11 +67,11 @@ namespace RingBufferPlusBenchmarkSample
                     })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
                 .SlaveScale()
-                    .ReportScale((mode, log, metric, _) =>
+                    .ReportScale((metric, log, cts) =>
                     {
-                        log.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
+                        log?.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
                     })
-                    .MaxCapacity(10)
+                    .MaxCapacity(5)
                     .MinCapacity(1)
                 .BuildWarmup(out completedCnn);
 
@@ -84,11 +83,12 @@ namespace RingBufferPlusBenchmarkSample
                         log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ModelFactory(cts)!)
+                .BufferHealth((buffer) => buffer.IsOpen, TimeSpan.FromSeconds(5))
                 .MasterScale(connectionRingBuffer)
-                    .SampleUnit(TimeSpan.FromSeconds(10), 10)
-                    .ReportScale((mode,log,metric,_) => 
+                    .SampleUnit(TimeSpan.FromSeconds(10), 50)
+                    .ReportScale((metric, log, cts) => 
                     {
-                        log.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
+                        log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
                     })
                     .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()
@@ -166,13 +166,13 @@ namespace RingBufferPlusBenchmarkSample
 
             Console.WriteLine($"Wait... {delaysec}sec. to start {threadCount} thread"); 
             Thread.Sleep(TimeSpan.FromSeconds(delaysec));
-            Console.WriteLine($"Running");
 
             var dtref = DateTime.Now.AddSeconds(12000);
             for (int i = 0; i < threadCount; i++)
             {
                 Thread thread = new(() =>
                 {
+                    Console.WriteLine($"Running");
                     while (true)
                     {
                         if (DateTime.Now > dtref)
@@ -180,6 +180,7 @@ namespace RingBufferPlusBenchmarkSample
                             Console.WriteLine($"wait 90 seconds idle");
                             Thread.Sleep(TimeSpan.FromSeconds(90));
                             dtref = DateTime.Now.AddSeconds(120);
+                            Console.WriteLine($"Running");
                         }
                         using var bufferedItem = modelRingBuffer!.Accquire();
                         if (bufferedItem.Successful)
@@ -194,9 +195,9 @@ namespace RingBufferPlusBenchmarkSample
                             {
                                 bufferedItem.Current.BasicPublish("", "log", false, props, body);
                             }
-                            catch (Exception)
+                            catch (Exception ex)
                             {
-                                Console.WriteLine($"{modelRingBuffer.Name} buffer is invalid!");
+                                Console.WriteLine($"{modelRingBuffer.Name} buffer is invalid! : {ex.Message}");
                                 bufferedItem.Invalidate();
                             }
                         }

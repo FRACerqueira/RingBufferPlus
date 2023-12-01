@@ -33,6 +33,14 @@ namespace RingBufferPlus
         IRingBuffer<T> Factory(Func<CancellationToken,T> value, TimeSpan? timeout = null, TimeSpan? idleRetryError = null);
 
         /// <summary>
+        /// Check buffer health with each acquisition or after timeout
+        /// </summary>
+        /// <param name="value">The handler to health.</param>
+        /// <param name="timeout">The timeout for checking buffer integrity when there is no acquisition. Default value is 30 seconds</param>
+        /// <returns><see cref="IRingBuffer{T}"/>.</returns>
+        IRingBuffer<T> BufferHealth(Func<T, bool> value, TimeSpan? timeout = null);
+
+        /// <summary>
         /// The Logger
         /// <br>Default value is ILoggerFactory.Create (if any) with category euqal name of ring buffer</br>
         /// </summary>
@@ -74,7 +82,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="ringBuffer">The slave Ring buffer.</param>
         /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
-        IRingBufferMasterCapacity<T> MasterScale(IRingBufferSwith? ringBuffer = null);
+        IRingBufferMasterCapacity<T> MasterScale(IRingBufferPlus ringBuffer = null);
 
         /// <summary>
         /// Swith to scale definitions from other ring buffer.

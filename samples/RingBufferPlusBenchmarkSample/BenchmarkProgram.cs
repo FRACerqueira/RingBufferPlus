@@ -15,8 +15,6 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Loggers;
 using RabbitMQ.Client;
 using RingBufferPlus;
-using Microsoft.Extensions.Logging;
-using BenchmarkDotNet.Toolchains.InProcess.Emit;
 using BenchmarkDotNet.Toolchains.InProcess.NoEmit;
 
 namespace RingBufferPlusBenchmarkSample
@@ -195,7 +193,7 @@ namespace RingBufferPlusBenchmarkSample
             modelRingBuffer1 = RingBuffer<IModel>.New("RabbitChanels")
                 .Capacity(10)
                 .Factory((cts) => ModelFactory1(cts)!)
-                .MasterScale(connectionRingBuffer1)
+                .MasterScale(connectionRingBuffer1!)
                     .SampleUnit(TimeSpan.FromSeconds(10), 10)
                     .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()

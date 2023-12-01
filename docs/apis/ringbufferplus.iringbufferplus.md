@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferSwith 
+# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferPlus 
 
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
@@ -7,33 +7,15 @@
 
 [**Back to List Api**](./apis.md)
 
-# IRingBufferSwith
+# IRingBufferPlus
 
 Namespace: RingBufferPlus
 
-Represents the salve commands to RingBufferPlus service.
+Represents the RingBufferPlus.
 
 ```csharp
-public interface IRingBufferSwith
+public interface IRingBufferPlus
 ```
-
-## Methods
-
-### <a id="methods-swithto"/>**SwithTo(ScaleMode)**
-
-Swith to new capacity in slave RingBuffer
-
-```csharp
-bool SwithTo(ScaleMode scaleMode)
-```
-
-#### Parameters
-
-`scaleMode` [ScaleMode](./ringbufferplus.scalemode.md)<br>
-
-#### Returns
-
-True if scale changed, otherwise false
 
 
 - - -

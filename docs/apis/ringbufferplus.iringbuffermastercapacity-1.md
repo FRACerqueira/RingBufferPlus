@@ -90,18 +90,18 @@ The minimal buffer. Value mus be greater or equal 1
 
 [IRingBufferScaleMin&lt;T&gt;](./ringbufferplus.iringbufferscalemin-1.md).
 
-### <a id="methods-reportscale"/>**ReportScale(Action&lt;ScaleMode, ILogger, RingBufferMetric, CancellationToken&gt;)**
+### <a id="methods-reportscale"/>**ReportScale(Action&lt;RingBufferMetric, ILogger, Nullable&lt;CancellationToken&gt;&gt;)**
 
 Extension point when capacity was changed.
  <br>Executes asynchronously.
 
 ```csharp
-IRingBufferMasterCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+IRingBufferMasterCapacity<T> ReportScale(Action<RingBufferMetric, ILogger, Nullable<CancellationToken>> report)
 ```
 
 #### Parameters
 
-`report` [Action&lt;ScaleMode, ILogger, RingBufferMetric, CancellationToken&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-4)<br>
+`report` [Action&lt;RingBufferMetric, ILogger, Nullable&lt;CancellationToken&gt;&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-3)<br>
 The handler to action.
 
 #### Returns
