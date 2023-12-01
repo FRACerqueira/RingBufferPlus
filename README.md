@@ -286,6 +286,7 @@ Intel Core i7-8565U CPU 1.80GHz (Whiskey Lake), 1 CPU, 8 logical and 4 physical 
 | WithRingBufferScaler |    537.9 ms |  81.06 ms |   140.40 ms |    392.1 ms |    470.8 ms |    549.5 ms |    610.8 ms |    672.2 ms | 1.8591 |    2 |
 | WithoutRingBuffer    | 84,961.4 ms | 752.59 ms | 1,303.52 ms | 84,198.0 ms | 84,208.8 ms | 84,219.6 ms | 85,343.1 ms | 86,466.5 ms | 0.0118 |    3 |
 +--------------------- +-------------+-----------+-------------+-------------+-------------+-------------+-------------+-------------+--------+------|
+
 Legends
 -------
 Mean   : Arithmetic mean of all measurements
@@ -299,7 +300,6 @@ Max    : Maximum
 Op/s   : Operation per second
 Rank   : Relative position of current benchmark mean among all benchmarks (Arabic style)
 1 ms   : 1 Millisecond (0.001 sec)
-
 ```
 
 ## Code of Conduct
