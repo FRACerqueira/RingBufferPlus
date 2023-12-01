@@ -201,9 +201,9 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
 
 The **RingBufferPlus** use **fluent interface**; an object-oriented API whose design relies extensively on method chaining. Its goal is to increase code legibility. The term was coined in 2005 by Eric Evans and Martin Fowler.
 
-RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** when RinbufferPlus uses AutoScale.
+<font color="red">RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** with RingBufferPlus.</font>
 
-_**If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RinbufferPlus control)**_
+_**If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RingBufferPlus control)**_
 ### Sample-Console Master-Slave feature using RabbitMq (basic usage)
 
 For more details see [**Complete-Samples**](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample).
