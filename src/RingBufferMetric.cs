@@ -25,7 +25,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="source">Source tigger.</param>
         /// <param name="fromcapacity">Current capacity.</param>
-        /// <param name="tocapacity"> New capacity trigger.</param>
+        /// <param name="tocapacity">New capacity trigger.</param>
         public RingBufferMetric(SourceTrigger source, int fromcapacity, int tocapacity)
         {
             Trigger = source;
@@ -48,7 +48,6 @@ namespace RingBufferPlus
         /// New capacity trigger.
         /// </summary>
         public int ToCapacity { get; }
-
 
         /// <summary>
         /// Date of metric .

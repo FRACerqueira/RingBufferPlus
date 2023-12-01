@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferScaleCapacity<T> 
+# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferMasterCapacity<T> 
 
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
@@ -7,14 +7,14 @@
 
 [**Back to List Api**](./apis.md)
 
-# IRingBufferScaleCapacity&lt;T&gt;
+# IRingBufferMasterCapacity&lt;T&gt;
 
 Namespace: RingBufferPlus
 
-Represents the scale capacity commands to RingBufferPlus.
+Represents the Master capacity commands to RingBufferPlus.
 
 ```csharp
-public interface IRingBufferScaleCapacity<T>
+public interface IRingBufferMasterCapacity<T>
 ```
 
 #### Type Parameters
@@ -71,7 +71,7 @@ The maximum buffer.Value mus be greater or equal [IRingBuffer&lt;T&gt;.Capacity(
 
 #### Returns
 
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+[IRingBufferScaleMax&lt;T&gt;](./ringbufferplus.iringbufferscalemax-1.md).
 
 ### <a id="methods-mincapacity"/>**MinCapacity(Int32)**
 
@@ -88,25 +88,25 @@ The minimal buffer. Value mus be greater or equal 1
 
 #### Returns
 
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+[IRingBufferScaleMin&lt;T&gt;](./ringbufferplus.iringbufferscalemin-1.md).
 
-### <a id="methods-reportscale"/>**ReportScale(Action&lt;ScaleMode, ILogger, RingBufferMetric, CancellationToken&gt;)**
+### <a id="methods-reportscale"/>**ReportScale(Action&lt;RingBufferMetric, ILogger, Nullable&lt;CancellationToken&gt;&gt;)**
 
 Extension point when capacity was changed.
  <br>Executes asynchronously.
 
 ```csharp
-IRingBufferScaleCapacity<T> ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+IRingBufferMasterCapacity<T> ReportScale(Action<RingBufferMetric, ILogger, Nullable<CancellationToken>> report)
 ```
 
 #### Parameters
 
-`report` [Action&lt;ScaleMode, ILogger, RingBufferMetric, CancellationToken&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-4)<br>
+`report` [Action&lt;RingBufferMetric, ILogger, Nullable&lt;CancellationToken&gt;&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.action-3)<br>
 The handler to action.
 
 #### Returns
 
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+[IRingBufferMasterCapacity&lt;T&gt;](./ringbufferplus.iringbuffermastercapacity-1.md).
 
 ### <a id="methods-sampleunit"/>**SampleUnit(Nullable&lt;TimeSpan&gt;, Nullable&lt;Int32&gt;)**
 
@@ -114,7 +114,7 @@ Sampling unit for return buffer-free resource (Average colledted samples).
  <br>baseunit/value must be greater or equal than 100ms.
 
 ```csharp
-IRingBufferScaleCapacity<T> SampleUnit(Nullable<TimeSpan> baseunit, Nullable<Int32> value)
+IRingBufferMasterCapacity<T> SampleUnit(Nullable<TimeSpan> baseunit, Nullable<Int32> value)
 ```
 
 #### Parameters
@@ -127,7 +127,7 @@ Number of samples collected.Default value is baseunit/10. Default value is 60.
 
 #### Returns
 
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+[IRingBufferMasterCapacity&lt;T&gt;](./ringbufferplus.iringbuffermastercapacity-1.md).
 
 ### <a id="methods-sampleunit"/>**SampleUnit(Nullable&lt;Int32&gt;)**
 
@@ -135,7 +135,7 @@ Sampling unit for return buffer-free resource (Average colledted samples).
  <br>baseunit/value must be greater or equal than 100ms.<br>Base unit = The interval to colledted samples. Default is 60 seconds.
 
 ```csharp
-IRingBufferScaleCapacity<T> SampleUnit(Nullable<Int32> value)
+IRingBufferMasterCapacity<T> SampleUnit(Nullable<Int32> value)
 ```
 
 #### Parameters
@@ -146,7 +146,7 @@ Number of samples collected.Default value is baseunit/10. Default value is 60.
 
 #### Returns
 
-[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+[IRingBufferMasterCapacity&lt;T&gt;](./ringbufferplus.iringbuffermastercapacity-1.md).
 
 
 - - -

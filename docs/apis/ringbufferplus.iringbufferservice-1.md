@@ -14,14 +14,14 @@ Namespace: RingBufferPlus
 Represents the commands to RingBufferPlus service.
 
 ```csharp
-public interface IRingBufferService<T> : IRingBufferSwith, System.IDisposable
+public interface IRingBufferService<T> : IRingBufferPlus, System.IDisposable
 ```
 
 #### Type Parameters
 
 `T`<br>
 
-Implements [IRingBufferSwith](./ringbufferplus.iringbufferswith.md), [IDisposable](https://docs.microsoft.com/en-us/dotnet/api/system.idisposable)
+Implements [IRingBufferPlus](./ringbufferplus.iringbufferplus.md), [IDisposable](https://docs.microsoft.com/en-us/dotnet/api/system.idisposable)
 
 ## Properties
 
@@ -31,6 +31,18 @@ Timeout to accquire buffer. Default value is 30 seconds.
 
 ```csharp
 public abstract TimeSpan AccquireTimeout { get; }
+```
+
+#### Property Value
+
+[TimeSpan](https://docs.microsoft.com/en-us/dotnet/api/system.timespan)<br>
+
+### <a id="properties-bufferhealttimeout"/>**BufferHealtTimeout**
+
+The timeout for checking buffer integrity when there is no acquisition
+
+```csharp
+public abstract TimeSpan BufferHealtTimeout { get; }
 ```
 
 #### Property Value

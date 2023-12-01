@@ -10,12 +10,14 @@ using Microsoft.Extensions.Logging;
 namespace RingBufferPlus
 {
 
-    internal class RingBufferBuilder<T>(string uniquename, ILoggerFactory? loggerFactory, CancellationToken? cancellation) : IRingBuffer<T>,IRingBufferMasterCapacity<T>, IRingBufferScaleMax<T>, IRingBufferScaleMin<T>, IRingBufferSlaveCapacity<T>, IRingBufferOptions<T>, IRingBufferCallback
+    internal class RingBufferBuilder<T>(string uniquename, ILoggerFactory? loggerFactory, CancellationToken? cancellation) : IRingBuffer<T>,IRingBufferMasterCapacity<T>, IRingBufferScaleMax<T>, IRingBufferScaleMin<T>, IRingBufferSlaveCapacity<T>, IRingBufferOptions<T>
     {
         private readonly ILoggerFactory? _loggerFactory = loggerFactory;
         private readonly CancellationToken _apptoken = cancellation??CancellationToken.None;
 
         #region IRingBufferOptions
+
+        public bool IsSlave { get; private set; }
 
         public string Name => uniquename;
 
@@ -27,11 +29,12 @@ namespace RingBufferPlus
 
         public int MaxCapacity { get; private set; } = 2;
 
-        public Func<T, bool> FactoryHealth { get; private set; }
-
         public Func<CancellationToken, T> FactoryHandler { get; private set; }
 
+        public Func<T,bool> BufferHealthHandler { get; private set; }
         public TimeSpan FactoryTimeout { get; private set; } = TimeSpan.FromSeconds(10);
+
+        public TimeSpan BufferHealtTimeout { get; private set; } = TimeSpan.FromSeconds(30);
 
         public TimeSpan FactoryIdleRetryError { get; private set; } = TimeSpan.FromSeconds(5);
 
@@ -59,30 +62,30 @@ namespace RingBufferPlus
 
         public int? MaxTriggerByAccqWhenFreeGreaterEq { get; private set; }
 
-        public Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> ReportHandler { get; private set; }
+        public Action<RingBufferMetric, ILogger?, CancellationToken?> ReportHandler { get; private set; }
 
         public TimeSpan AccquireTimeout { get; private set; } = TimeSpan.FromSeconds(30);
 
         public IRingBufferSwith SwithFrom { get; private set; }
+
         public IRingBufferSwith SwithTo { get; private set; }
 
         #endregion
 
-        #region IRingBufferCallback
+        //#region IRingBufferCallback
 
-        public SemaphoreSlim SemaphoremasterSlave => null;
+        //public SemaphoreSlim SemaphoremasterSlave => null;
 
-        public void CallBackMaster(IRingBufferSwith value)
-        { 
-            //none
-        }
+        //public void CallBackMaster(IRingBufferSwith value)
+        //{ 
+        //    //none
+        //}
 
-        string IRingBufferCallback.Name => Name;
-
-        public bool IsSlave { get; private set; }
+        //string IRingBufferCallback.Name => Name;
 
 
-        #endregion
+
+        //#endregion
 
         #region IRingBuffer
 
@@ -135,9 +138,18 @@ namespace RingBufferPlus
             return this;
         }
 
-        IRingBuffer<T> IRingBuffer<T>.FactoryHealth(Func<T, bool> value)
+        IRingBuffer<T> IRingBuffer<T>.BufferHealth(Func<T, bool> value, TimeSpan? timeout)
         {
-            FactoryHealth = value;
+#if NETSTANDARD2_1
+            if (value is null)
+            {
+                throw new ArgumentNullException(nameof(value));
+            }
+#else
+            ArgumentNullException.ThrowIfNull(value);
+#endif
+            BufferHealthHandler = value;
+            BufferHealtTimeout = timeout ?? TimeSpan.FromSeconds(30);
             return this;
         }
 
@@ -172,21 +184,16 @@ namespace RingBufferPlus
         }
 
 
-        IRingBufferMasterCapacity<T> IRingBuffer<T>.MasterScale(IRingBufferSwith ringBuffer)
+        IRingBufferMasterCapacity<T> IRingBuffer<T>.MasterScale(IRingBufferPlus ringBuffer)
         {
-#if NETSTANDARD2_1
-            if (ringBuffer is null)
+            if (ringBuffer is not null)
             {
-                throw new ArgumentNullException(nameof(ringBuffer));
+                if (!((IRingBufferCallback)ringBuffer).IsSlave)
+                {
+                    throw new InvalidOperationException("ringBuffer parameter not slave");
+                }
+                SwithTo = (IRingBufferSwith)ringBuffer;
             }
-#else
-            ArgumentNullException.ThrowIfNull(ringBuffer);
-#endif
-            if(!((IRingBufferCallback)ringBuffer).IsSlave)
-            {
-                throw new InvalidOperationException("ringBuffer parameter not slave");
-            }
-            SwithTo = ringBuffer;
             IsSlave = false;
             SwithFrom = null;
             return this;
@@ -232,7 +239,7 @@ namespace RingBufferPlus
         }
 
 
-        IRingBufferMasterCapacity<T> IRingBufferMasterCapacity<T>.ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        IRingBufferMasterCapacity<T> IRingBufferMasterCapacity<T>.ReportScale(Action<RingBufferMetric, ILogger?, CancellationToken?> report)
         {
             SharedReport(report);
             return this;
@@ -407,7 +414,7 @@ namespace RingBufferPlus
 
         #region IRingBufferScaleFromCapacity
 
-        IRingBufferSlaveCapacity<T> IRingBufferSlaveCapacity<T>.ReportScale(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        IRingBufferSlaveCapacity<T> IRingBufferSlaveCapacity<T>.ReportScale(Action<RingBufferMetric, ILogger?, CancellationToken?> report)
         {
             SharedReport(report);
             return this;
@@ -482,7 +489,7 @@ namespace RingBufferPlus
             MinTriggerByAccqWhenFreeGreaterEq  = null;   
         }
 
-        private void SharedReport(Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> report)
+        private void SharedReport(Action<RingBufferMetric, ILogger?, CancellationToken?> report)
         {
 #if NETSTANDARD2_1
             if (report is null)

@@ -12,7 +12,7 @@ namespace RingBufferPlus
     /// Represents the commands to RingBufferPlus service.
     /// </summary>
     /// <typeparam name="T"></typeparam>
-    public interface IRingBufferService<T> : IRingBufferSwith, IDisposable
+    public interface IRingBufferService<T> : IRingBufferPlus,IDisposable
     {
         /// <summary>
         /// Unique name to RingBuffer.
@@ -43,6 +43,11 @@ namespace RingBufferPlus
         /// The delay time for retrying when a build fails. Default value is 30 seconds.
         /// </summary>
         TimeSpan FactoryIdleRetry { get; }
+
+        /// <summary>
+        /// The timeout for checking buffer integrity when there is no acquisition
+        /// </summary>
+        TimeSpan BufferHealtTimeout { get; }
 
         /// <summary>
         /// If ring buffer hscapacity to scale

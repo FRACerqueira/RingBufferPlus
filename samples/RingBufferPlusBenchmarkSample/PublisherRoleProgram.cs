@@ -30,24 +30,14 @@ namespace RingBufferPlusBenchmarkSample
                 {
                     if (connectionWrapper.Successful)
                     {
-                        if (connectionWrapper.Current.IsOpen)
-                        {
-                            model = connectionWrapper.Current.CreateModel();
-                            if (model.IsOpen)
-                            {
-                                break;
-                            }
-                        }
-                        else
-                        {
-                            connectionWrapper.Invalidate();
-                        }
+                        model = connectionWrapper.Current.CreateModel();
+                        break;
                     }
                 }
                 catch 
                 {
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
+                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(2));
             }
             return model;
         }
@@ -62,7 +52,7 @@ namespace RingBufferPlusBenchmarkSample
                 UserName = "guest",
                 Password = "guest",
                 VirtualHost = "EnterpriseLog",
-                AutomaticRecoveryEnabled = true,
+                AutomaticRecoveryEnabled = false,
                 RequestedHeartbeat = TimeSpan.FromMinutes(1),
                 ClientProvidedName = "PublisherRoleProgram"
             };
@@ -73,18 +63,15 @@ namespace RingBufferPlusBenchmarkSample
                 .AccquireTimeout(TimeSpan.FromMilliseconds(500))
                 .OnError((log, error) =>
                     {
-                        log?.LogError("{error}", error);
+                        log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .FactoryHealth((item) => item.IsOpen)
                 .SlaveScale()
-                    .ReportScale((mode, log, metric, _) =>
+                    .ReportScale((metric, log, cts) =>
                     {
-                        #pragma warning disable CA2254 // Template should be a static expression
-                        log.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
-                        #pragma warning restore CA2254 // Template should be a static expression
+                        log?.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
                     })
-                    .MaxCapacity(10)
+                    .MaxCapacity(5)
                     .MinCapacity(1)
                 .BuildWarmup(out completedCnn);
 
@@ -93,17 +80,15 @@ namespace RingBufferPlusBenchmarkSample
                 .Logger(applogger!)
                 .OnError((log, error) =>
                     {
-                        log?.LogError("{error}", error);
+                        log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ModelFactory(cts)!)
-                .FactoryHealth((item) => item.IsOpen)
+                .BufferHealth((buffer) => buffer.IsOpen, TimeSpan.FromSeconds(5))
                 .MasterScale(connectionRingBuffer)
-                    .SampleUnit(TimeSpan.FromSeconds(10), 10)
-                    .ReportScale((mode,log,metric,_) => 
+                    .SampleUnit(TimeSpan.FromSeconds(10), 50)
+                    .ReportScale((metric, log, cts) => 
                     {
-                        #pragma warning disable CA2254 // Template should be a static expression
-                        log.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} : {mode} from {metric.FromCapacity} to {metric.ToCapacity}");
-                        #pragma warning restore CA2254 // Template should be a static expression
+                        log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
                     })
                     .MaxCapacity(50)
                         .ScaleWhenFreeLessEq()
@@ -181,20 +166,21 @@ namespace RingBufferPlusBenchmarkSample
 
             Console.WriteLine($"Wait... {delaysec}sec. to start {threadCount} thread"); 
             Thread.Sleep(TimeSpan.FromSeconds(delaysec));
-            Console.WriteLine($"Running");
 
             var dtref = DateTime.Now.AddSeconds(120);
             for (int i = 0; i < threadCount; i++)
             {
                 Thread thread = new(() =>
                 {
+                    Console.WriteLine($"Running");
                     while (true)
                     {
                         if (DateTime.Now > dtref)
                         {
-                            Console.WriteLine($"wait 120 seconds idle");
-                            Thread.Sleep(TimeSpan.FromSeconds(120));
+                            Console.WriteLine($"wait 90 seconds idle");
+                            Thread.Sleep(TimeSpan.FromSeconds(90));
                             dtref = DateTime.Now.AddSeconds(120);
+                            Console.WriteLine($"Running");
                         }
                         using var bufferedItem = modelRingBuffer!.Accquire();
                         if (bufferedItem.Successful)
@@ -209,9 +195,9 @@ namespace RingBufferPlusBenchmarkSample
                             {
                                 bufferedItem.Current.BasicPublish("", "log", false, props, body);
                             }
-                            catch (Exception)
+                            catch (Exception ex)
                             {
-                                Console.WriteLine($"{modelRingBuffer.Name} buffer is invalid!");
+                                Console.WriteLine($"{modelRingBuffer.Name} buffer is invalid! : {ex.Message}");
                                 bufferedItem.Invalidate();
                             }
                         }

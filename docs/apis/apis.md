@@ -17,9 +17,9 @@
 
 - [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md)
 
-- [IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md)
+- [IRingBufferMasterCapacity&lt;T&gt;](./ringbufferplus.iringbuffermastercapacity-1.md)
 
-- [IRingBufferScaleFromCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalefromcapacity-1.md)
+- [IRingBufferPlus](./ringbufferplus.iringbufferplus.md)
 
 - [IRingBufferScaleMax&lt;T&gt;](./ringbufferplus.iringbufferscalemax-1.md)
 
@@ -27,7 +27,7 @@
 
 - [IRingBufferService&lt;T&gt;](./ringbufferplus.iringbufferservice-1.md)
 
-- [IRingBufferSwith](./ringbufferplus.iringbufferswith.md)
+- [IRingBufferSlaveCapacity&lt;T&gt;](./ringbufferplus.iringbufferslavecapacity-1.md)
 
 - [RingBuffer&lt;T&gt;](./ringbufferplus.ringbuffer-1.md)
 
@@ -36,8 +36,6 @@
 - [RingBufferMetric](./ringbufferplus.ringbuffermetric.md)
 
 - [RingBufferValue&lt;T&gt;](./ringbufferplus.ringbuffervalue-1.md)
-
-- [ScaleMode](./ringbufferplus.scalemode.md)
 
 - [SourceTrigger](./ringbufferplus.sourcetrigger.md)
 

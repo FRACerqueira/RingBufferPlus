@@ -8,12 +8,12 @@ namespace RingBufferPlus
     /// <summary>
     /// Represents Scale Mode of RingBufferPlus.
     /// </summary>
-    public enum ScaleMode
+    internal enum ScaleMode
     {
         /// <summary>
-        /// Current Scale 
+        /// Current Scale, Renew an item in the buffer
         /// </summary>
-        None,
+        ReNew,
         /// <summary>
         /// Scale to minimal capacity.
         /// </summary>

@@ -4,7 +4,6 @@
 // ***************************************************************************************
 
 using System;
-using System.Runtime.CompilerServices;
 using System.Threading;
 using Microsoft.Extensions.Logging;
 
@@ -16,8 +15,9 @@ namespace RingBufferPlus
         int Capacity { get; }
         int MinCapacity { get; }
         int MaxCapacity { get; }
-        Func<T, bool> FactoryHealth { get; }
         Func<CancellationToken, T> FactoryHandler { get; }
+        Func<T,bool> BufferHealthHandler { get; }
+        TimeSpan BufferHealtTimeout { get; }
         TimeSpan FactoryTimeout { get; }
         TimeSpan FactoryIdleRetryError { get; }
         ILogger Logger { get; }
@@ -32,7 +32,7 @@ namespace RingBufferPlus
         int? ScaleToMaxLessEq { get; }
         int? MaxRollbackWhenFreeGreaterEq { get; }
         int? MaxTriggerByAccqWhenFreeGreaterEq { get; }
-        Action<ScaleMode, ILogger, RingBufferMetric, CancellationToken> ReportHandler { get; }
+        Action<RingBufferMetric, ILogger?, CancellationToken?> ReportHandler { get; }
         TimeSpan AccquireTimeout { get; }
         IRingBufferSwith SwithFrom { get; }
         IRingBufferSwith SwithTo { get; }

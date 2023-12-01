@@ -13,32 +13,41 @@
 Welcome to RingBufferPlus
 =========================
 
-RingBufferPlus A generic circular buffer (ring buffer) in C# with Auto-Scaler.
+RingBufferPlus A generic circular buffer (ring buffer) in C# with auto-scaler.
 
-Features
-========
+Key Features
+============
 
 - Conscious use of resources
+    - Designed to reduce buffer resources when unused
+        - **Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal. 
+        - **Under low usage conditions**, The RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.  
+     - Designed to work on **container (or not) mitigating cpu and memory usage** (Avoiding k8s upscale/downscale unnecessarily)
+- Start/restart under **Fault conditions and/or Stress conditions**
 - Set unique name for same buffer type
-- Set the buffer capacity
-- Set buffer integrity (validate if the buffer is valid)
-    - Verified with each acquiring
-- Set the minimum and maximum capacity (optional)
+- Set the **default capacity** (Startup)
+- Set the **minimum and maximum capacity** (optional)
     - Set the conditions for scaling to maximum and minimum (required)
         - Automatic condition values ​​based on capacity (value not required)
-- Set master-slave (2 Ring Buffer with synchronization)
+    - Upscaling does **not need to remove** the buffer
+        - better performance and availability  
+    - Downscaling **needs to remove** all buffering
+        - Performance penalty
+        - Ensure consistency and relationship between Master and slave
+- Set **buffer integrity** for each acquisition and **check all integrity when acquisition idle**. (optional)
+- Set master-slave (optional) - **2 Ring Buffer with synchronization**
     - Master controls slave scale
-- Event with scale change information
+- Event with **scale change** information
     - Executed in a separate thread asynchronously
-- Associate the logger interface (optional)
-- Define a user role for generated errors (optional)
+- Associate the **logger** interface (optional)
+- Define a user function for generated **errors** (optional)
     - Executed in a separate thread asynchronously
-- Command to Invalidate the buffer when it is in an invalid state
-- Warm up to full capacity before starting application 
-- Receive item from buffer with success/failure information and elapsed time for acquisition
-- Sets a time limit for acquiring the item in the buffer
-- Detailed information about operations when the minimum log is Debug
-- Simple and clear fluent syntax
+- Command to **Invalidate and renew** the buffer when it is in an invalid state
+- Warm up to full capacity **before starting application** (optional but **recommended**)
+- Receive item from buffer with **success/failure** information and **elapsed time** for acquisition
+- Sets a **time limit** for acquiring the item in the buffer
+- Detailed information about operations when the minimum log is Debug/Trace (**not recommended**)
+- Simple and clear **fluent syntax**
 
 Visit the official page for more documentation : 
 https://fracerqueira.github.io/RingBufferPlus
@@ -50,30 +59,29 @@ PipeAndFilter was developed in C# with target frameworks:
 - .NET 7
 - .NET 8
 
-*** What's new in V3.0.0 ***
+*** What's new in V3.1.0 ***
 ============================
 
-- Added command 'FactoryHealth'
-    - Check health item before accquire buffer.
-- Renamed Method 'SwithToScaleDefinitions' to 'MasterScale'
-- Added master-slave feature(2 Ring Buffer with synchronization)
-    - Added command set 'SlaveScale' to set report handler, Minimum and maximum capacity
-- Added 'MasterSlave' enum item in SourceTrigger
-- Added 'None' enum item in ScaleMode
-- Revised to have greater performance without 'lock'
-- Removed Method 'Counters'
-    - data was not relevant and inaccurate
-- Revised 'RingBufferMetric' 
-    - Now only propreties 'Trigger', 'FromCapacity', 'ToCapacity' and 'MetricDate'
+- Release with G.A
+- Renamed command 'FactoryHealth' to 'BufferHealth'
+    - Added parameter 'timeout' in 'BufferHealth'
+        - Check internal health for all buffer when idle acquisition. Default value is 30 seconds.
+- Upscaling does not need to remove the buffer
+    - better performance and availability  
+- Downscaling needs to remove all buffering
+    - Performance penalty
+    - Ensure consistency and relationship between Master and slave
+- Created recovery state functionality
+    - start/restart under fault conditions
 
-**Examples**
-============
+Examples
+========
 
 See folder:
 https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples
 
-**Usage**
-=========
+Generic Usage
+=============
 
 Sample-Console Usage (Minimal features with auto-scale)
 -------------------------------------------------------
@@ -153,10 +161,25 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
     }
 }
 
+RabbitMQ Usage
+==============
+
+RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** when RinbufferPlus uses AutoScale.
+
+If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RinbufferPlus control)
+
+For more details see https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample
+
 Sample-Console Master-Slave feature using RabbitMq (basic usage)
 ----------------------------------------------------------------
 
-For more details see https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample.
+ConnectionFactory = new ConnectionFactory()
+{
+    ...
+    AutomaticRecoveryEnabled = false
+};
+
+...
 
 connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
     .Capacity(2)
@@ -167,7 +190,6 @@ connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
             log?.LogError("{error}", error);
         })
     .Factory((cts) => ConnectionFactory.CreateConnection())
-    .FactoryHealth((item) => item.IsOpen)
     .SlaveScale()
         .MaxCapacity(10)
         .MinCapacity(1)
@@ -181,7 +203,7 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
             log?.LogError("{error}", error);
         })
     .Factory((cts) => ModelFactory(cts))
-    .FactoryHealth((item) => item.IsOpen)
+    .BufferHealth((buffer) => buffer.IsOpen)
     .MasterScale(connectionRingBuffer)
         .SampleUnit(TimeSpan.FromSeconds(10), 10)
         .MaxCapacity(50)
@@ -192,8 +214,9 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
             .RollbackWhenFreeLessEq()
     .BuildWarmup(out completedChanels);
 
-**License**
-===========
+
+License
+=======
 
 Copyright 2022 @ Fernando Cerqueira
 RingBufferPlus project is licensed under the  the MIT license.

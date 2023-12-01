@@ -25,11 +25,11 @@ namespace RingBufferPlus
         /// <summary>
         /// Create empty RingBufferValue.
         /// </summary>
-        internal RingBufferValue(int diffCapacity, ScaleMode scaleMode)
+        internal RingBufferValue(ScaleMode scaleMode)
         {
             IsScaleCapacity = true;
+            Successful = false;
             Current = default;
-            DiffCapacity = diffCapacity;
             ScaleMode = scaleMode;
         }
 
@@ -43,7 +43,6 @@ namespace RingBufferPlus
         /// <param name="turnback">The action handler to turn back buffer when disposed.</param>
         public RingBufferValue(string name, TimeSpan elapsedTime, bool succeeded, T value,Action<RingBufferValue<T>>? turnback) 
         {
-            DiffCapacity = 0;
             ElapsedTime = elapsedTime;
             Successful = succeeded;
             Current = value;
@@ -110,7 +109,6 @@ namespace RingBufferPlus
 
         internal bool SkipTurnback { get; set; }
         internal bool IsScaleCapacity { get; set; }
-        internal int DiffCapacity { get; }
         internal ScaleMode ScaleMode { get; }
 
     }
