@@ -7,6 +7,6 @@ namespace RingBufferPlus
 {
     internal interface IRingBufferSwith
     {
-        bool SwithTo(ScaleMode scaleMode);
+        bool SyncSwithTo(ScaleType scaleMode);
     }
 }

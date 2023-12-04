@@ -235,6 +235,18 @@ public abstract Nullable<Int32> TriggerFromMin { get; }
 
 [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
 
+### <a id="properties-userscale"/>**UserScale**
+
+The Scale Unit
+
+```csharp
+public abstract ScaleMode UserScale { get; }
+```
+
+#### Property Value
+
+[ScaleMode](./ringbufferplus.scalemode.md)<br>
+
 ## Methods
 
 ### <a id="methods-accquire"/>**Accquire(Nullable&lt;CancellationToken&gt;)**
@@ -254,6 +266,19 @@ The [CancellationToken](https://docs.microsoft.com/en-us/dotnet/api/system.threa
 #### Returns
 
 [RingBufferValue&lt;T&gt;](./ringbufferplus.ringbuffervalue-1.md).
+
+### <a id="methods-swithto"/>**SwithTo(ScaleSwith)**
+
+Manual Swith scale
+
+```csharp
+void SwithTo(ScaleSwith value)
+```
+
+#### Parameters
+
+`value` [ScaleSwith](./ringbufferplus.scaleswith.md)<br>
+New scale capacity
 
 
 - - -

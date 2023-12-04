@@ -37,7 +37,7 @@ namespace RingBufferPlus
         private readonly IRingBufferSwith _slaveBuffer;
 
         private readonly Func<CancellationToken, T> _factoryHandler;
-        private readonly Func<T,bool> _healthHandler;
+        private readonly Func<T, bool> _healthHandler;
         private readonly Action<ILogger?, RingBufferException> _errorHandler;
         private readonly Action<RingBufferMetric, ILogger?, CancellationToken?> _reportHandler;
 
@@ -88,6 +88,7 @@ namespace RingBufferPlus
             TriggerFromMax = ringBufferOptions.MaxTriggerByAccqWhenFreeGreaterEq;
             AccquireTimeout = ringBufferOptions.AccquireTimeout;
             BufferHealtTimeout = ringBufferOptions.BufferHealtTimeout;
+            UserScale = ringBufferOptions.UserSwithScale;
 
             _logger = ringBufferOptions.Logger;
             _factoryHandler = ringBufferOptions.FactoryHandler;
@@ -190,6 +191,8 @@ namespace RingBufferPlus
 
         public TimeSpan AccquireTimeout { get; }
 
+        public ScaleMode UserScale { get;}
+
         #endregion
 
         #region IRingBufferService 
@@ -287,8 +290,8 @@ namespace RingBufferPlus
                             ((TriggerFromMin.HasValue && _currentCapacity == MinCapacity && available <= TriggerFromMin) ||
                                 (TriggerFromMax.HasValue && _currentCapacity == MaxCapacity && available >= TriggerFromMax)))
                         {
-                            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleMode.ToDefaultCapacity));
-                            WriteLogDebug(DateTime.Now, $"{Name} Accquire Invoked {ScaleMode.ToDefaultCapacity} : {Capacity}");
+                            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleType.ToDefaultCapacity));
+                            WriteLogDebug(DateTime.Now, $"{Name} Accquire Invoked {ScaleType.ToDefaultCapacity} : {Capacity}");
                         }
                         sw.Stop();
                         //ok
@@ -313,14 +316,14 @@ namespace RingBufferPlus
                             }
                             WriteLogWarning(DateTime.Now, $"{Name} with State RecoveryBuffer");
                             _blockexceptionsBuffer.Add(new RingBufferException(Name, $"{Name} with State RecoveryBuffer"));
-                            var mode = ScaleMode.ToDefaultCapacity;
+                            var mode = ScaleType.ToDefaultCapacity;
                             if (ScaleCapacity && _currentCapacity == MaxCapacity)
                             {
-                                mode = ScaleMode.ToMaxCapacity;
+                                mode = ScaleType.ToMaxCapacity;
                             }
                             else if (ScaleCapacity && _currentCapacity == MinCapacity)
                             {
-                                mode = ScaleMode.ToMinCapacity;
+                                mode = ScaleType.ToMinCapacity;
                             }
                             _blockrenewBuffer.Add(new RingBufferValue<T>(mode));
                         }
@@ -334,6 +337,43 @@ namespace RingBufferPlus
             }
             //not ok
             return new RingBufferValue<T>(Name, TimeSpan.Zero, false, default, null);
+        }
+
+        public void SwithTo(ScaleSwith value)
+        {
+            if (UserScale == ScaleMode.Automatic)
+            {
+                throw new InvalidOperationException($"RingBuffer is configured to autoscale!");
+
+            }
+            ScaleType newscale;
+            switch (value)
+            {
+                case ScaleSwith.ToMinCapacity:
+                    if (_currentCapacity == MinCapacity)
+                    {
+                        return;
+                    }
+                    newscale = ScaleType.ToMinCapacity;
+                    break;
+                case ScaleSwith.ToMaxCapacity:
+                    if (_currentCapacity == MaxCapacity)
+                    {
+                        return;
+                    }
+                    newscale = ScaleType.ToMaxCapacity;
+                    break;
+                case ScaleSwith.ToDefaultCapacity:
+                    if (_currentCapacity == Capacity)
+                    {
+                        return;
+                    }
+                    newscale = ScaleType.ToDefaultCapacity;
+                    break;
+                default:
+                    throw new NotImplementedException($"ScaleUnit {value}");
+            }
+            _blockrenewBuffer.Add(new RingBufferValue<T>(newscale));
         }
 
         #endregion
@@ -355,7 +395,7 @@ namespace RingBufferPlus
 
         #region IRingBufferSwith
 
-        public bool SwithTo(ScaleMode scaleMode)
+        public bool SyncSwithTo(ScaleType scaleMode)
         {
             if (!_WarmupComplete)
             {
@@ -368,10 +408,10 @@ namespace RingBufferPlus
 
             var newcap = scaleMode switch
             {
-                ScaleMode.ReNew => throw new InvalidOperationException($"{Name}: {scaleMode} Not valid to Swith"),
-                ScaleMode.ToMinCapacity => MinCapacity,
-                ScaleMode.ToMaxCapacity => MaxCapacity,
-                ScaleMode.ToDefaultCapacity => Capacity,
+                ScaleType.ReNew => throw new InvalidOperationException($"{Name}: {scaleMode} Not valid to Swith"),
+                ScaleType.ToMinCapacity => MinCapacity,
+                ScaleType.ToMaxCapacity => MaxCapacity,
+                ScaleType.ToDefaultCapacity => Capacity,
                 _ => throw new ArgumentException($"scaleMode Not found {scaleMode}"),
             };
             if (_currentCapacity != newcap)
@@ -391,7 +431,7 @@ namespace RingBufferPlus
                             _runningScale = true;
                         }
                         //nenew all buffer and resert counts
-                        RemoveAllBuffer();
+                        RemoveAllBuffer(null);
                         TryLoadBufferAsync(newcap);
                     }
                 }
@@ -490,7 +530,7 @@ namespace RingBufferPlus
                                     {
                                         disposablevalue.Dispose();
                                     }
-                                    _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleMode.ReNew));
+                                    _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleType.ReNew));
                                 }
                                 else
                                 {
@@ -560,13 +600,13 @@ namespace RingBufferPlus
                                 var newcap = _currentCapacity;
                                 switch (item.ScaleMode)
                                 {
-                                    case ScaleMode.ToDefaultCapacity:
+                                    case ScaleType.ToDefaultCapacity:
                                         newcap = Capacity;
                                         break;
-                                    case ScaleMode.ToMinCapacity:
+                                    case ScaleType.ToMinCapacity:
                                         newcap = MinCapacity;
                                         break;
-                                    case ScaleMode.ToMaxCapacity:
+                                    case ScaleType.ToMaxCapacity:
                                         newcap = MaxCapacity;
                                         break;
                                 }
@@ -575,11 +615,11 @@ namespace RingBufferPlus
                                 SemaphoremasterSlave.Wait();
                                 WriteLogTrace(DateTime.Now, $"{Name} Master SemaphoremasterSlave Block done");
 
-                                if (_slaveBuffer is not null && item.ScaleMode != ScaleMode.ReNew)
+                                if (_slaveBuffer is not null && item.ScaleMode != ScaleType.ReNew)
                                 {
                                     var slavename = ((IRingBufferCallback)_slaveBuffer).Name;
                                     WriteLogDebug(DateTime.Now, $"{Name} Master invoke  SwithTo to Slave({slavename}) with scale: {item.ScaleMode}");
-                                    if (_slaveBuffer.SwithTo(item.ScaleMode))
+                                    if (_slaveBuffer.SyncSwithTo(item.ScaleMode))
                                     {
                                         WriteLogTrace(DateTime.Now, $"{Name} Master wait SemaphoremasterSlave Release from {slavename}");
                                         SemaphoremasterSlave.Wait();
@@ -591,7 +631,7 @@ namespace RingBufferPlus
                                     }
                                 }
                                 var diff = newcap - _currentCapacity;
-                                if ((item.ScaleMode != ScaleMode.ReNew && diff < 0))
+                                if ((item.ScaleMode != ScaleType.ReNew && diff < 0))
                                 {
                                     lock (_lockAccquire)
                                     {
@@ -600,7 +640,14 @@ namespace RingBufferPlus
                                             _runningScale = true;
                                         }
                                         //nenew all buffer and resert counts
-                                        RemoveAllBuffer();
+                                        if (_slaveBuffer is not null)
+                                        {
+                                            RemoveAllBuffer(null);
+                                        }
+                                        else
+                                        {
+                                            RemoveAllBuffer(diff*-1);
+                                        }
                                         TryLoadBufferAsync(newcap);
                                     }
                                 }
@@ -712,10 +759,10 @@ namespace RingBufferPlus
                         }
                         WriteLogDebug(DateTime.Now, $"{Name} Wait Retry Factory {diff}");
                         _managertoken.Token.WaitHandle.WaitOne(diff);
-                        if (!_managertoken.Token.IsCancellationRequested)
+                        if (!_managertoken.IsCancellationRequested)
                         {
                             WriteLogDebug(DateTime.Now, $"{Name} Retry Factory Send Message Create to Renew Buffer Thread");
-                            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleMode.ReNew));
+                            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleType.ReNew));
                         }
                     }
                 }
@@ -733,14 +780,14 @@ namespace RingBufferPlus
 
             _metricBufferThread = new Task(() =>
             {
-                if (ScaleCapacity)
+                if (ScaleCapacity && UserScale == ScaleMode.Automatic)
                 {
-                    while (!_managertoken.Token.IsCancellationRequested && !_WarmupComplete)
+                    while (!_managertoken.IsCancellationRequested && !_WarmupComplete)
                     {
                         _managertoken.Token.WaitHandle.WaitOne(5);
                     }
                 }
-                while (ScaleCapacity && !_managertoken.Token.IsCancellationRequested)
+                while (ScaleCapacity && UserScale == ScaleMode.Automatic  && !_managertoken.IsCancellationRequested)
                 {
                     _managertoken.Token.WaitHandle.WaitOne(SampleUnit);
 
@@ -748,7 +795,7 @@ namespace RingBufferPlus
                     {
                         continue;
                     }
-                    if (_managertoken.Token.IsCancellationRequested)
+                    if (_managertoken.IsCancellationRequested)
                     {
                         continue;
                     }
@@ -772,7 +819,7 @@ namespace RingBufferPlus
                                 median = tmp[pos - 1];
                             }
                             _MetricBuffer.Clear();
-                            if (!_managertoken.Token.IsCancellationRequested)
+                            if (!_managertoken.IsCancellationRequested)
                             {
                                 _blockScaleBuffer.Add(Convert.ToInt32(Math.Ceiling(median)));
                                 WriteLogTrace(DateTime.Now, $"{Name} Metric Resume Created({median} / {Convert.ToInt32(Math.Ceiling(median))})");
@@ -787,7 +834,7 @@ namespace RingBufferPlus
 
             _scaleCapacityThread = new Task(() =>
             {
-                if (ScaleCapacity)
+                if (ScaleCapacity && UserScale == ScaleMode.Automatic)
                 {
                     try
                     {
@@ -799,28 +846,28 @@ namespace RingBufferPlus
                             }
                             var newcap = _currentCapacity;
                             var currentcap = newcap;
-                            ScaleMode? mode = null;
+                            ScaleType? mode = null;
                             if (ScaleToMax.HasValue && freebuffer <= ScaleToMax.Value && currentcap == Capacity)
                             {
                                 newcap = MaxCapacity;
-                                mode = ScaleMode.ToMaxCapacity;
+                                mode = ScaleType.ToMaxCapacity;
                             }
                             else if (ScaleToMin.HasValue && freebuffer >= ScaleToMin.Value && currentcap == Capacity)
                             {
                                 newcap = MinCapacity;
-                                mode = ScaleMode.ToMinCapacity;
+                                mode = ScaleType.ToMinCapacity;
                             }
                             else if (RollbackFromMin.HasValue && freebuffer <= RollbackFromMin.Value && currentcap == MinCapacity)
                             {
                                 newcap = Capacity;
-                                mode = ScaleMode.ToDefaultCapacity;
+                                mode = ScaleType.ToDefaultCapacity;
                             }
                             else if (RollbackFromMax.HasValue && freebuffer >= RollbackFromMax.Value && currentcap == MaxCapacity)
                             {
                                 newcap = Capacity;
-                                mode = ScaleMode.ToDefaultCapacity;
+                                mode = ScaleType.ToDefaultCapacity;
                             }
-                            if (mode.HasValue && !_managertoken.Token.IsCancellationRequested)
+                            if (mode.HasValue && !_managertoken.IsCancellationRequested)
                             {
                                 if (_reportHandler != null)
                                 {
@@ -887,7 +934,7 @@ namespace RingBufferPlus
 
             WriteLogInfo(DateTime.Now, $"{Name} Creating {Capacity} items");
 
-            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleMode.ToDefaultCapacity));
+            _blockrenewBuffer.Add(new RingBufferValue<T>(ScaleType.ToDefaultCapacity));
 
             warmupcts.CancelAfter(timeoutfullcapacity);
             while (!warmupcts.Token.IsCancellationRequested && _counterBuffer != Capacity)
@@ -914,23 +961,45 @@ namespace RingBufferPlus
 
         private void DisposeBuffer(RingBufferValue<T> value)
         {
-            if (!_managertoken.Token.IsCancellationRequested)
+            if (!_managertoken.IsCancellationRequested)
             {
                 _blockrenewBuffer.Add(value);
             }
         }
 
-        private void RemoveAllBuffer()
+        private void RemoveAllBuffer(int? maxcount)
         {
             WriteLogDebug(DateTime.Now, $"{Name} Remove All Buffer");
+            var localmax = int.MaxValue;
+            if (maxcount.HasValue)
+            {
+                localmax = maxcount.Value;
+            }
+            var count = 0;
             while (_availableBuffer.TryDequeue(out var value))
             {
                 if (value is IDisposable disposablevalue)
                 {
                     disposablevalue.Dispose();
                 }
+                count++;
+                if (count >= localmax)
+                {
+                    break;
+                }
             }
-            _counterBuffer = 0;
+            if (!maxcount.HasValue)
+            {
+                _counterBuffer = 0;
+            }
+            else
+            {
+                _counterBuffer -= count;
+                if (_counterBuffer < 0)
+                {
+                    _counterBuffer = 0;
+                }
+            }
             _counterAccquire = 0;
         }
 

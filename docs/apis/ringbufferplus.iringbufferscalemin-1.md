@@ -76,7 +76,7 @@ The maximum buffer.
 ### <a id="methods-rollbackwhenfreelesseq"/>**RollbackWhenFreeLessEq(Nullable&lt;Int32&gt;)**
 
 Condition to scale up to default capacity.
- <br>The free resource (averange collected) must be less than or equal to value.<br>RollbackWhenFreeLessEq do not used with TriggerByAccqWhenFreeLessEq command.
+ <br>The free resource (averange collected) must be less than or equal to value.<br>RollbackWhenFreeLessEq do not used with TriggerByAccqWhenFreeLessEq command.<br>RollbackWhenFreeLessEq do not use with Manual/Slave scale
 
 ```csharp
 IRingBufferScaleMin<T> RollbackWhenFreeLessEq(Nullable<Int32> value)
@@ -95,7 +95,7 @@ Number of averange collected.
 ### <a id="methods-scalewhenfreegreatereq"/>**ScaleWhenFreeGreaterEq(Nullable&lt;Int32&gt;)**
 
 Condition to scale down to min capacity.
- <br>The free resource collected must be greater than or equal to value.
+ <br>The free resource collected must be greater than or equal to value.<br>ScaleWhenFreeGreaterEq do not use with Manual/Slave scale
 
 ```csharp
 IRingBufferScaleMin<T> ScaleWhenFreeGreaterEq(Nullable<Int32> value)
@@ -114,7 +114,7 @@ Number to free resource.
 ### <a id="methods-triggerbyaccqwhenfreelesseq"/>**TriggerByAccqWhenFreeLessEq(Nullable&lt;Int32&gt;)**
 
 Condition to trigger to default capacity (check at foreach accquire).
- <br>The free resource collected at aqccquire must be less than or equal to value.<br>TriggerByAccqWhenFreeLessEq do not used with RollbackWhenFreeLessEq command.
+ <br>The free resource collected at aqccquire must be less than or equal to value.<br>TriggerByAccqWhenFreeLessEq do not used with RollbackWhenFreeLessEq command.<br>TriggerByAccqWhenFreeLessEq do not use with Manual/Slave scale
 
 ```csharp
 IRingBufferScaleMin<T> TriggerByAccqWhenFreeLessEq(Nullable<Int32> value)

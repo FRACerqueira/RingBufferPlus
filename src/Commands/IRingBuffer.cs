@@ -78,17 +78,16 @@ namespace RingBufferPlus
         IRingBufferService<T> BuildWarmup(out bool fullcapacity, TimeSpan? timeout = null);
 
         /// <summary>
-        /// Swith to scale definitions commands (self) or other ring buffer.
+        /// Swith to scale definitions commands with scale mode and sampling unit/base timer for return buffer-free resource (Median colledted samples).
+        /// <br>basetimer/numbersamples must be greater or equal than 100ms.</br>
         /// </summary>
-        /// <param name="ringBuffer">The slave Ring buffer.</param>
-        /// <returns><see cref="IRingBufferMasterCapacity{T}"/>.</returns>
-        IRingBufferMasterCapacity<T> MasterScale(IRingBufferPlus ringBuffer = null);
-
-        /// <summary>
-        /// Swith to scale definitions from other ring buffer.
-        /// </summary>
-        /// <returns><see cref="IRingBufferSlaveCapacity{T}"/>.</returns>
-        IRingBufferSlaveCapacity<T> SlaveScale();
-
+        /// <param name="unit">
+        /// Scale unit type.
+        /// <br>When <see cref="ScaleMode"/> is Manual the 'numbersamples' and 'basetimer' parameters will be ignored</br>
+        /// <br>When <see cref="ScaleMode"/> is Slave the 'numbersamples' and 'basetimer' parameters will be ignored</br>
+        /// </param>
+        /// <param name="numbersamples">Number of samples collected.Default value is basetimer/10. Default basetimer is 60.</param>
+        /// <param name="basetimer">The <see cref="TimeSpan"/> interval to colleted samples.Default value is 60 seconds.</param>
+        IRingBufferScaleCapacity<T> ScaleUnit(ScaleMode unit, int? numbersamples = null,TimeSpan ? basetimer = null);
     }
 }

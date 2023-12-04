@@ -25,7 +25,7 @@ namespace RingBufferPlus
         /// <summary>
         /// Create empty RingBufferValue.
         /// </summary>
-        internal RingBufferValue(ScaleMode scaleMode)
+        internal RingBufferValue(ScaleType scaleMode)
         {
             IsScaleCapacity = true;
             Successful = false;
@@ -109,7 +109,7 @@ namespace RingBufferPlus
 
         internal bool SkipTurnback { get; set; }
         internal bool IsScaleCapacity { get; set; }
-        internal ScaleMode ScaleMode { get; }
+        internal ScaleType ScaleMode { get; }
 
     }
 }

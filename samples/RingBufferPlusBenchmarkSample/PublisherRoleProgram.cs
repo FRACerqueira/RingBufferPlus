@@ -66,7 +66,7 @@ namespace RingBufferPlusBenchmarkSample
                         log?.LogError($"{error.NameRingBuffer}: {error.Message}");
                     })
                 .Factory((cts) => ConnectionFactory.CreateConnection())
-                .SlaveScale()
+                .ScaleUnit(ScaleMode.Slave)
                     .ReportScale((metric, log, cts) =>
                     {
                         log?.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
@@ -84,18 +84,14 @@ namespace RingBufferPlusBenchmarkSample
                     })
                 .Factory((cts) => ModelFactory(cts)!)
                 .BufferHealth((buffer) => buffer.IsOpen, TimeSpan.FromSeconds(5))
-                .MasterScale(connectionRingBuffer)
-                    .SampleUnit(TimeSpan.FromSeconds(10), 50)
-                    .ReportScale((metric, log, cts) => 
+                .ScaleUnit(ScaleMode.Automatic, 50, TimeSpan.FromSeconds(10))
+                    .Slave(connectionRingBuffer)
+                    .ReportScale((metric, log, cts) =>
                     {
                         log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
                     })
                     .MaxCapacity(50)
-                        .ScaleWhenFreeLessEq()
-                        .RollbackWhenFreeGreaterEq()
                     .MinCapacity(2)
-                        .ScaleWhenFreeGreaterEq()
-                        .RollbackWhenFreeLessEq()
                 .BuildWarmup(out completedChanels);
 
         }

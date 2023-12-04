@@ -17,17 +17,17 @@ namespace RingBufferPlusApiSample.Controllers
         private static bool _toInvalidade = true;
 
         [HttpGet(Name = "GetWeatherForecast")]
-        public IEnumerable<WeatherForecast> Get()
+        public IEnumerable<WeatherForecast> Get(CancellationToken token)
         {
 
-            using (var buffer = _ringBufferService.Accquire())
+            using (var buffer = _ringBufferService.Accquire(token))
             {
                 _toInvalidade = !_toInvalidade;
                 if (_toInvalidade)
                 {
                     buffer.Invalidate();
                 }
-                Thread.Sleep(100);
+                token.WaitHandle.WaitOne(100);
             }
             return Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {
@@ -36,6 +36,14 @@ namespace RingBufferPlusApiSample.Controllers
                 Summary = Summaries[Random.Shared.Next(Summaries.Length)]
             })
             .ToArray();
+        }
+
+        [HttpPatch]
+        [Route("/ChangeCapacity")]
+        public ActionResult ChangeCapacity(ScaleSwith scaleUnit)
+        {
+            _ringBufferService.SwithTo(scaleUnit);
+            return Ok();
         }
     }
 }

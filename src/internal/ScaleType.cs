@@ -6,24 +6,24 @@
 namespace RingBufferPlus
 {
     /// <summary>
-    /// Represents Scale Mode of RingBufferPlus.
+    /// Represents Scale type of RingBufferPlus.
     /// </summary>
-    internal enum ScaleMode
+    internal enum ScaleType
     {
         /// <summary>
-        /// Current Scale, Renew an item in the buffer
+        /// Current ScaleUnit, Renew an item in the buffer
         /// </summary>
         ReNew,
         /// <summary>
-        /// Scale to minimal capacity.
+        /// ScaleUnit to minimal capacity.
         /// </summary>
         ToMinCapacity,
         /// <summary>
-        /// Scale to maximum capacity.
+        /// ScaleUnit to maximum capacity.
         /// </summary>
         ToMaxCapacity,
         /// <summary>
-        /// Scale to default capacity.
+        /// ScaleUnit to default capacity.
         /// </summary>
         ToDefaultCapacity
     }

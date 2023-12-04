@@ -65,6 +65,11 @@ namespace RingBufferPlus
         int SamplesCount { get; }
 
         /// <summary>
+        /// The Scale Unit 
+        /// </summary>
+        ScaleMode UserScale { get; }
+
+        /// <summary>
         /// Condition to scale down to min capacity.
         /// <br>The free resource collected must be greater than or equal to value.</br>
         /// </summary>
@@ -115,6 +120,12 @@ namespace RingBufferPlus
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>
         /// <returns><see cref="RingBufferValue{T}"/>.</returns>
         RingBufferValue<T> Accquire(CancellationToken? cancellation = null);
+
+        /// <summary>
+        /// Manual Swith scale
+        /// </summary>
+        /// <param name="value">New scale capacity</param>
+        void SwithTo(ScaleSwith value);
 
     }
 }
