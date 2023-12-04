@@ -1,4 +1,4 @@
-# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferSlaveCapacity<T> 
+# <img align="left" width="100" height="100" src="../images/icon.png">RingBufferPlus API:IRingBufferScaleCapacity<T> 
 
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
@@ -7,14 +7,14 @@
 
 [**Back to List Api**](./apis.md)
 
-# IRingBufferSlaveCapacity&lt;T&gt;
+# IRingBufferScaleCapacity&lt;T&gt;
 
 Namespace: RingBufferPlus
 
-Represents the Slave capacity commands to RingBufferPlus.
+Represents the scale capacity commands to RingBufferPlus.
 
 ```csharp
-public interface IRingBufferSlaveCapacity<T>
+public interface IRingBufferScaleCapacity<T>
 ```
 
 #### Type Parameters
@@ -61,7 +61,7 @@ The Timeout to Warmup has full capacity. Default value is 30 seconds.
 Maximum capacity.
 
 ```csharp
-IRingBufferSlaveCapacity<T> MaxCapacity(int value)
+IRingBufferScaleMax<T> MaxCapacity(int value)
 ```
 
 #### Parameters
@@ -71,14 +71,14 @@ The maximum buffer.Value mus be greater or equal [IRingBuffer&lt;T&gt;.Capacity(
 
 #### Returns
 
-[IRingBufferSlaveCapacity&lt;T&gt;](./ringbufferplus.iringbufferslavecapacity-1.md).
+[IRingBufferScaleMax&lt;T&gt;](./ringbufferplus.iringbufferscalemax-1.md).
 
 ### <a id="methods-mincapacity"/>**MinCapacity(Int32)**
 
 Minimum capacity.
 
 ```csharp
-IRingBufferSlaveCapacity<T> MinCapacity(int value)
+IRingBufferScaleMin<T> MinCapacity(int value)
 ```
 
 #### Parameters
@@ -88,7 +88,7 @@ The minimal buffer. Value mus be greater or equal 1
 
 #### Returns
 
-[IRingBufferSlaveCapacity&lt;T&gt;](./ringbufferplus.iringbufferslavecapacity-1.md).
+[IRingBufferScaleMin&lt;T&gt;](./ringbufferplus.iringbufferscalemin-1.md).
 
 ### <a id="methods-reportscale"/>**ReportScale(Action&lt;RingBufferMetric, ILogger, Nullable&lt;CancellationToken&gt;&gt;)**
 
@@ -96,7 +96,7 @@ Extension point when capacity was changed.
  <br>Executes asynchronously.
 
 ```csharp
-IRingBufferSlaveCapacity<T> ReportScale(Action<RingBufferMetric, ILogger, Nullable<CancellationToken>> report)
+IRingBufferScaleCapacity<T> ReportScale(Action<RingBufferMetric, ILogger, Nullable<CancellationToken>> report)
 ```
 
 #### Parameters
@@ -106,7 +106,24 @@ The handler to action.
 
 #### Returns
 
-[IRingBufferSlaveCapacity&lt;T&gt;](./ringbufferplus.iringbufferslavecapacity-1.md).
+[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
+
+### <a id="methods-slave"/>**Slave(IRingBufferPlus)**
+
+Set slave ring buffer.
+
+```csharp
+IRingBufferScaleCapacity<T> Slave(IRingBufferPlus slaveRingBuffer)
+```
+
+#### Parameters
+
+`slaveRingBuffer` [IRingBufferPlus](./ringbufferplus.iringbufferplus.md)<br>
+The slave Ring buffer.
+
+#### Returns
+
+[IRingBufferScaleCapacity&lt;T&gt;](./ringbufferplus.iringbufferscalecapacity-1.md).
 
 
 - - -

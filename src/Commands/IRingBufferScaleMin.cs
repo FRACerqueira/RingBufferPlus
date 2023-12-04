@@ -16,6 +16,7 @@ namespace RingBufferPlus
         /// <summary>
         /// Condition to scale down to min capacity.
         /// <br>The free resource collected must be greater than or equal to value.</br>
+        /// <br>ScaleWhenFreeGreaterEq do not use with Manual/Slave scale</br>
         /// </summary>
         /// <param name="value">
         /// Number to free resource. 
@@ -28,6 +29,7 @@ namespace RingBufferPlus
         /// Condition to trigger to default capacity (check at foreach accquire).
         /// <br>The free resource collected at aqccquire must be less than or equal to value.</br>
         /// <br>TriggerByAccqWhenFreeLessEq do not used with RollbackWhenFreeLessEq command.</br>
+        /// <br>TriggerByAccqWhenFreeLessEq do not use with Manual/Slave scale</br>
         /// </summary>
         /// <param name="value">
         /// Number to trigger.
@@ -41,6 +43,7 @@ namespace RingBufferPlus
         /// Condition to scale up to default capacity.
         /// <br>The free resource (averange collected) must be less than or equal to value.</br>
         /// <br>RollbackWhenFreeLessEq do not used with TriggerByAccqWhenFreeLessEq command.</br>
+        /// <br>RollbackWhenFreeLessEq do not use with Manual/Slave scale</br>
         /// </summary>
         /// <param name="value">
         /// Number of averange collected.

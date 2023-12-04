@@ -1,3 +1,5 @@
+using RingBufferPlus;
+
 namespace RingBufferPlusApiSample
 {
     public class Program
@@ -19,22 +21,9 @@ namespace RingBufferPlusApiSample
                 return ringbuf
                         .Capacity(8)
                         .Factory((cts) => { return 10; })
-                        .MasterScale()
-                            .SampleUnit(TimeSpan.FromSeconds(60),60)
-                            .MinCapacity(4)
-                                // Defaut = Max  (Min = 1, Max = Capacity)
-                                .ScaleWhenFreeGreaterEq()
-                                // Defaut = Min  (Min = 1, Max = MinCapacity)
-                                .RollbackWhenFreeLessEq()
-                                // Defaut = Max-1 (Min = 1, Max = MinCapacity)
-                                //.TriggerByAccqWhenFreeLessEq() 
-                            .MaxCapacity(20)
-                                // Default = Min (Min =  1, Max = Capacity)
-                                .ScaleWhenFreeLessEq()
-                                //Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
-                                .RollbackWhenFreeGreaterEq()
-                                // Default = Min (Min = MaxCapacity-Capacity, Max = MaxCapacity)
-                                //.TriggerByAccqWhenFreeGreaterEq()
+                        .ScaleUnit(ScaleMode.Manual)
+                            .MinCapacity(2)
+                            .MaxCapacity(12)
                         .Build();
             });
 

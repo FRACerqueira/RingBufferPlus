@@ -1,26 +1,32 @@
 ﻿# **Welcome to RingBufferPlus**
 
-### **RingBufferPlus A generic circular buffer (ring buffer) in C# with auto-scaler.**
+### **RingBufferPlus a generic circular buffer (ring buffer) in C# with auto-scaler.**
 
 **RingBufferPlus** was developed in C# with the **netstandard2.1**, **.NET 6** , **.NET 7** and **.NET 8** target frameworks.
 
 **[Visit the official page for more documentation of RingBufferPlus](https://fracerqueira.github.io/RingBufferPlus)**
 
 ## What's new in the latest version 
-### V3.1.0 
+### V3.2.0 
 [**Top**](#table-of-contents)
 
-- Release with G.A
-- Renamed command 'FactoryHealth' to 'BufferHealth'
-    - Added parameter 'timeout' in 'BufferHealth'
-        - Check internal health for all buffer when idle acquisition. Default value is 30 seconds.
-- Upscaling does not need to remove the buffer
-    - better performance and availability  
-- Downscaling needs to remove all buffering
-    - Performance penalty
-    - Ensure consistency and relationship between Master and slave
-- Created recovery state functionality
-    - start/restart under fault conditions
+- Renamed command 'MasterScale' to 'ScaleUnit'
+    - Added parameter 'ScaleUnit' to set the scale type (automatic/manual)
+        - Now the user can manually set the scale change mode
+- Removed command 'SlaveScale'
+    - Now use 'ScaleUnit' command with scale type Slave
+- Removed command 'SampleUnit'
+    - Now time base unit and number of samples collected are parameters of the command 'ScaleUnit'
+- Added new command 'SlaveControl' to set Slave Ringbuffer
+    - Better clarity of command intent 
+- Removed mandatory commands 'ScaleWhenFreeLessEq' , 'RollbackWhenFreeGreaterEq' for MaxCapacity commands
+    - Now it is automatically set when 'MaxCapacity' is set  
+- Removed mandatory commands 'ScaleWhenFreeGreaterEq' , 'RollbackWhenFreeLessEq' for MinCapacity commands
+    - Now it is automatically set when 'MinCapacity' is set  
+- Added new command 'SwithTo' for Ringbuffer service
+    - Now the user can manually set the scale change when scale type is manual
+- Improvement: Downscaling does not need to remove all buffer when no slave control
+    - Better performance and availability  
 
 ## Features
 
@@ -39,13 +45,19 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Set unique name for same buffer type
 - Set the **default capacity** (Startup)
 - Set the **minimum and maximum capacity** (optional)
-    - Set the conditions for scaling to maximum and minimum (required)
+    - Set the conditions for scaling to maximum and minimum (optional)
         - Automatic condition values ​​based on capacity (value not required)
     - Upscaling does **not need to remove** the buffer
         - better performance and availability  
-    - Downscaling **needs to remove** all buffering
+    - Downscaling does **not need to remove** the buffer when **no slave control**
+        - better performance and availability  
+    - Downscaling **needs to remove all** buffering when **has slave control**
         - Performance penalty
         - Ensure consistency and relationship between Master and slave
+- Set scale type **Automatic** , **Manual** or **Slave**
+    - Automatic: by free-resources on buffer
+    - Manual: User/Application defined using 'Switch To' command
+    - Slave : Indicates that the control is a slave scale type
 - Set **buffer integrity** for each acquisition and **check all integrity when acquisition idle**. (optional)
 - Set master-slave (optional) - **2 Ring Buffer with synchronization**
     - Master controls slave scale
@@ -60,6 +72,7 @@ The implementation follows the basic principle. The principle was expanded to ha
 - Sets a **time limit** for acquiring the item in the buffer
 - Detailed information about operations when the minimum log is Debug/Trace (**not recommended**)
 - Simple and clear **fluent syntax**
+
 
 ## Installing
 

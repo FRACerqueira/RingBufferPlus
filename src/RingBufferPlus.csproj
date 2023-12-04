@@ -16,7 +16,7 @@
 	
 	<PropertyGroup>
 		<Authors>Fernando Cerqueira</Authors>
-		<Description>A generic circular buffer (ring buffer) in C# with Auto-Scaler.</Description>
+		<Description>A generic circular buffer (ring buffer) in C# with auto-scaler.</Description>
 		<PackageReleaseNotes>https://github.com/FRACerqueira/RingBufferPlus/releases</PackageReleaseNotes>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageTags>csharp;dotnet;dotnetcore;ringbuffer;ring-buffer;circular-buffer;rabittmq;cyclic-buffer</PackageTags>
@@ -27,7 +27,7 @@
 		<PackageProjectUrl>https://fracerqueira.github.io/RingBufferPlus</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
-		<PackageVersion>3.1.0</PackageVersion>
+		<PackageVersion>3.2.0</PackageVersion>
 		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
 		<GeneratePackageOnBuild>false</GeneratePackageOnBuild>
 	</PropertyGroup>

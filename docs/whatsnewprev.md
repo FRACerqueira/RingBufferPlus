@@ -4,6 +4,21 @@
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 
+### V3.1.0 
+[**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
+
+- Release with G.A
+- Renamed command 'FactoryHealth' to 'BufferHealth'
+    - Added parameter 'timeout' in 'BufferHealth'
+        - Check internal health for all buffer when idle acquisition. Default value is 30 seconds.
+- Upscaling does not need to remove the buffer
+    - better performance and availability  
+- Downscaling needs to remove all buffering
+    - Performance penalty
+    - Ensure consistency and relationship between Master and slave
+- Created recovery state functionality
+    - start/restart under fault conditions
+    - 
 ### V3.0.0 (Deprecate! CRITICAL BUGS)
 [**Main**](index.md) | [**Top**](#ringbufferplus-whats-new)
 

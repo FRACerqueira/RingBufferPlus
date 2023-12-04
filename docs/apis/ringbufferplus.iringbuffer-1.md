@@ -152,23 +152,6 @@ IRingBuffer<T> Logger(ILogger value)
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
-### <a id="methods-masterscale"/>**MasterScale(IRingBufferPlus)**
-
-Swith to scale definitions commands (self) or other ring buffer.
-
-```csharp
-IRingBufferMasterCapacity<T> MasterScale(IRingBufferPlus ringBuffer)
-```
-
-#### Parameters
-
-`ringBuffer` [IRingBufferPlus](./ringbufferplus.iringbufferplus.md)<br>
-The slave Ring buffer.
-
-#### Returns
-
-[IRingBufferMasterCapacity&lt;T&gt;](./ringbufferplus.iringbuffermastercapacity-1.md).
-
 ### <a id="methods-onerror"/>**OnError(Action&lt;ILogger, RingBufferException&gt;)**
 
 Extension point to log a error.
@@ -187,17 +170,30 @@ he handler to log error.
 
 [IRingBuffer&lt;T&gt;](./ringbufferplus.iringbuffer-1.md).
 
-### <a id="methods-slavescale"/>**SlaveScale()**
+### <a id="methods-scaleunit"/>**ScaleUnit(ScaleMode, Nullable&lt;Int32&gt;, Nullable&lt;TimeSpan&gt;)**
 
-Swith to scale definitions from other ring buffer.
+Swith to scale definitions commands with scale mode and sampling unit/base timer for return buffer-free resource (Median colledted samples).
+ <br>basetimer/numbersamples must be greater or equal than 100ms.
 
 ```csharp
-IRingBufferSlaveCapacity<T> SlaveScale()
+IRingBufferScaleCapacity<T> ScaleUnit(ScaleMode unit, Nullable<Int32> numbersamples, Nullable<TimeSpan> basetimer)
 ```
+
+#### Parameters
+
+`unit` [ScaleMode](./ringbufferplus.scalemode.md)<br>
+Scale unit type.
+ <br>When  is Manual the 'numbersamples' and 'basetimer' parameters will be ignored<br>When  is Slave the 'numbersamples' and 'basetimer' parameters will be ignored
+
+`numbersamples` [Nullable&lt;Int32&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
+Number of samples collected.Default value is basetimer/10. Default basetimer is 60.
+
+`basetimer` [Nullable&lt;TimeSpan&gt;](https://docs.microsoft.com/en-us/dotnet/api/system.nullable-1)<br>
+The [TimeSpan](https://docs.microsoft.com/en-us/dotnet/api/system.timespan) interval to colleted samples.Default value is 60 seconds.
 
 #### Returns
 
-[IRingBufferSlaveCapacity&lt;T&gt;](./ringbufferplus.iringbufferslavecapacity-1.md).
+IRingBufferScaleCapacity&lt;T&gt;
 
 
 - - -

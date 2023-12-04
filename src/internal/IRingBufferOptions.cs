@@ -36,6 +36,7 @@ namespace RingBufferPlus
         TimeSpan AccquireTimeout { get; }
         IRingBufferSwith SwithFrom { get; }
         IRingBufferSwith SwithTo { get; }
+        ScaleMode UserSwithScale { get; }
         bool IsSlave { get; }
 
     }

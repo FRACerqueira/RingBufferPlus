@@ -187,8 +187,9 @@ namespace RingBufferPlusBenchmarkSample
                 .Capacity(2)
                 .Factory((cts) => ConnectionFactory1.CreateConnection())
                 .AccquireTimeout(TimeSpan.FromMilliseconds(500))
-                .SlaveScale()
+                .ScaleUnit(ScaleMode.Slave)
                     .MaxCapacity(10)
+                        .ScaleWhenFreeLessEq()
                     .MinCapacity(1)
                 .BuildWarmup(out _);
 
@@ -196,14 +197,10 @@ namespace RingBufferPlusBenchmarkSample
                 .Capacity(10)
                 .Factory((cts) => ModelFactory1(cts)!)
                 .BufferHealth((buffer) => buffer.IsOpen)
-                .MasterScale(connectionRingBuffer1!)
-                    .SampleUnit(TimeSpan.FromSeconds(10), 10)
+                .ScaleUnit(ScaleMode.Automatic,10, TimeSpan.FromSeconds(10))
+                    .Slave(connectionRingBuffer1)
                     .MaxCapacity(50)
-                        .ScaleWhenFreeLessEq()
-                        .RollbackWhenFreeGreaterEq()
                     .MinCapacity(2)
-                        .ScaleWhenFreeGreaterEq()
-                        .RollbackWhenFreeLessEq()
                 .BuildWarmup(out _);
         }
 

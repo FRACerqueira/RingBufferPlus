@@ -13,7 +13,7 @@
 Welcome to RingBufferPlus
 =========================
 
-RingBufferPlus A generic circular buffer (ring buffer) in C# with auto-scaler.
+RingBufferPlus a generic circular buffer (ring buffer) in C# with auto-scaler.
 
 Key Features
 ============
@@ -27,13 +27,19 @@ Key Features
 - Set unique name for same buffer type
 - Set the **default capacity** (Startup)
 - Set the **minimum and maximum capacity** (optional)
-    - Set the conditions for scaling to maximum and minimum (required)
+    - Set the conditions for scaling to maximum and minimum (optional)
         - Automatic condition values ​​based on capacity (value not required)
     - Upscaling does **not need to remove** the buffer
         - better performance and availability  
-    - Downscaling **needs to remove** all buffering
+    - Downscaling does **not need to remove** the buffer when **no slave control**
+        - better performance and availability  
+    - Downscaling **needs to remove all** buffering when **has slave control**
         - Performance penalty
         - Ensure consistency and relationship between Master and slave
+- Set scale type **Automatic** , **Manual** or **Slave**
+    - Automatic: by free-resources on buffer
+    - Manual: User/Application defined using 'Switch To' command
+    - Slave : Indicates that the control is a slave scale type
 - Set **buffer integrity** for each acquisition and **check all integrity when acquisition idle**. (optional)
 - Set master-slave (optional) - **2 Ring Buffer with synchronization**
     - Master controls slave scale
@@ -49,6 +55,7 @@ Key Features
 - Detailed information about operations when the minimum log is Debug/Trace (**not recommended**)
 - Simple and clear **fluent syntax**
 
+
 Visit the official page for more documentation : 
 https://fracerqueira.github.io/RingBufferPlus
 
@@ -59,20 +66,26 @@ PipeAndFilter was developed in C# with target frameworks:
 - .NET 7
 - .NET 8
 
-*** What's new in V3.1.0 ***
+*** What's new in V3.2.0 ***
 ============================
 
-- Release with G.A
-- Renamed command 'FactoryHealth' to 'BufferHealth'
-    - Added parameter 'timeout' in 'BufferHealth'
-        - Check internal health for all buffer when idle acquisition. Default value is 30 seconds.
-- Upscaling does not need to remove the buffer
-    - better performance and availability  
-- Downscaling needs to remove all buffering
-    - Performance penalty
-    - Ensure consistency and relationship between Master and slave
-- Created recovery state functionality
-    - start/restart under fault conditions
+- Renamed command 'MasterScale' to 'ScaleUnit'
+    - Added parameter 'ScaleUnit' to set the scale type (automatic/manual)
+        - Now the user can manually set the scale change mode
+- Removed command 'SlaveScale'
+    - Now use 'ScaleUnit' command with scale type Slave
+- Removed command 'SampleUnit'
+    - Now time base unit and number of samples collected are parameters of the command 'ScaleUnit'
+- Added new command 'SlaveControl' to set Slave Ringbuffer
+    - Better clarity of command intent 
+- Removed mandatory commands 'ScaleWhenFreeLessEq' , 'RollbackWhenFreeGreaterEq' for MaxCapacity commands
+    - Now it is automatically set when 'MaxCapacity' is set  
+- Removed mandatory commands 'ScaleWhenFreeGreaterEq' , 'RollbackWhenFreeLessEq' for MinCapacity commands
+    - Now it is automatically set when 'MinCapacity' is set  
+- Added new command 'SwithTo' for Ringbuffer service
+    - Now the user can manually set the scale change when scale type is manual
+- Improvement: Downscaling does not need to remove all buffer when no slave control
+    - Better performance and availability 
 
 Examples
 ========
@@ -90,19 +103,14 @@ Random rnd = new();
 var rb = RingBuffer<int>.New("MyBuffer", cts.Token)
     .Capacity(8)
     .Factory((cts) => { return rnd.Next(1, 10); })
-    .MasterScale()
-        .SampleUnit(TimeSpan.FromSeconds(10), 10)
+    .ScaleUnit(ScaleMode.Automatic)
         .MinCapacity(4)
-            .ScaleWhenFreeGreaterEq()
-            .RollbackWhenFreeLessEq()
         .MaxCapacity(20)
-            .ScaleWhenFreeLessEq()
-            .RollbackWhenFreeGreaterEq()
     .BuildWarmup(out var completed);
 
 ...
 
-using (var buffer = rb.Accquire())
+using (var buffer = rb.Accquire(cts.Token))
 {
     if (bufferedItem.Successful)
     {
@@ -142,9 +150,9 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
     private readonly IRingBufferService<int> _ringBufferService = ringBufferService;
 
     [HttpGet]
-    public ActionResult Get()
+    public ActionResult Get(CancellationToken token)
     {
-        using (var buffer = _ringBufferService.Accquire())
+        using (var buffer = _ringBufferService.Accquire(token))
         {
             if (bufferedItem.Successful)
             {
@@ -161,12 +169,66 @@ public class MyController(IRingBufferService<int> ringBufferService) : Controlle
     }
 }
 
+Sample-api/web Usage (Minimal features with manual scale)
+---------------------------------------------------------
+builder.Services.AddRingBuffer<int>("Mybuffer",(ringbuf, _) =>
+{
+    return ringbuf
+        .Capacity(8)
+        .Factory((cts) => { return 10; })
+        .ScaleUnit(ScaleMode.Manual)
+            .MinCapacity(2)
+            .MaxCapacity(12)
+        .Build();
+});
+
+...
+
+//If you do not use the 'Warmup Ring Buffer' command, the first access to acquire the buffer will be Warmup (not recommended)
+app.WarmupRingBuffer<int>("Mybuffer");
+
+...
+
+[ApiController]
+[Route("[controller]")]
+public class MyController(IRingBufferService<int> ringBufferService) : ControllerBase
+{
+    private readonly IRingBufferService<int> _ringBufferService = ringBufferService;
+
+    [HttpGet]
+    public ActionResult Get(CancellationToken token)
+    {
+        using (var buffer = _ringBufferService.Accquire(token))
+        {
+            if (bufferedItem.Successful)
+            {
+                try 
+                {
+                    //do something    
+                }
+                catch
+                {
+                    buffer.Invalidate();
+                }
+            }
+        }
+    }
+
+    [HttpPatch]
+    [Route("/ChangeCapacity")]
+    public ActionResult ChangeCapacity(ScaleSwith scaleUnit)
+    {
+        _ringBufferService.SwithTo(scaleUnit);
+        return Ok();
+    }
+}
+
 RabbitMQ Usage
 ==============
 
-RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** when RinbufferPlus uses AutoScale.
+RabbitMQ has **AutomaticRecovery** functionality. This feature must be **DISABLED** when RingbufferPlus uses AutoScale.
 
-If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RinbufferPlus control)
+If the AutomaticRecovery functionality is activated, "ghost" buffers may occur (without RingbufferPlus control)
 
 For more details see https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples/RingBufferPlusBenchmarkSample
 
@@ -190,7 +252,7 @@ connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
             log?.LogError("{error}", error);
         })
     .Factory((cts) => ConnectionFactory.CreateConnection())
-    .SlaveScale()
+    .ScaleUnit(ScaleMode.Slave)
         .MaxCapacity(10)
         .MinCapacity(1)
     .BuildWarmup(out completedCnn);
@@ -204,14 +266,10 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
         })
     .Factory((cts) => ModelFactory(cts))
     .BufferHealth((buffer) => buffer.IsOpen)
-    .MasterScale(connectionRingBuffer)
-        .SampleUnit(TimeSpan.FromSeconds(10), 10)
+    .ScaleUnit(ScaleMode.Automatic,10,TimeSpan.FromSeconds(10))
+        .Slave(connectionRingBuffer)
         .MaxCapacity(50)
-            .ScaleWhenFreeLessEq()
-            .RollbackWhenFreeGreaterEq()
         .MinCapacity(2)
-            .ScaleWhenFreeGreaterEq()
-            .RollbackWhenFreeLessEq()
     .BuildWarmup(out completedChanels);
 
 
