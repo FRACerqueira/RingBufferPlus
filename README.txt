@@ -253,6 +253,10 @@ connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
         })
     .Factory((cts) => ConnectionFactory.CreateConnection())
     .ScaleUnit(ScaleMode.Slave)
+        .ReportScale((metric, log, cts) =>
+            {
+                log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
+            })
         .MaxCapacity(10)
         .MinCapacity(1)
     .BuildWarmup(out completedCnn);
@@ -267,6 +271,10 @@ modelRingBuffer = RingBuffer<IModel>.New("RabbitChanels")
     .Factory((cts) => ModelFactory(cts))
     .BufferHealth((buffer) => buffer.IsOpen)
     .ScaleUnit(ScaleMode.Automatic,10,TimeSpan.FromSeconds(10))
+        .ReportScale((metric, log, cts) =>
+            {
+                log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
+            })
         .Slave(connectionRingBuffer)
         .MaxCapacity(50)
         .MinCapacity(2)

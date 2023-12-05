@@ -36,6 +36,7 @@ namespace RingBufferPlusBenchmarkSample
                 }
                 catch 
                 {
+                    //try again or timeout by RingbufferPlus
                 }
                 cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(2));
             }
