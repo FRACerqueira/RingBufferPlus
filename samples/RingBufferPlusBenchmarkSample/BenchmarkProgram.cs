@@ -58,7 +58,7 @@ namespace RingBufferPlusBenchmarkSample
                 catch
                 {
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
+                cancellation.WaitHandle.WaitOne(1);
             }
             return model;
         }
@@ -89,7 +89,7 @@ namespace RingBufferPlusBenchmarkSample
                 catch
                 {
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(5));
+                cancellation.WaitHandle.WaitOne(1);
             }
             return model;
         }

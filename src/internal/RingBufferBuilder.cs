@@ -23,6 +23,8 @@ namespace RingBufferPlus
 
         public bool HasScaleCallbackEvent { get; private set; }
 
+        public int ErrorMaxPerc { get; private set; } = 33;
+
         public int Capacity { get; private set; } = 2;
 
         public int MinCapacity { get; private set; } = 2;
@@ -77,13 +79,26 @@ namespace RingBufferPlus
 
         #region IRingBuffer
 
-
         IRingBuffer<T> IRingBuffer<T>.Logger(ILogger value)
         {
             Logger = value;
             return this;
         }
 
+
+        IRingBuffer<T> IRingBuffer<T>.FactoryErrorMaxPerc(int value)
+        {
+            if (value < 0)
+            {
+                throw new ArgumentException("Value  must be greater than or equal to 0", nameof(value));
+            }
+            if (value > 100)
+            {
+                throw new ArgumentException("Value  must be less than or equal to 100", nameof(value));
+            }
+            ErrorMaxPerc = value;
+            return this;
+        }
 
         IRingBufferService<T> IRingBuffer<T>.BuildWarmup(out bool fullcapacity, TimeSpan? timeout)
         {

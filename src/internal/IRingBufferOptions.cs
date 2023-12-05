@@ -19,6 +19,7 @@ namespace RingBufferPlus
         Func<T,bool> BufferHealthHandler { get; }
         TimeSpan BufferHealtTimeout { get; }
         TimeSpan FactoryTimeout { get; }
+        int ErrorMaxPerc { get; }
         TimeSpan FactoryIdleRetryError { get; }
         ILogger Logger { get; }
         bool HasScaleCapacity { get; }

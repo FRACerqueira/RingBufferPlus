@@ -48,7 +48,7 @@ namespace RingBufferPlusConsoleSample
             Console.WriteLine($"Ring Buffer Capacity({rb.Capacity})");
             Console.WriteLine($"Ring Buffer MinCapacity({rb.MinCapacity})");
             Console.WriteLine($"Ring Buffer MaxCapacity({rb.MaxCapacity})");
-            Console.WriteLine($"Ring Buffer ScaleCapacity({rb.ScaleCapacity})");
+            Console.WriteLine($"Ring Buffer ScaleCapacity({rb.ScaleCapacity}/{rb.UserScale})");
             Console.WriteLine($"Ring Buffer AccquireTimeout({rb.AccquireTimeout})");
             Console.WriteLine($"Ring Buffer FactoryTimeout({rb.FactoryTimeout})");
             Console.WriteLine($"Ring Buffer FactoryIdleRetry({rb.FactoryIdleRetry})");

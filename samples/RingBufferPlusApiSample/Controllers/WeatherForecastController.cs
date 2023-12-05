@@ -27,7 +27,6 @@ namespace RingBufferPlusApiSample.Controllers
                 {
                     buffer.Invalidate();
                 }
-                token.WaitHandle.WaitOne(100);
             }
             return Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {

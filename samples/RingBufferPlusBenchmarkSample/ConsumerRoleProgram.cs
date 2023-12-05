@@ -33,7 +33,7 @@ namespace RingBufferPlusBenchmarkSample
                     model.QueueDeclare("log", false, false, false);
                     break;
                 }
-                cancellation.WaitHandle.WaitOne(TimeSpan.FromMilliseconds(100));
+                cancellation.WaitHandle.WaitOne(1);
             }
             return model;
         }
@@ -48,7 +48,7 @@ namespace RingBufferPlusBenchmarkSample
                 UserName = "guest",
                 Password = "guest",
                 VirtualHost = "EnterpriseLog",
-                AutomaticRecoveryEnabled = true,
+                AutomaticRecoveryEnabled = false,
                 RequestedHeartbeat = TimeSpan.FromMinutes(1),
                 ClientProvidedName = "ConsumerRoleProgram"
             };
@@ -96,7 +96,7 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer Capacity({connectionRingBuffer!.Capacity})");
             Console.WriteLine($"Ring Buffer MinCapacity({connectionRingBuffer!.MinCapacity})");
             Console.WriteLine($"Ring Buffer MaxCapacity({connectionRingBuffer!.MaxCapacity})");
-            Console.WriteLine($"Ring Buffer ScaleCapacity({connectionRingBuffer!.ScaleCapacity})");
+            Console.WriteLine($"Ring Buffer ScaleCapacity({connectionRingBuffer!.ScaleCapacity}/{connectionRingBuffer!.UserScale})");
             Console.WriteLine($"Ring Buffer AccquireTimeout({connectionRingBuffer!.AccquireTimeout})");
             Console.WriteLine($"Ring Buffer FactoryTimeout({connectionRingBuffer!.FactoryTimeout})");
             Console.WriteLine($"Ring Buffer FactoryIdleRetry({connectionRingBuffer!.FactoryIdleRetry})");
@@ -121,7 +121,7 @@ namespace RingBufferPlusBenchmarkSample
             Console.WriteLine($"Ring Buffer Capacity({modelRingBuffer.Capacity})");
             Console.WriteLine($"Ring Buffer MinCapacity({modelRingBuffer.MinCapacity})");
             Console.WriteLine($"Ring Buffer MaxCapacity({modelRingBuffer.MaxCapacity})");
-            Console.WriteLine($"Ring Buffer ScaleCapacity({modelRingBuffer.ScaleCapacity})");
+            Console.WriteLine($"Ring Buffer ScaleCapacity({modelRingBuffer.ScaleCapacity}/{modelRingBuffer.UserScale})");
             Console.WriteLine($"Ring Buffer AccquireTimeout({modelRingBuffer.AccquireTimeout})");
             Console.WriteLine($"Ring Buffer FactoryTimeout({modelRingBuffer.FactoryTimeout})");
             Console.WriteLine($"Ring Buffer FactoryIdleRetry({modelRingBuffer.FactoryIdleRetry})");

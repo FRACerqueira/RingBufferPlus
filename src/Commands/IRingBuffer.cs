@@ -33,6 +33,14 @@ namespace RingBufferPlus
         IRingBuffer<T> Factory(Func<CancellationToken,T> value, TimeSpan? timeout = null, TimeSpan? idleRetryError = null);
 
         /// <summary>
+        /// Maximum error percentage during buffer creation to cancel the operation
+        /// <br> Default value is 33 (33% - 1/3)</br>
+        /// </summary>
+        /// <param name="value">The percentage (0 - Any error to 100 - None)</param>
+        /// <returns><see cref="IRingBuffer{T}"/>.</returns>
+        IRingBuffer<T> FactoryErrorMaxPerc(int value);
+
+        /// <summary>
         /// Check buffer health with each acquisition or after timeout
         /// </summary>
         /// <param name="value">The handler to health.</param>

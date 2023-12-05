@@ -28,7 +28,6 @@ namespace RingBufferPlus
         private Task _errorBufferThread;
         private Task _metricBufferThread;
         private Task _scaleCapacityThread;
-
         private Task _bufferHealthThread;
 
         private Task _reportscaleCapacityThread;
@@ -49,6 +48,7 @@ namespace RingBufferPlus
         private readonly CancellationToken _apptoken;
         private readonly CancellationTokenSource _managertoken;
         private readonly ILogger? _logger;
+        private int _errorMaxPerc;
         private bool _disposed;
         private bool _WarmupComplete;
         private bool _WarmupRunning;
@@ -90,6 +90,7 @@ namespace RingBufferPlus
             BufferHealtTimeout = ringBufferOptions.BufferHealtTimeout;
             UserScale = ringBufferOptions.UserSwithScale;
 
+            _errorMaxPerc = ringBufferOptions.ErrorMaxPerc;
             _logger = ringBufferOptions.Logger;
             _factoryHandler = ringBufferOptions.FactoryHandler;
             _healthHandler = ringBufferOptions.BufferHealthHandler;
@@ -233,7 +234,7 @@ namespace RingBufferPlus
                 }
                 if (fullavailable != _currentCapacity)
                 {
-                    localcancellation.WaitHandle.WaitOne(5);
+                    localcancellation.WaitHandle.WaitOne(1);
                     return new RingBufferValue<T>(Name, TimeSpan.Zero, false, default, null);
                 }
                 lock (_lockAccquire)
@@ -332,7 +333,7 @@ namespace RingBufferPlus
                         _blockexceptionsBuffer.Add(new RingBufferException(Name, $"Accquire timeout {sw.Elapsed}"), _managertoken.Token);
                         break;
                     }
-                    localcancellation.WaitHandle.WaitOne(5);
+                    localcancellation.WaitHandle.WaitOne(1);
                 }
             }
             //not ok
@@ -551,7 +552,7 @@ namespace RingBufferPlus
                             }
                             WriteLogInfo(DateTime.Now, $"{Name} Internal Buffer Health done");
                         }
-                        _managertoken.Token.WaitHandle.WaitOne(100);
+                        _managertoken.Token.WaitHandle.WaitOne(1);
                     }
                     WriteLogInfo(DateTime.Now, $"{Name} Buffer Health Thread Stoped");
                 }
@@ -784,7 +785,7 @@ namespace RingBufferPlus
                 {
                     while (!_managertoken.IsCancellationRequested && !_WarmupComplete)
                     {
-                        _managertoken.Token.WaitHandle.WaitOne(5);
+                        _managertoken.Token.WaitHandle.WaitOne(1);
                     }
                 }
                 while (ScaleCapacity && UserScale == ScaleMode.Automatic  && !_managertoken.IsCancellationRequested)
@@ -939,7 +940,7 @@ namespace RingBufferPlus
             warmupcts.CancelAfter(timeoutfullcapacity);
             while (!warmupcts.Token.IsCancellationRequested && _counterBuffer != Capacity)
             {
-                warmupcts.Token.WaitHandle.WaitOne(5);
+                warmupcts.Token.WaitHandle.WaitOne(1);
             }
 
             WriteLogInfo(DateTime.Now, $"{Name} Warmup complete with {_counterBuffer} items of {Capacity}");
@@ -1006,8 +1007,9 @@ namespace RingBufferPlus
         private void TryLoadBufferAsync(int diff)
         {
             var qtderr = 0;
-            //33% error stop! 
-            var maxerr =  (int)Math.Ceiling(diff / 3.0);
+            var qtdok = 0;
+            //error stop! 
+            var maxerr =  (int)Math.Ceiling(diff * _errorMaxPerc / 100.0);
             var sw = Stopwatch.StartNew();
             for (int i = 0; i < diff; i++)
             {
@@ -1017,8 +1019,8 @@ namespace RingBufferPlus
                 {
                     var tk = Task.Run(() =>
                     {
-                        //33% error stop! 
-                        if (qtderr > maxerr)
+                        //% error stop! 
+                        if (qtderr >= maxerr)
                         {
                             //force error
                             throw new RingBufferException(Name, "TryLoadBufferAsync Factory Exception");
@@ -1042,6 +1044,7 @@ namespace RingBufferPlus
                                 }
                                 else
                                 {
+                                    Interlocked.Increment(ref qtdok);
                                     _availableBuffer.Enqueue(value);
                                     _counterBuffer++;
                                     WriteLogDebug(DateTime.Now, $"{Name} TryLoadBufferAsync Added New Item To Buffer : {_availableBuffer.Count} , Available : {_counterBuffer} Unavailable : {_counterAccquire}");
@@ -1053,9 +1056,8 @@ namespace RingBufferPlus
                 }
                 catch (OperationCanceledException)
                 {
-                    qtderr++;
                     //Send to retry
-                    WriteLogWarning(DateTime.Now, $"{Name} TryLoadBufferAsync Send Factory to Retry (Timeout)");
+                    WriteLogWarning(DateTime.Now, $"{Name} TryLoadBufferAsync Send Factory to Retry (Timeout). Created {qtdok}/{diff}");
                     _blockRetryFactoryBuffer.Add(DateTime.Now.Add(FactoryIdleRetry));
                 }
                 catch (Exception ex)
