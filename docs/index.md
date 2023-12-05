@@ -293,7 +293,7 @@ connectionRingBuffer = RingBuffer<IConnection>.New("RabbitCnn")
     .ScaleUnit(ScaleMode.Slave)
         .ReportScale((metric, log, cts) =>
             {
-                log?.LogInformation($"RabbitChanels Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
+                log?.LogInformation($"RabbitCnn Report: [{metric.MetricDate}]  Trigger {metric.Trigger} from {metric.FromCapacity} to {metric.ToCapacity}");
             })
         .MaxCapacity(10)
         .MinCapacity(1)
