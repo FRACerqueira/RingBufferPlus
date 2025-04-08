@@ -81,42 +81,62 @@ namespace RingBufferPlus.Tests
         public async Task SwitchToAsync_ShouldScaleToMinCapacity()
         {
             // Arrange
-            var manager = CreateRingBufferManager();
-            await manager.WarmupAsync();
+            var builder = new RingBufferBuilder<int>("TestBuffer",null);
+            builder.Capacity(5);
+            builder.LockAcquireWhenAutoScale();
+            builder.MaxCapacity(10);
+            builder.MinCapacity(2);
+            builder.Factory((_) => Task.FromResult(0));
+            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
+            var service = builder.Build();
+            await service.WarmupAsync();
 
             // Act
-            await manager.SwitchToAsync(ScaleSwitch.MinCapacity);
+            await service.SwitchToAsync(ScaleSwitch.MinCapacity);
 
             // Assert
-            Assert.True(manager.IsMinCapacity);
+            Assert.True(service.IsMinCapacity);
         }
 
         [Fact]
         public async Task SwitchToAsync_ShouldScaleToMaxCapacity()
         {
             // Arrange
-            var manager = CreateRingBufferManager();
-            await manager.WarmupAsync();
-
+            var builder = new RingBufferBuilder<int>("TestBuffer", null);
+            builder.Capacity(5);
+            builder.LockAcquireWhenAutoScale();
+            builder.MaxCapacity(10);
+            builder.MinCapacity(2);
+            builder.Factory((_) => Task.FromResult(0));
+            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
+            var service = builder.Build();
+            await service.WarmupAsync();
             // Act
-            await manager.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
 
             // Assert
-            Assert.True(manager.IsMaxCapacity);
+            Assert.True(service.IsMaxCapacity);
         }
 
         [Fact]
         public async Task SwitchToAsync_ShouldScaleToInitCapacity()
         {
             // Arrange
-            var manager = CreateRingBufferManager();
-            await manager.WarmupAsync();
+            var builder = new RingBufferBuilder<int>("TestBuffer", null);
+            builder.Capacity(5);
+            builder.LockAcquireWhenAutoScale();
+            builder.MaxCapacity(10);
+            builder.MinCapacity(2);
+            builder.Factory((_) => Task.FromResult(0));
+            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
+            var service = builder.Build();
+            await service.WarmupAsync();
 
             // Act
-            await manager.SwitchToAsync(ScaleSwitch.InitCapacity);
+            await service.SwitchToAsync(ScaleSwitch.InitCapacity);
 
             // Assert
-            Assert.True(manager.IsInitCapacity);
+            Assert.True(service.IsInitCapacity);
         }
 
         [Fact]
