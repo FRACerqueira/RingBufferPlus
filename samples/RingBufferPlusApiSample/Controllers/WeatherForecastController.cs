@@ -1,3 +1,8 @@
+// ***************************************************************************************
+// MIT LICENCE
+// The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
+// ***************************************************************************************
+
 using Microsoft.AspNetCore.Mvc;
 using RingBufferPlus;
 
@@ -5,22 +10,21 @@ namespace RingBufferPlusApiSample.Controllers
 {
     [ApiController]
     [Route("[controller]")]
-    public class WeatherForecastController(IRingBufferService<int> ringBufferService, ILogger<WeatherForecastController> logger) : ControllerBase
+    public class WeatherForecastController(IRingBufferService<int> ringBufferService) : ControllerBase
     {
         private static readonly string[] Summaries =
         [
             "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
         ];
 
-        private readonly ILogger<WeatherForecastController> _logger = logger;
         private readonly IRingBufferService<int> _ringBufferService = ringBufferService;
         private static bool _toInvalidade = true;
 
         [HttpGet(Name = "GetWeatherForecast")]
-        public IEnumerable<WeatherForecast> Get(CancellationToken token)
+        public async Task<IEnumerable<WeatherForecast>> Get(CancellationToken token)
         {
 
-            using (var buffer = _ringBufferService.Accquire(token))
+            using (var buffer = await  _ringBufferService.AcquireAsync(token))
             {
                 _toInvalidade = !_toInvalidade;
                 if (_toInvalidade)
@@ -40,10 +44,10 @@ namespace RingBufferPlusApiSample.Controllers
 
         [HttpPatch]
         [Route("/ChangeCapacity")]
-        public ActionResult ChangeCapacity(ScaleSwith scaleUnit)
+        public async Task<ActionResult> ChangeCapacity(ScaleSwitch scaleUnit)
         {
-            _ringBufferService.SwithTo(scaleUnit);
-            return Ok();
+            await _ringBufferService.SwitchToAsync(scaleUnit);
+            return Ok(_ringBufferService.CurrentCapacity);
         }
     }
 }

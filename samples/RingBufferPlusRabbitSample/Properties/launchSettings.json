@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "RingBufferPlusBenchmarkSample": {
+      "commandName": "Project",
+      "commandLineArgs": "--role publisher --delay 20"
+    }
+  }
+}
