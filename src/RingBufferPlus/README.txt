@@ -329,11 +329,11 @@ private async Task<IChannel> ModelFactory(CancellationToken cancellation)
 
 Examples
 ========
-For more examples, please refer to the [Samples directory](./samples) :
+For more examples, please refer to the [Samples directory](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples) :
 
 Documentation
 =============
-The documentation is available in the [Docs directory](./src/docs/docindex.md).
+The documentation is available in the [Docs directory](https://github.com/FRACerqueira/RingBufferPlus/blob/main/src/docs/docindex.md).
 
 License
 =======
