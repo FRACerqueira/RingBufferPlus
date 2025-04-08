@@ -346,6 +346,7 @@ namespace RingBufferPlus.Core
                             _currentCapacity = Capacity;
                             if (qtd < 0)
                             {
+                                await ScaleDownProcessAsync(new ScaleParameters(null, origin, qtd*-1, _managertoken.Token));
                             }
                             else if (qtd > 0)
                             {
