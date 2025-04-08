@@ -215,9 +215,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .HeartBeat(MyHeartBeat)
            .Logger(HostApp.Services.GetService<ILogger<Program>>())
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer()
-                .MinCapacity(3)
-                .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -256,9 +253,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .Logger(HostApp.Services.GetService<ILogger<Program>>())
            .BackgroundLogger()
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer()
-                .MinCapacity(3)
-                .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");

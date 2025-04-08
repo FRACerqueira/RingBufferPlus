@@ -66,7 +66,7 @@ A ring buffer makes a bounded queue when separate indices are used for inserting
     - Added command BackgroundLogger
     - Renamed command ScaleUnit ScaleTimer (Break changes)
     
-- **v3.2.0 (Deprecated) **
+- **v3.2.0 (Deprecated)**
     - Renamed command 'MasterScale' to 'ScaleUnit'
         - Added parameter 'ScaleUnit' to set the scale type (automatic/manual/Slave)
             - Now the user can manually set the scale change mode
@@ -273,9 +273,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .HeartBeat(MyHeartBeat)
            .Logger(HostApp.Services.GetService<ILogger<Program>>())
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer()
-                .MinCapacity(3)
-                .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -317,9 +314,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .Logger(HostApp.Services.GetService<ILogger<Program>>())
            .BackgroundLogger()
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer()
-                .MinCapacity(3)
-                .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
