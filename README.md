@@ -1,4 +1,4 @@
-# ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/docs/images/icon.png) Welcome to RingBufferPlus
+# ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png) Welcome to RingBufferPlus
 
 ## **The generic ring buffer with auto-scaler (elastic buffer).** 
 
