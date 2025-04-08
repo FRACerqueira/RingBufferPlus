@@ -1,6 +1,6 @@
 # ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/docs/images/icon.png) Welcome to RingBufferPlus
 
-## **The generic circular buffer (ring buffer) in C# with auto-scaler (elastic buffer).** 
+## **The generic ring buffer with auto-scaler (elastic buffer).** 
 
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE)
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)

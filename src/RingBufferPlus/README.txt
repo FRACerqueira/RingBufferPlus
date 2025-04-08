@@ -13,7 +13,7 @@
 Welcome to RingBufferPlus
 =========================
 
-The generic circular buffer (ring buffer) in C# with auto-scaler (elastic buffer)
+The generic ring buffer with auto-scaler (elastic buffer)
 
 Project Description
 ====================
