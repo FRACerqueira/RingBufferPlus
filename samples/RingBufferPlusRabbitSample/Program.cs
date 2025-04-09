@@ -89,7 +89,7 @@ namespace RingBufferPlusRabbitSample
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
-            Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread");
+            Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread using Non lock Acquire");
             Thread.Sleep(TimeSpan.FromSeconds(20));
 
             Console.WriteLine($"Running 60 seconds..");
@@ -148,6 +148,88 @@ namespace RingBufferPlusRabbitSample
             }
             sw.Reset();
 
+            threads.Clear();
+
+            cts.Dispose();          
+            cts = CancellationTokenSource.CreateLinkedTokenSource(tokenapplifetime);
+
+            Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread using lock Acquire");
+
+            rb = await RingBuffer<IChannel>.New("RabbitChanels")
+                    .Capacity(10)
+                    .Logger(hostApp.Services.GetService<ILogger<Program>>())
+                    .BackgroundLogger()
+                    .Factory((cts) => ChannelFactory(cts)!)
+                    .ScaleTimer(50, TimeSpan.FromSeconds(5))
+                        .MaxCapacity(20)
+                        .MinCapacity(5)
+                        .LockWhenScaling()
+                        .AutoScaleAcquireFault()
+                    .BuildWarmupAsync(cts.Token);
+
+            Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
+            Console.WriteLine($"Ring Buffer Current capacity = {rb.CurrentCapacity}");
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+
+            Thread.Sleep(TimeSpan.FromSeconds(20));
+
+            Console.WriteLine($"Running 60 seconds..");
+            Thread.Sleep(TimeSpan.FromSeconds(1));
+
+            dtref = DateTime.Now.AddSeconds(60);
+            qtdstart = 0;
+            for (int i = 0; i < threadCount; i++)
+            {
+                Thread thread = new(async () =>
+                {
+                    var id = Interlocked.Increment(ref qtdstart);
+                    Console.WriteLine($"Thread {qtdstart} started ");
+                    while (true)
+                    {
+                        if (DateTime.Now >= dtref)
+                        {
+                            Console.WriteLine($"wait({id}) 60 seconds (idle)");
+                            Thread.Sleep(TimeSpan.FromSeconds(60));
+                            break;
+                        }
+                        using var bufferedItem = await rb!.AcquireAsync();
+                        if (bufferedItem.Successful)
+                        {
+                            var body = new ReadOnlyMemory<byte>(messageBodyBytes);
+                            await bufferedItem.Current!.BasicPublishAsync("", "log", body);
+                        }
+                        else
+                        {
+                            if (!cts.IsCancellationRequested)
+                            {
+                                Console.WriteLine($"RingBuffer-{id}({bufferedItem.Successful}:{bufferedItem.ElapsedTime}) Channel Capacity({rb!.CurrentCapacity})");
+                            }
+                        }
+                    }
+                    Console.WriteLine($"Thread {id} ended");
+                    Interlocked.Decrement(ref qtdstart);
+                });
+                thread.Start();
+                threads.Add(thread);
+            }
+
+            Console.WriteLine($"Waiting for {threadCount} threads to finish...");
+            while (qtdstart > 0)
+            {
+                Thread.Sleep(10);
+            }
+
+            Console.WriteLine("Dispose ring buffer");
+            cts.Cancel();
+            sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 10000)
+            {
+                Thread.Sleep(1000);
+                Console.WriteLine($"Ring Buffer {rb!.Name} current capacity : {rb!.CurrentCapacity}");
+            }
+            sw.Reset();
         }
 
         public static string RandomString(int length)

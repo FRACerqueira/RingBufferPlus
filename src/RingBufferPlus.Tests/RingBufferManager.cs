@@ -83,7 +83,7 @@ namespace RingBufferPlus.Tests
             // Arrange
             var builder = new RingBufferBuilder<int>("TestBuffer",null);
             builder.Capacity(5);
-            builder.LockAcquireWhenAutoScale();
+            builder.LockWhenScaling();
             builder.MaxCapacity(10);
             builder.MinCapacity(2);
             builder.Factory((_) => Task.FromResult(0));
@@ -104,7 +104,7 @@ namespace RingBufferPlus.Tests
             // Arrange
             var builder = new RingBufferBuilder<int>("TestBuffer", null);
             builder.Capacity(5);
-            builder.LockAcquireWhenAutoScale();
+            builder.LockWhenScaling();
             builder.MaxCapacity(10);
             builder.MinCapacity(2);
             builder.Factory((_) => Task.FromResult(0));
@@ -124,7 +124,7 @@ namespace RingBufferPlus.Tests
             // Arrange
             var builder = new RingBufferBuilder<int>("TestBuffer", null);
             builder.Capacity(5);
-            builder.LockAcquireWhenAutoScale();
+            builder.LockWhenScaling();
             builder.MaxCapacity(10);
             builder.MinCapacity(2);
             builder.Factory((_) => Task.FromResult(0));

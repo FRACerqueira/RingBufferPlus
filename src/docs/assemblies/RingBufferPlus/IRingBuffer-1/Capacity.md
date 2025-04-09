@@ -4,7 +4,7 @@
 </br>
 
 
-#### Sets the initial/startup capacity of the ring buffer.
+#### Sets the initial/startup (required) capacity of the ring buffer.
 
 ```csharp
 public IRingBuffer Capacity(int value)

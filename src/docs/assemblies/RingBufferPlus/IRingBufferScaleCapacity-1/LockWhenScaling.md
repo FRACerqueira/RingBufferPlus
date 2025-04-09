@@ -1,13 +1,13 @@
 ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png)
 
-### IRingBufferScaleCapacity&lt;T&gt;.LockAcquireWhenAutoScale method
+### IRingBufferScaleCapacity&lt;T&gt;.LockWhenScaling method
 </br>
 
 
-#### Sets acquisition lock when running auto scale.
+#### Sets acquisition/Switch lock when running scaleUp/ScaleDown.
 
 ```csharp
-public IRingBufferScaleCapacity LockAcquireWhenAutoScale(bool value = true)
+public IRingBufferScaleCapacity LockWhenScaling(bool value = true)
 ```
 
 | parameter | description |
