@@ -21,7 +21,7 @@
 		<RepositoryType>git</RepositoryType>
 		<PackageId>RingBufferPlus</PackageId>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<PackageIcon>icon.png</PackageIcon>
+		<PackageIcon>Icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
 		<GenerateDocumentationFile>True</GenerateDocumentationFile>
