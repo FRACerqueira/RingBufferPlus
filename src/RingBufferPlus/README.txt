@@ -53,7 +53,7 @@ What's new in the latest version
     - Bug fixed when used with Rabbitmq.
       - Removed need to set Automatic Recovery to false for use with Rabbitmq
     - Removed Master/Slave, ReportScale, BufferHealth,  ScaleWhen..., RollbackWhen... and TriggerByAccqWhen... concept (Break changes)
-    - Added command LockAcquireWhenAutoScale 
+    - Added command LockWhenScaling 
     - Added command AutoScaleAcquireFault
     - Added command HeartBeat
     - Added command BackgroundLogger
@@ -74,9 +74,9 @@ var rb = await RingBuffer<int>.New("MyBuffer")
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
 Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity({rb.Capacity}) = {rb.IsInitCapacity}.");
+Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity({rb.MaxCapacity}) = {rb.IsMaxCapacity}.");
+Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity({rb.MinCapacity}) = {rb.IsMinCapacity}.");
 
 using (var buffer = await rb.AcquireAsync(token))
 {
@@ -106,29 +106,11 @@ var rb = await RingBuffer<int>.New("MyBuffer")
                 .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
 if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity)) 
 {
     //manual scale was not scheduled
     //do something
 }
-
-using (var buffer = await rb.AcquireAsync(token))
-{
-    if (buffer.Successful)
-    {
-        Console.WriteLine($"Buffer is ok({buffer.Successful}:{buffer.ElapsedTime}) value: {buffer.Current}");
-    }
-    else
-    {
-        //do something
-    }
-}  
 
 Trigger Scale Usage
 ===================
@@ -148,25 +130,7 @@ var rb = await RingBuffer<int>.New("MyBuffer")
                 .MaxCapacity(9)
            .BuildWarmupAsync(token);
 
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-using (var buffer = await rb.AcquireAsync(token))
-{
-    if (buffer.Successful)
-    {
-        Console.WriteLine($"Buffer is ok({buffer.Successful}:{buffer.ElapsedTime}) value: {buffer.Current}");
-    }
-    else
-    {
-        //do something
-    }
-}  
-
-Lock/Unlock de Acquire/Switch Usage
+Lock Acquire/Switch Usage
 ===================================
 When the scaling up or down process is executed, acquisition or scale switching is not blocked.
 In scenarios where there is a lot of stress on the buffer resource, it may not be possible to perform these actions. In these scenarios, it is preferable to block acquisition or scale switching to ensure the desired execution.
@@ -179,28 +143,9 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
            .ScaleTimer(50, TimeSpan.FromSeconds(5))
                 .LockAcquireWhenAutoScale()
-                .AutoScaleAcquireFault()
                 .MinCapacity(3)
                 .MaxCapacity(9)
            .BuildWarmupAsync(token);
-
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-using (var buffer = await rb.AcquireAsync(token))
-{
-    if (buffer.Successful)
-    {
-        Console.WriteLine($"Buffer is ok({buffer.Successful}:{buffer.ElapsedTime}) value: {buffer.Current}");
-    }
-    else
-    {
-        //do something
-    }
-}  
 
 HeartBeat Usage
 ===============
@@ -217,24 +162,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
            .BuildWarmupAsync(token);
 
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-using (var buffer = await rb.AcquireAsync(token))
-{
-    if (buffer.Successful)
-    {
-        Console.WriteLine($"Buffer is ok({buffer.Successful}:{buffer.ElapsedTime}) value: {buffer.Current}");
-    }
-    else
-    {
-        //do something
-    }
-}
-
 private void MyHeartBeat(RingBufferValue<int> item)
 {
      //do anything ex: health check
@@ -243,7 +170,7 @@ private void MyHeartBeat(RingBufferValue<int> item)
 Background Logger Usage
 =======================
 
-Log execution is done automatically by the component (Level debug and Error) in the same execution thread. This process can burden execution if the log recording process takes a long time. 
+Log execution is done automatically by the component (Level Debug, Warning and Error) in the same execution thread. This process can burden execution if the log recording process takes a long time. 
 For this scenario, you can use the log execution in the background in an asynchronous process done by the component.
 
 Random rnd = new();
@@ -254,24 +181,6 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .BackgroundLogger()
            .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
            .BuildWarmupAsync(token);
-
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-using (var buffer = await rb.AcquireAsync(token))
-{
-    if (buffer.Successful)
-    {
-        Console.WriteLine($"Buffer is ok({buffer.Successful}:{buffer.ElapsedTime}) value: {buffer.Current}");
-    }
-    else
-    {
-        //do something
-    }
-}
 
 RabbitMQ Usage
 ==============
@@ -296,18 +205,12 @@ var rb = await RingBuffer<IChannel>.New("RabbitChanels")
            .Capacity(10)
            .Logger(applogger!)
            .BackgroundLogger()
-           .Factory((cts) => ModelFactory(cts)!)
+           .Factory((cts) => ChannelFactory(cts))
            .ScaleTimer(100, TimeSpan.FromSeconds(10))
                 .MaxCapacity(20)
                 .MinCapacity(5)
                 .AutoScaleAcquireFault()
             .BuildWarmupAsync(token);
-
-Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
 using (var buffer = await rb.AcquireAsync(token))
 {
@@ -322,7 +225,7 @@ using (var buffer = await rb.AcquireAsync(token))
     }
 }  
 
-private async Task<IChannel> ModelFactory(CancellationToken cancellation)
+private async Task<IChannel> ChannelFactory(CancellationToken cancellation)
 {
     return await connectionRabbit!.CreateChannelAsync(cancellationToken: cancellation);
 }

@@ -19,7 +19,7 @@ public interface IRingBufferScaleCapacity<T> : IRingBufferBuild<T>
 | name | description |
 | --- | --- |
 | [AutoScaleAcquireFault](IRingBufferScaleCapacity-1/AutoScaleAcquireFault.md)(…) | Sets the condition to autoscale (scale up) capacity when an acquire fault occurs. The Manually change scale will always return false if autoscale is enabled. |
-| [LockAcquireWhenAutoScale](IRingBufferScaleCapacity-1/LockAcquireWhenAutoScale.md)(…) | Sets acquisition lock when running auto scale. |
+| [LockWhenScaling](IRingBufferScaleCapacity-1/LockWhenScaling.md)(…) | Sets acquisition/Switch lock when running scaleUp/ScaleDown. |
 | [MaxCapacity](IRingBufferScaleCapacity-1/MaxCapacity.md)(…) | Sets the maximum capacity. |
 | [MinCapacity](IRingBufferScaleCapacity-1/MinCapacity.md)(…) | Sets the minimum capacity. |
 

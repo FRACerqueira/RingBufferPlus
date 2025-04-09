@@ -120,7 +120,7 @@ namespace RingBufferPlus.Core
             return this;
         }
 
-        public IRingBufferScaleCapacity<T> LockAcquireWhenAutoScale(bool value = true)
+        public IRingBufferScaleCapacity<T> LockWhenScaling(bool value = true)
         {
             _lockAcquire = value;
             return this;

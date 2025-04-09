@@ -32,11 +32,11 @@ namespace RingBufferPlus
         IRingBufferScaleCapacity<T> MaxCapacity(int value);
 
         /// <summary>
-        /// Sets acquisition lock when running auto scale.
+        /// Sets acquisition/Switch lock when running scaleUp/ScaleDown.
         /// </summary>
         /// <param name="value">True to acquisition lock.Default true</param>
         /// <returns></returns>
-        IRingBufferScaleCapacity<T> LockAcquireWhenAutoScale(bool value = true);
+        IRingBufferScaleCapacity<T> LockWhenScaling(bool value = true);
 
         /// <summary>
         /// Sets the condition to autoscale (scale up) capacity when an acquire fault occurs. The Manually change scale will always return false if autoscale is enabled.

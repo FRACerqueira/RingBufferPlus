@@ -20,7 +20,7 @@ public interface IRingBuffer<T> : IRingBufferBuild<T>
 | --- | --- |
 | [AcquireTimeout](IRingBuffer-1/AcquireTimeout.md)(…) | Sets the timeout to acquire buffer. |
 | [BackgroundLogger](IRingBuffer-1/BackgroundLogger.md)(…) | Sets to write in background (evaluation asynchronously). |
-| [Capacity](IRingBuffer-1/Capacity.md)(…) | Sets the initial/startup capacity of the ring buffer. |
+| [Capacity](IRingBuffer-1/Capacity.md)(…) | Sets the initial/startup (required) capacity of the ring buffer. |
 | [Factory](IRingBuffer-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [HeartBeat](IRingBuffer-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
 | [Logger](IRingBuffer-1/Logger.md)(…) | Sets the logger. |
