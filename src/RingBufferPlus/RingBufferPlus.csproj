@@ -4,19 +4,23 @@
 		<TargetFrameworks>net9.0;net8.0</TargetFrameworks>
 		<ImplicitUsings>enable</ImplicitUsings>
 		<Nullable>enable</Nullable>
+		<LangVersion>latestmajor</LangVersion>
 	</PropertyGroup>
 
 	<PropertyGroup>
 		<Authors>Fernando Cerqueira</Authors>
-		<Description>he generic ring buffer with auto-scaler (elastic buffer).</Description>
+		<Owners>Fernando Cerqueira</Owners>
+		<Title>The generic ring buffer with auto-scaler (elastic buffer).</Title>
+		<Description>RingBufferPlus is an MIT-licensed open source library that implements a generic autoscaler ring buffer (elastic buffer).</Description>
 		<PackageReleaseNotes>https://github.com/FRACerqueira/RingBufferPlus/releases</PackageReleaseNotes>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageTags>csharp;dotnet;dotnetcore;ringbuffer;ring-buffer;circular-buffer;rabittmq;cyclic-buffer;elastic-buffer</PackageTags>
 		<RepositoryUrl>https://github.com/FRACerqueira/RingBufferPlus</RepositoryUrl>
+		<IncludeSymbols>True</IncludeSymbols>
+		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<RepositoryType>git</RepositoryType>
 		<PackageId>RingBufferPlus</PackageId>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
-		<PackageProjectUrl>https://fracerqueira.github.io/RingBufferPlus</PackageProjectUrl>
 		<PackageIcon>icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
 		<Copyright>© 2022 - Fernando Cerqueira </Copyright>
