@@ -42,8 +42,10 @@ Features
 
 What's new in the latest version 
 ================================
+- v4.0.1 (latest version)
+    -  Added support for .Net10
 
-- v4.0.0 (latest version)
+- v4.0.0
     - Added support for .Net9, maintained support.Net8 
     - Removed support for .Net6, .Net7 and netstandard2.1
     - Some properties and commands have been refactored for readability or syntax errors. (Break changes)
