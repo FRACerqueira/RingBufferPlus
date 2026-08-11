@@ -73,6 +73,8 @@ Chosen option: "Keep multi-targeting net8.0/net9.0/net10.0 on the library and ch
 
 With the mandate for a complete product overhaul for v5.0.0 (sweeping breaking changes authorized), this decision was re-examined and **reaffirmed without change**: net8.0/net9.0/net10.0 remain supported in v5. The `#if NET9_0_OR_GREATER` currently present in `RingBufferManager.cs` (swapping `System.Threading.Lock` for `object` as the lock primitive) would, in theory, motivate dropping net8.0 if the Channel-based rewrite ([ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)) made that `#if` unnecessary and depended on other net9+-only APIs. That possibility was evaluated, and the maintainer explicitly chose to keep all three TFMs regardless of the rewrite's technical outcome — a market-reach decision, not a technical-feasibility one.
 
+**Outcome (Phase 2, 2026-08-11):** the Channel-based rewrite ([ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)) removed the `#if NET9_0_OR_GREATER` / `System.Threading.Lock` conditional entirely — the new single-consumer engine design needs no lock primitive at all, on any TFM. This confirms, rather than changes, the decision above: net8.0/net9.0/net10.0 all build and pass the full test suite identically, so keeping all three TFMs remains a pure market-reach choice with no remaining technical asymmetry between them.
+
 ## Links
 
 * Related: [ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md) — the most critical TFM-conditional code today is precisely the lock primitive in `RingBufferManager.cs`; the Channel-based rewrite must keep net8.0 compatibility regardless of whether it eliminates that `#if`.
