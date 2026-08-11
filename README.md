@@ -23,7 +23,7 @@ Full version history has moved to [CHANGELOG.md](CHANGELOG.md).
 
 **v4.0.1 (latest released version)** added .NET 10 support.
 
-**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [Action Plan](doc/action-plan.md), the [ADRs](doc/adr), and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is planned) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
+**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [Action Plan](doc/action-plan.md), the [ADRs](doc/adr/indexadrs.md), and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is planned) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
 
 ## Installing
 
@@ -68,7 +68,6 @@ For elastic (scaling) buffers, dependency injection, RabbitMQ channel pooling, a
 - [RabbitMQ channel pooling](doc/guides/usage-rabbitmq.md)
 - [ASP.NET Core / generic host dependency injection](doc/guides/usage-dependency-injection.md)
 - [Observability (metrics and tracing)](doc/guides/usage-observability.md)
-- [Architecture overview](doc/architecture/overview.md) — for contributors: components and where things live.
 
 ## Examples
 
@@ -80,9 +79,9 @@ For runnable samples, see the [Samples directory](./samples):
 - [RingBufferPlusBasicTriggerScale](./samples/RingBufferPlusBasicTriggerScale) — elastic capacity with autoscale on acquire fault.
 - [RingBufferPlusRabbitSample](./samples/RingBufferPlusRabbitSample) — RabbitMQ channel pooling with autoscale.
 
-## Documentation
+## API Reference
 
-API reference is available in the [Docs directory](./src/docs/docindex.md).
+Generated per-type/per-member reference: [src/docs/docindex.md](./src/docs/docindex.md).
 
 ## Code of Conduct
 
@@ -91,7 +90,11 @@ For more information see the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## Contributing
 
-See the [Contributing guide](CONTRIBUTING.md) for developer documentation.
+See the [Contributing guide](CONTRIBUTING.md) for developer documentation, and the [Architecture overview](doc/architecture/overview.md) for a map of the main components before you dive into the source.
+
+## Security
+
+To report a (suspected) security vulnerability, see [SECURITY.md](SECURITY.md).
 
 ## Credits
 

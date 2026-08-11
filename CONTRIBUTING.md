@@ -40,11 +40,11 @@ What is generally considered trivial:
 ### Code style
 
 Normal .NET coding guidelines apply.
-See the [Framework Design Guidelines](https://msdn.microsoft.com/en-us/library/ms229042%28v=vs.110%29.aspx) for more information.
+See the [.NET Framework Design Guidelines](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/) for more information.
 
 ### Dependencies
 
-The assembly `RingBufferPlus` should have no dependencies except the .NET BCL library.
+The `RingBufferPlus` assembly keeps its dependency footprint minimal: today it references only `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.Hosting.Abstractions` (both lightweight, dependency-free abstraction packages) plus the .NET BCL. Don't add a dependency on a concrete implementation package (e.g. a specific logging provider, a specific DI container) — abstractions only, and only when the alternative is reimplementing something the BCL already gives every consumer for free.
 
 ### Unit tests
 
@@ -69,7 +69,7 @@ If your contribution removes or changes the behavior of a public symbol, call th
    you talk about a feature you would like to see (or a bug), and why it should be in RingBufferPlus.
    * If approved through the GitHub discussions, ensure an accompanying GitHub issue is created with
      information and a link back to the discussion.
-  * Once you get a nod from someone in the PrompPLus Team, you can start on the feature.
+  * Once you get a nod from someone in the RingBufferPlus Team, you can start on the feature.
   * Alternatively, if a feature is on the issues list with the
    [Up For Grabs](https://github.com/FRACerqueira/RingBufferPlus/labels/up-for-grabs) label,
    it is open for a community member (contributor) to patch. You should comment that you are signing up for it on

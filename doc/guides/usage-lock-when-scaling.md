@@ -11,6 +11,8 @@ By default, `SwitchToAsync` returns as soon as the scale operation it triggered 
 ## Minimal example
 
 ```csharp
+Random rnd = new();
+
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))

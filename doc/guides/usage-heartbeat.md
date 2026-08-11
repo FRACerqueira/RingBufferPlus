@@ -9,6 +9,8 @@ You want to periodically inspect a live item from the pool — e.g. a health che
 ## Minimal example
 
 ```csharp
+Random rnd = new();
+
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))

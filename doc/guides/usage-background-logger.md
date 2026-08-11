@@ -9,6 +9,8 @@ By default, every log call (`Logger`) and error report (`OnError`) executes sync
 ## Minimal example
 
 ```csharp
+Random rnd = new();
+
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .BackgroundLogger()

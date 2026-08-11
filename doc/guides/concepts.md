@@ -4,6 +4,8 @@
 
 This guide gives you the mental model to read before touching the API reference or the usage guides. It answers: what is a ring buffer here, what do `Capacity`/`MinCapacity`/`MaxCapacity` mean, how does an instance move through its lifecycle, and when should you *not* reach for this library.
 
+> **Reading the code samples in every guide:** they're deliberately minimal, not complete programs. `logger` (an `ILogger?`) and `cancellation` (a `CancellationToken`) appear without being declared — assume they already exist from your own composition root, e.g. `ILoggerFactory.CreateLogger<T>()` and `IHostApplicationLifetime.ApplicationStopping`, the same way the [dependency injection guide](usage-dependency-injection.md) gets them. Pass `null`/`CancellationToken.None` if you're just trying a snippet out with nothing wired up yet — both are optional in practice (`Logger(null)` disables logging; a default token never cancels).
+
 - [What RingBufferPlus is](#what-ringbufferplus-is)
 - [Capacity, MinCapacity, MaxCapacity](#capacity-mincapacity-maxcapacity)
 - [Lifecycle](#lifecycle)
@@ -19,7 +21,7 @@ Every instance is built once via the `Factory` you supply, and each build is exa
 
 ## Capacity, MinCapacity, MaxCapacity
 
-These three numbers only exist for an elastic buffer ([`ElasticCapacity`](../../src/RingBufferPlus/Commands/IRingBufferBuilder.cs)). A fixed buffer ([`FixedCapacity`](../../src/RingBufferPlus/Commands/IRingBufferBuilder.cs)) has exactly one capacity value and never scales.
+These three numbers only exist for an elastic buffer ([`ElasticCapacity`](usage-elastic-manual-scale.md)). A fixed buffer ([`FixedCapacity`](usage-fixed-capacity.md)) has exactly one capacity value and never scales.
 
 | Property | Meaning |
 |---|---|
