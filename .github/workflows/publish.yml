@@ -5,14 +5,9 @@ on:
     tags: [ v* ]
 
 jobs:
-  # Phase 5, item 5.1: publish now depends on build.yml succeeding on this exact commit,
-  # instead of running independently. Calling it as a reusable workflow (rather than
-  # duplicating its steps here) means it can never drift out of sync with the real gate.
-  build:
-    uses: ./.github/workflows/build.yml
-
   # Phase 5, item 5.2: reject a tag that doesn't match vMAJOR.MINOR.PATCH before anything
-  # is packed or pushed - no pre-release/build-metadata suffixes, matching ADR004's policy.
+  # else runs - no pre-release/build-metadata suffixes, matching ADR004's policy. This gates
+  # `build` below so a malformed tag fails fast instead of burning the full test matrix first.
   validate-tag:
     runs-on: ubuntu-latest
     steps:
@@ -24,8 +19,15 @@ jobs:
           exit 1
         fi
 
+  # Phase 5, item 5.1: publish now depends on build.yml succeeding on this exact commit,
+  # instead of running independently. Calling it as a reusable workflow (rather than
+  # duplicating its steps here) means it can never drift out of sync with the real gate.
+  build:
+    needs: validate-tag
+    uses: ./.github/workflows/build.yml
+
   publish:
-    needs: [build, validate-tag]
+    needs: build
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v5
