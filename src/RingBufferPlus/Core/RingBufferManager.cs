@@ -1,53 +1,55 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 
-using System.Collections.Concurrent;
+// Design note (ADR001/ADR005): all mutable scale state (_currentCapacity, fault counters,
+// samples) is owned exclusively by the single consumer loop (RunEngineAsync). No other thread
+// ever mutates it, so no lock/semaphore is needed for correctness. Callers only ever post
+// commands into an unbounded Channel<EngineCommand> and, optionally, await a completion signal.
+//
+// Two deliberate simplifications versus v4, both authorized by ADR006 (no compatibility
+// obligation) and consistent with ADR001's "correctness by construction over blocking dances":
+//  - AcquireAsync never blocks waiting for an in-flight scale operation. It always reads
+//    directly from the available-items channel (which blocks only until an item exists),
+//    regardless of LockWhenScaling. LockWhenScaling now controls exactly one thing: whether
+//    SwitchToAsync's caller awaits the scale operation's completion before returning.
+//  - AcquireDelayAttempts is removed: a Channel-based read has no polling loop to pace.
+//  - Warmup runs at most once per instance (Lazy<Task>, ExecutionAndPublication) and caches a
+//    failure: an instance whose warmup throws is permanently broken by design; construct a new
+//    instance to retry (v4's retry path was itself broken: a failed Startup() left
+//    _WarmupRunning stuck true forever).
+
 using System.Diagnostics;
+using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
 namespace RingBufferPlus.Core
 {
-    internal sealed class RingBufferManager<T>(CancellationToken lifetimecancellation) : IRingBufferService<T>, IDisposable
+    internal sealed class RingBufferManager<T> : IRingBufferManualScaleService<T>
     {
-
         #region fields
 
-        private readonly CancellationTokenSource _managertoken = CancellationTokenSource.CreateLinkedTokenSource(lifetimecancellation);
-        private readonly ConcurrentQueue<T> _availableBuffer = [];
-        private readonly SemaphoreSlim _semaphoreBuffer = new(1, 1);
-        private readonly BlockingCollection<LogMessageBackground> _blockLogger = [];
-        private readonly BlockingCollection<ScaleParameters> _blockScale = [];
-#if NET9_0_OR_GREATER
-        private readonly Lock _lock = new();
-#else
-        private readonly object _lock = new();
-#endif
+        private readonly CancellationTokenSource _lifetime;
+        private readonly Channel<T> _availableItems = Channel.CreateUnbounded<T>();
+        private readonly Channel<EngineCommand> _commands = Channel.CreateUnbounded<EngineCommand>();
+        private readonly Channel<LogMessageBackground> _logQueue = Channel.CreateUnbounded<LogMessageBackground>();
+        private readonly Lazy<Task> _warmup;
+        private readonly Task _engineTask;
+        private readonly List<int> _samples = [];
+
+        private Task? _heartbeatTask;
+        private Task? _sampleTickTask;
+        private Task? _loggerTask;
 
         private bool _disposed;
-        private bool _WarmupDone;
-        private bool _WarmupRunning;
-        private bool _autoscaleRunning;
-
-        private Task? _taskbufferHeartBeat;
-        private Task? _taskbufferLogger;
-        private Task? _taskbufferautoscale;
-        private Task? _taskbufferNoLockautoscale;
-
         private int _currentCapacity;
+        private volatile bool _scaling;
+        private int _faultCount;
 
         #endregion
 
-        #region properties
-
-        private int AvailableBuffer => _availableBuffer.Count;
-
-        public bool IsMinCapacity => _currentCapacity == MinCapacity;
-
-        public bool IsMaxCapacity => _currentCapacity == MaxCapacity;
-
-        public bool IsInitCapacity => _currentCapacity == Capacity;
+        #region configuration (set by RingBufferBuilder via object initializer)
 
         public required string Name { get; init; }
 
@@ -71,985 +73,617 @@ namespace RingBufferPlus.Core
 
         public int? ScaleDownMax { get; init; }
 
-        public bool TriggerFault { get; init; }
+        public bool AutoScaleFault { get; init; }
 
         public byte NumberFault { get; init; }
 
         public TimeSpan AcquireTimeout { get; init; }
 
-        public TimeSpan AcquireDelayAttempts { get; init; }
+        public bool LockWhenScaling { get; init; }
+
+        /// <summary>
+        /// True only for elastic buffers without autoscale-on-fault. Guards the escaped-cast path:
+        /// <see cref="SwitchToAsync(ScaleSwitch)"/> is not exposed at the type level otherwise (ADR007),
+        /// but a caller that casts back to <see cref="IRingBufferManualScaleService{T}"/> must not silently no-op.
+        /// </summary>
+        public bool ManualSwitchAllowed { get; init; }
 
         public ILogger? Logger { get; init; }
 
         public bool BackgroundLogger { get; init; }
 
-        public bool LockAcquire { get; init; }
-
         public Action<ILogger?, Exception>? ErrorHandler { get; init; }
 
         public Action<RingBufferValue<T>>? BufferHeartBeat { get; init; }
 
-        public required Func<CancellationToken, Task<T?>> Factory { get; init; }
-
-        public int CurrentCapacity => _currentCapacity;
+        public required Func<CancellationToken, Task<T>> Factory { get; init; }
 
         #endregion
 
         #region IRingBufferService
 
+        public bool IsMinCapacity => CurrentCapacity == MinCapacity;
+
+        public bool IsMaxCapacity => CurrentCapacity == MaxCapacity;
+
+        public bool IsInitCapacity => CurrentCapacity == Capacity;
+
+        public int CurrentCapacity => Volatile.Read(ref _currentCapacity);
+
+        #endregion
+
+        public RingBufferManager(CancellationToken lifetimecancellation)
+        {
+            _lifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetimecancellation);
+            _warmup = new Lazy<Task>(WarmupCoreAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+            _engineTask = Task.Run(RunEngineAsync);
+        }
+
         public async ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default)
         {
-            if (!_WarmupDone)
-            {
-                LogWaring("AcquireAsync wait WarmupAsync done...");
-                await WarmupAsync(_managertoken.Token);
-            }
-            if ((cancellation.IsCancellationRequested) || _managertoken.IsCancellationRequested)
-            {
-#pragma warning disable CS8604 // Possible null reference argument.
-                return new RingBufferValue<T>(Name, TimeSpan.Zero, false, default, null);
-#pragma warning restore CS8604 // Possible null reference argument.
-            }
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            await EnsureWarmupAsync().ConfigureAwait(false);
+
             var sw = Stopwatch.StartNew();
-            if (_autoscaleRunning && LockAcquire)
+            using var timeoutCts = new CancellationTokenSource(AcquireTimeout);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _lifetime.Token, cancellation);
+            try
             {
-                LogWaring("AcquireAsync wait autoscale done...");
-                while (_autoscaleRunning)
-                {
-                    try
-                    {
-                        await Task.Delay(2, cancellation);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        //ignore
-                    }
-                }
+                var item = await _availableItems.Reader.ReadAsync(linked.Token).ConfigureAwait(false);
+                return new RingBufferValue<T>(Name, sw.Elapsed, true, item, TurnbackAsync);
             }
-            using var tokentimeoutAcquire = new CancellationTokenSource();
-            tokentimeoutAcquire.CancelAfter(AcquireTimeout);
-            using var acquiretoken = CancellationTokenSource.CreateLinkedTokenSource(tokentimeoutAcquire.Token, _managertoken.Token, cancellation);
-            var qtdfault = 0;
-            var TriggerDone = false;
-            while (!acquiretoken.IsCancellationRequested)
+            catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
-                var exist = _availableBuffer.TryDequeue(out var result);
-                if (exist)
+                if (timeoutCts.IsCancellationRequested)
                 {
-                    return new RingBufferValue<T>(Name, sw.Elapsed, true, result!, DisposeBuffer);
-                }
-                if (TriggerFault && !TriggerDone && _currentCapacity != MaxCapacity && !_autoscaleRunning)
-                {
-                    qtdfault++;
-                    if (qtdfault > NumberFault && !_autoscaleRunning)
+                    LogWarning("RingBuffer without resource");
+                    if (AutoScaleFault)
                     {
-                        TriggerDone = true;
-                        if (IsMinCapacity && !_autoscaleRunning)
-                        {
-                            try
-                            {
-                                if (LockAcquire)
-                                {
-                                    await _semaphoreBuffer.WaitAsync(cancellation);
-                                    var qtd = Capacity - _currentCapacity;
-                                    _currentCapacity = Capacity;
-                                    _semaphoreBuffer.Release();
-                                    await ScaleUpProcessAsync(new ScaleParameters(null, ScaleSwitch.MinCapacity, qtd, _managertoken.Token), true);
-                                }
-                                else
-                                {
-                                    if (!_autoscaleRunning)
-                                    {
-                                        lock(_lock)
-                                        {
-                                            if (!_blockScale.IsAddingCompleted)
-                                            {
-                                                _autoscaleRunning = true;
-                                                _blockScale.Add(new ScaleParameters(ScaleSwitch.InitCapacity, ScaleSwitch.InitCapacity, Capacity - _currentCapacity, _managertoken.Token),_managertoken.Token);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            catch (Exception)
-                            {
-                                //ingnore
-                            }
-                        }
-                        else if (IsInitCapacity && !_autoscaleRunning)
-                        {
-                            try
-                            {
-                                if (LockAcquire)
-                                {
-                                    await _semaphoreBuffer.WaitAsync(cancellation);
-                                    var qtd = MaxCapacity - _currentCapacity;
-                                    _currentCapacity = MaxCapacity;
-                                    _semaphoreBuffer.Release();
-                                    await ScaleUpProcessAsync(new ScaleParameters(null, ScaleSwitch.InitCapacity, qtd, _managertoken.Token), true);
-                                }
-                                else
-                                {
-                                    if (!_autoscaleRunning)
-                                    {
-                                        lock (_lock)
-                                        {
-                                            if (!_blockScale.IsAddingCompleted)
-                                            {
-                                                _autoscaleRunning = true;
-                                                _blockScale.Add(new ScaleParameters(ScaleSwitch.MaxCapacity, ScaleSwitch.InitCapacity, MaxCapacity - _currentCapacity, _managertoken.Token),_managertoken.Token);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            catch (OperationCanceledException)
-                            {
-                                //ingnore
-                            }
-                        }
-                        continue;
+                        _commands.Writer.TryWrite(EngineCommand.Fault());
                     }
                 }
-                try
-                {
-                    await Task.Delay(AcquireDelayAttempts, acquiretoken.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    //ignore
-                }
+                return new RingBufferValue<T>(Name, sw.Elapsed, false, default!, null);
             }
-            if (acquiretoken.IsCancellationRequested)
-            {
-                LogWaring("RingBuffer without resource");
-            }
-            else
-            {
-                LogError(new TimeoutException("Buffer acquire"));
-            }
-#pragma warning disable CS8604 // Possible null reference argument.
-            return new RingBufferValue<T>(Name, sw.Elapsed, false, default, null);
-#pragma warning restore CS8604 // Possible null reference argument.
         }
 
         public async Task<bool> SwitchToAsync(ScaleSwitch value)
         {
-            if (TriggerFault)
+            if (!ManualSwitchAllowed)
             {
-                return false;
+                throw new InvalidOperationException("Manual scale switching is not available: the buffer has a fixed capacity, or autoscale-on-fault is enabled (see ADR007).");
             }
-            if (!_WarmupDone)
-            {
-                LogWaring("SwitchToAsync wait WarmupAsync done...");
-                await WarmupAsync(_managertoken.Token);
-            }
-            if ((value == ScaleSwitch.MinCapacity && IsMinCapacity) ||
-                (value == ScaleSwitch.MaxCapacity && IsMaxCapacity) ||
-                (value == ScaleSwitch.InitCapacity && IsInitCapacity))
-            {
-                return false;
-            }
-            if (_autoscaleRunning && LockAcquire)
-            {
-                LogWaring("SwitchToAsync wait autoscalel done...");
-                while (_autoscaleRunning)
-                {
-                    try
-                    {
-                        await Task.Delay(2, _managertoken.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        //ignore
-                    }
-                }
-            }
-            ScaleSwitch origin = ScaleSwitch.InitCapacity;
-            if (IsMinCapacity)
-            {
-                origin = ScaleSwitch.MinCapacity;
-            }
-            else if (IsMaxCapacity)
-            {
-                origin = ScaleSwitch.MaxCapacity;
-            }
-
-
-            switch (value)
-            {
-                case ScaleSwitch.MinCapacity:
-                    {
-                        var qtd = _currentCapacity - MinCapacity;
-                        if (LockAcquire)
-                        {
-                            _currentCapacity = MinCapacity;
-                            await ScaleDownProcessAsync(new ScaleParameters(null, origin, qtd, _managertoken.Token));
-                            return _currentCapacity == MinCapacity;
-                        }
-                        else
-                        {
-                            if (!_autoscaleRunning)
-                            {
-                                lock (_lock)
-                                {
-                                    if (!_blockLogger.IsAddingCompleted)
-                                    {
-                                        _autoscaleRunning = true;
-                                        _blockScale.Add(new ScaleParameters(ScaleSwitch.MinCapacity, origin, qtd, _managertoken.Token));
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        }
-                    }
-                case ScaleSwitch.MaxCapacity:
-                    {
-                        var qtd = MaxCapacity - _currentCapacity;
-                        if (LockAcquire)
-                        {
-                            _currentCapacity = MaxCapacity;
-                            await ScaleUpProcessAsync(new ScaleParameters(null, origin, qtd, _managertoken.Token), true);
-                            return _currentCapacity == MaxCapacity;
-                        }
-                        else 
-                        {
-                            if (!_autoscaleRunning)
-                            {
-                                lock (_lock)
-                                {
-                                    if (!_blockLogger.IsAddingCompleted)
-                                    {
-                                        _autoscaleRunning = true;
-                                        _blockScale.Add(new ScaleParameters(ScaleSwitch.MaxCapacity, origin, qtd, _managertoken.Token),_managertoken.Token);
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        }
-                    }
-                case ScaleSwitch.InitCapacity:
-                    {
-                        var qtd = Capacity - _currentCapacity;
-                        if (LockAcquire)
-                        {
-                            _currentCapacity = Capacity;
-                            if (qtd < 0)
-                            {
-                                await ScaleDownProcessAsync(new ScaleParameters(null, origin, qtd*-1, _managertoken.Token));
-                            }
-                            else if (qtd > 0)
-                            {
-                                await ScaleUpProcessAsync(new ScaleParameters(null, origin, qtd, _managertoken.Token), true);
-                            }
-                            return _currentCapacity == Capacity;
-                        }
-                        else
-                        {
-                            if (!_autoscaleRunning)
-                            {
-                                lock (_lock)
-                                {
-                                    if (!_blockScale.IsAddingCompleted)
-                                    {
-                                        _autoscaleRunning = true;
-                                        _blockScale.Add(new ScaleParameters(ScaleSwitch.InitCapacity, origin, qtd, _managertoken.Token), _managertoken.Token);
-                                        return true;
-                                    }
-                                    return false;
-                                }
-                            }
-                            else
-                            {
-                                return false;
-                            }
-                        }
-                    }
-            }
-            return false;
-        }
-
-        public async Task WarmupAsync(CancellationToken cancellation = default)
-        {
-            if (cancellation.IsCancellationRequested)
-            {
-                return;
-            }
-            if (_WarmupDone)
-            {
-                return;
-            }
-            await Startup(cancellation);
-        }
-
-        #endregion
-
-        #region IDisposable
-
-        public void Dispose()
-        {
-            // Do not change this code. Put cleanup code in 'Dispose(bool disposing)' method
-            if (_disposed) return;
-            _disposed = true;
-            CleanupResources();
-            GC.SuppressFinalize(this);
-        }
-
-        #endregion
-
-        private async void DisposeBuffer(RingBufferValue<T> value)
-        {
-            if (value.Successful)
-            {
-                if (!value.SkipTurnback)
-                {
-                    _availableBuffer.Enqueue(value.Current!);
-                }
-                else
-                {
-                    if (value.Current is IDisposable itemdispose)
-                    {
-                        itemdispose.Dispose();
-                    }
-                    await ScaleUpProcessAsync(new ScaleParameters(null, null, 1, _managertoken.Token), true);
-                }
-            }
-        }
-
-        private void CleanupResources()
-        {
-            // Cancel the token to all tasks
-            _managertoken?.Cancel();
-
-            // wait threads end
-            if (_taskbufferHeartBeat is not null)
-            {
-                _taskbufferHeartBeat?.Wait();
-                LogMessage($"Buffer Heart Beat Thread stoped");
-            }
-
-            if (_taskbufferNoLockautoscale is not null)
-            {
-                _taskbufferNoLockautoscale?.Wait();
-                LogMessage($"Buffer no lock auto scale Thread stoped");
-            }
-
-            if (_taskbufferautoscale is not null)
-            {
-                _taskbufferautoscale?.Wait();
-                LogMessage($"Buffer auto scale Thread stoped");
-            }
-
-            if (_taskbufferLogger is not null)
-            {
-                //set to complete (erro and message null)
-                _blockLogger?.Add(new LogMessageBackground(LogLevel.Debug, null, null));
-                //wait bufer log empty : mark completed (erro and message null)
-                _taskbufferLogger?.Wait();
-            }
-
-            _blockLogger?.Dispose();
-
-            _semaphoreBuffer?.Dispose();
-
-            _managertoken?.Dispose();
-
-            //dispose all buffer items
-            while (_availableBuffer.TryDequeue(out var itembuffer))
-            {
-                if (itembuffer is IDisposable itemdispose)
-                {
-                    itemdispose.Dispose();
-                }
-            }
-            _currentCapacity = _availableBuffer.Count;
-        }
-
-        private async Task Startup(CancellationToken cancellation)
-        {
-
-            if (_WarmupDone || _WarmupRunning)
-            {
-                return;
-            }
+            ObjectDisposedException.ThrowIf(_disposed, this);
             try
             {
-                await _semaphoreBuffer.WaitAsync(cancellation);
-                _WarmupRunning = true;
+                await EnsureWarmupAsync().ConfigureAwait(false);
+
+                var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                await _commands.Writer.WriteAsync(EngineCommand.Switch(value, accepted, completion), _lifetime.Token).ConfigureAwait(false);
+
+                var wasAccepted = await accepted.Task.ConfigureAwait(false);
+                if (!wasAccepted)
+                {
+                    return false;
+                }
+                return !LockWhenScaling || await completion.Task.ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
-                return;
+                return false;
             }
-            finally
+        }
+
+        public Task WarmupAsync(CancellationToken cancellation = default)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            return _warmup.Value.WaitAsync(cancellation);
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_disposed) return;
+            _disposed = true;
+
+            await _lifetime.CancelAsync().ConfigureAwait(false);
+            _commands.Writer.TryComplete();
+            _logQueue.Writer.TryComplete();
+
+            // If a warmup was already in flight, let it unwind first (it observes cancellation
+            // and returns or throws) before snapshotting which background pumps to await -
+            // otherwise a pump task WarmupCoreAsync assigns after our snapshot would never be
+            // awaited below.
+            if (_warmup.IsValueCreated)
             {
-                _semaphoreBuffer.Release();
+                try
+                {
+                    await _warmup.Value.ConfigureAwait(false);
+                }
+                catch
+                {
+                    //ignore: disposal is in progress, warmup's own outcome no longer matters
+                }
             }
 
-            _managertoken.Token.Register(() => Dispose());
+            var pending = new List<Task> { _engineTask };
+            if (_heartbeatTask is not null) pending.Add(_heartbeatTask);
+            if (_sampleTickTask is not null) pending.Add(_sampleTickTask);
+            if (_loggerTask is not null) pending.Add(_loggerTask);
 
-            CreateTaskbufferLogger();
+            try
+            {
+                await Task.WhenAll(pending).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                //ignore: expected once _lifetime is cancelled
+            }
 
-            _currentCapacity = Capacity;
+            _availableItems.Writer.TryComplete();
+            while (_availableItems.Reader.TryRead(out var item))
+            {
+                await DisposeItemAsync(item).ConfigureAwait(false);
+            }
+
+            _lifetime.Dispose();
+        }
+
+        private Task EnsureWarmupAsync() => _warmup.Value;
+
+        private async Task WarmupCoreAsync()
+        {
+            if (!_disposed && BackgroundLogger && (Logger is not null || ErrorHandler is not null))
+            {
+                _loggerTask = Task.Run(RunLoggerAsync);
+            }
 
             LogMessage("Starting warmup process.");
 
-            await ScaleUpProcessAsync(new ScaleParameters(null, ScaleSwitch.InitCapacity, Capacity, cancellation), false);
+            bool reached;
+            try
+            {
+                var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                await _commands.Writer.WriteAsync(EngineCommand.Warmup(completion), _lifetime.Token).ConfigureAwait(false);
+                reached = await completion.Task.ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                reached = false;
+            }
 
-            if (AvailableBuffer != Capacity)
+            if (!reached)
             {
                 var err = new InvalidOperationException("RingBuffer did not reach initial capacity");
                 LogError(err);
                 throw err;
             }
-            _WarmupRunning = false;
-            _WarmupDone = true;
-            LogMessage($"End warmup process with {AvailableBuffer} buffers.");
 
-            CreateTaskbufferHeartBeat();
-            CreateTaskbufferAutoScale();
+            LogMessage($"End warmup process with {CurrentCapacity} buffers.");
+
+            if (!_disposed && BufferHeartBeat is not null)
+            {
+                _heartbeatTask = Task.Run(RunHeartbeatAsync);
+            }
+            if (!_disposed && AutoScaleFault)
+            {
+                _sampleTickTask = Task.Run(RunSampleTickAsync);
+            }
         }
 
-        private void CreateTaskbufferLogger()
+        private async ValueTask TurnbackAsync(RingBufferValue<T> value)
         {
-            if (!BackgroundLogger || (Logger is null && ErrorHandler is null))
+            if (!value.Successful) return;
+            try
+            {
+                if (!value.SkipTurnback)
+                {
+                    await _availableItems.Writer.WriteAsync(value.Current, CancellationToken.None).ConfigureAwait(false);
+                }
+                else
+                {
+                    await DisposeItemAsync(value.Current).ConfigureAwait(false);
+                    _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
+                }
+            }
+            catch (ChannelClosedException)
+            {
+                //ignore: manager disposed concurrently with turnback
+            }
+        }
+
+        #region engine loop (single consumer of _commands; sole owner of _currentCapacity)
+
+        private async Task RunEngineAsync()
+        {
+            try
+            {
+                await foreach (var cmd in _commands.Reader.ReadAllAsync(_lifetime.Token).ConfigureAwait(false))
+                {
+                    try
+                    {
+                        await ProcessCommandAsync(cmd).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        cmd.Accepted?.TrySetResult(false);
+                        cmd.Completion?.TrySetResult(false);
+                    }
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                //ignore: manager disposed
+            }
+        }
+
+        private async Task ProcessCommandAsync(EngineCommand cmd)
+        {
+            switch (cmd.Kind)
+            {
+                case EngineCommandKind.Warmup:
+                    var reached = await MoveToCapacityAsync(Capacity, hasTimeout: false, _lifetime.Token).ConfigureAwait(false);
+                    cmd.Completion?.TrySetResult(reached);
+                    break;
+
+                case EngineCommandKind.Switch:
+                    var target = ResolveTarget(cmd.Target!.Value);
+                    if (target == CurrentCapacity)
+                    {
+                        cmd.Accepted?.TrySetResult(false);
+                        cmd.Completion?.TrySetResult(false);
+                        break;
+                    }
+                    cmd.Accepted?.TrySetResult(true);
+                    var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                    cmd.Completion?.TrySetResult(moved);
+                    break;
+
+                case EngineCommandKind.Fault:
+                    _faultCount++;
+                    if (_faultCount > NumberFault && CurrentCapacity != MaxCapacity)
+                    {
+                        _faultCount = 0;
+                        var next = CurrentCapacity == MinCapacity ? Capacity : MaxCapacity;
+                        await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                    }
+                    break;
+
+                case EngineCommandKind.ReplaceOne:
+                    await CreateSingleReplacementAsync().ConfigureAwait(false);
+                    break;
+
+                case EngineCommandKind.Tick:
+                    await ProcessTickAsync().ConfigureAwait(false);
+                    break;
+            }
+        }
+
+        private async Task ProcessTickAsync()
+        {
+            if (_scaling)
+            {
+                _samples.Clear();
+                return;
+            }
+            _samples.Add(_availableItems.Reader.Count);
+            if (_samples.Count < SamplesCount)
             {
                 return;
             }
-            _taskbufferLogger = Task.Run(() =>
+            var median = ComputeMedian(_samples);
+            _samples.Clear();
+            if (IsInitCapacity && median >= ScaleDownInit)
             {
-                var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: Buffer logger Thread Created";
-                logMessageForDbg(Logger!, Name, msg, null);
-                try
-                {
-                    foreach (var item in _blockLogger.GetConsumingEnumerable())
-                    {
-                        if (!string.IsNullOrEmpty(item.Message))
-                        {
-                            if (item.LogLevel == LogLevel.Debug)
-                            {
-                                logMessageForDbg(Logger!, Name, item.Message, null);
-                            }
-                            else if (item.LogLevel == LogLevel.Warning)
-                            {
-                                logMessageFoWrn(Logger!, Name, item.Message, null);
-                            }
-                        }
-                        if (item.Error is not null)
-                        {
-                            if (ErrorHandler == null)
-                            {
-                                msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {item.Error.Message} ";
-                                logMessageForErr(Logger!, Name, msg, item.Error);
-                            }
-                            else
-                            {
-                                ErrorHandler?.Invoke(Logger, item.Error);
-                            }
-                        }
-                        if (item.Error is  null && item.Message is null)
-                        {
-                            break;
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    //ignore
-                }
-                finally
-                {
-                    msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: Buffer logger Thread stoped";
-                    logMessageForDbg(Logger!, Name, msg, null);
-                }
-            }); 
+                await MoveToCapacityAsync(MinCapacity, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+            }
+            else if (IsMaxCapacity && median > ScaleDownMax)
+            {
+                await MoveToCapacityAsync(Capacity, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+            }
         }
 
-        private void CreateTaskbufferHeartBeat()
+        private int ResolveTarget(ScaleSwitch value) => value switch
         {
-            if (BufferHeartBeat is null) return;
+            ScaleSwitch.MinCapacity => MinCapacity,
+            ScaleSwitch.MaxCapacity => MaxCapacity,
+            _ => Capacity
+        };
 
-            _taskbufferHeartBeat = Task.Run(async () =>
+        private async Task<bool> MoveToCapacityAsync(int target, bool hasTimeout, CancellationToken token)
+        {
+            var current = CurrentCapacity;
+            if (target == current) return true;
+
+            _scaling = true;
+            try
             {
-                LogMessage($"Buffer Heart Beat Thread Created");
-                //wait Warmup
-                if (!_managertoken.IsCancellationRequested && !_WarmupDone)
+                if (target > current)
                 {
-                    LogMessage($"Heart Beat Thread Wait Warmup done");
-                    while (!_managertoken.IsCancellationRequested && !_WarmupDone)
+                    var quantity = target - current;
+                    LogMessage($"Starting ScaleUp {quantity}.");
+                    var created = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    LogMessage("End ScaleUp.");
+                    if (created != quantity) return false;
+                    Volatile.Write(ref _currentCapacity, target);
+                    return true;
+                }
+                else
+                {
+                    var quantity = current - target;
+                    LogMessage($"Starting ScaleDown {quantity}.");
+                    var removed = await RemoveItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    LogMessage("End ScaleDown.");
+                    if (removed != quantity) return false;
+                    Volatile.Write(ref _currentCapacity, target);
+                    return true;
+                }
+            }
+            finally
+            {
+                _scaling = false;
+            }
+        }
+
+        private async Task<int> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
+        {
+            var created = new List<T>(quantity);
+            using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
+            if (hasTimeout) overall.CancelAfter(SamplesBase);
+            try
+            {
+                while (created.Count < quantity)
+                {
+                    using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
+                    factoryTimeout.CancelAfter(FactoryTimeout);
+                    try
                     {
-                        _managertoken.Token.WaitHandle.WaitOne(5);
+                        var item = await Factory(overall.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
+                        created.Add(item);
+                    }
+                    catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested && !overall.IsCancellationRequested)
+                    {
+                        LogError(new TimeoutException("Timeout factory"));
+                        throw;
                     }
                 }
-                var skippulse = false;
-                while (!_managertoken.IsCancellationRequested)
+                foreach (var item in created)
                 {
-                    if (!skippulse)
+                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                }
+                return created.Count;
+            }
+            catch (OperationCanceledException)
+            {
+                LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity}."));
+                foreach (var item in created)
+                {
+                    await DisposeItemAsync(item).ConfigureAwait(false);
+                }
+                return 0;
+            }
+        }
+
+        private async Task<int> RemoveItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
+        {
+            var removed = new List<T>(quantity);
+            using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
+            if (hasTimeout) overall.CancelAfter(SamplesBase);
+            try
+            {
+                while (removed.Count < quantity)
+                {
+                    var item = await _availableItems.Reader.ReadAsync(overall.Token).ConfigureAwait(false);
+                    removed.Add(item);
+                }
+                foreach (var item in removed)
+                {
+                    await DisposeItemAsync(item).ConfigureAwait(false);
+                }
+                return removed.Count;
+            }
+            catch (OperationCanceledException)
+            {
+                LogError(new TimeoutException($"Timeout ScaleDown {removed.Count}/{quantity}."));
+                foreach (var item in removed)
+                {
+                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                }
+                return 0;
+            }
+        }
+
+        private async Task CreateSingleReplacementAsync()
+        {
+            using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+            factoryTimeout.CancelAfter(FactoryTimeout);
+            try
+            {
+                var item = await Factory(_lifetime.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
+                await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                LogError(new TimeoutException("Timeout factory (replacement)"));
+            }
+        }
+
+        private static async ValueTask DisposeItemAsync(T item)
+        {
+            if (item is IAsyncDisposable asyncDisposable)
+            {
+                await asyncDisposable.DisposeAsync().ConfigureAwait(false);
+            }
+            else if (item is IDisposable disposable)
+            {
+                disposable.Dispose();
+            }
+        }
+
+        private static double ComputeMedian(List<int> samples)
+        {
+            var sorted = samples.OrderBy(x => x).ToArray();
+            if (sorted.Length % 2 == 0)
+            {
+                var pos = sorted.Length / 2;
+                return (sorted[pos - 1] + sorted[pos]) / 2.0;
+            }
+            var mid = (sorted.Length + 1) / 2;
+            return sorted[mid - 1];
+        }
+
+        #endregion
+
+        #region background pumps
+
+        private async Task RunHeartbeatAsync()
+        {
+            try
+            {
+                while (!_lifetime.IsCancellationRequested)
+                {
+                    try
                     {
-                        try
+                        await Task.Delay(PulseHeartBeat, _lifetime.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
+                    }
+
+                    LogMessage("Started Heart Beat item");
+                    var acquired = await AcquireAsync(_lifetime.Token).ConfigureAwait(false);
+                    await using (acquired)
+                    {
+                        if (!acquired.Successful)
                         {
-                            await Task.Delay(PulseHeartBeat, _managertoken.Token);
-                        }
-                        catch (OperationCanceledException)
-                        {
+                            LogMessage("Heart Beat item not available");
                             continue;
                         }
-                    }
-                    LogMessage("Started Heart Beat item");
-                    skippulse = false;
-                    using var taskAcquire = await AcquireAsync(_managertoken.Token);
-                    var sw = new Stopwatch();
-                    if (taskAcquire.Successful)
-                    {
-                        using var tokentimeoutPulseHeartBeat = new CancellationTokenSource();
-                        tokentimeoutPulseHeartBeat.CancelAfter(PulseHeartBeat);
+                        using var pulseTimeout = new CancellationTokenSource(PulseHeartBeat);
                         try
                         {
-                            var taskaux = Task.Run(() =>
-                            {
-                                BufferHeartBeat?.Invoke(taskAcquire);
-                            }, tokentimeoutPulseHeartBeat.Token);
-                            await taskaux;
+                            await Task.Run(() => BufferHeartBeat?.Invoke(acquired), pulseTimeout.Token).ConfigureAwait(false);
                         }
                         catch (OperationCanceledException)
                         {
-                            var err = new TimeoutException("Timeout Heart Beat");
-                            LogError(err);
-                            skippulse = true;
+                            LogError(new TimeoutException("Timeout Heart Beat"));
                         }
                         catch (Exception ex)
                         {
                             LogError(ex);
                         }
                     }
-                    else
-                    {
-                        LogMessage("Heart Beat item not available");
-                    }
-                    LogMessage($"Stoped Heart Beat item after {sw.Elapsed}");
+                    LogMessage("Stopped Heart Beat item");
                 }
-            });
+            }
+            catch (OperationCanceledException)
+            {
+                //ignore: manager disposed
+            }
         }
 
-        private void CreateTaskbufferAutoScale()
+        private async Task RunSampleTickAsync()
         {
-            if (!LockAcquire)
+            try
             {
-                CreateTaskbufferNoLockAutoScale();
-            }
-
-            if (!TriggerFault)
-            {
-                return;
-            }
-
-            _taskbufferautoscale = Task.Run(async () =>
-            {
-                LogMessage($"Buffer auto scale Thread Created");
-                //wait Warmup
-                if (!_managertoken.IsCancellationRequested && !_WarmupDone)
-                {
-                    LogMessage($"Auto scale Thread Wait Warmup done");
-                    while (!_managertoken.IsCancellationRequested && !_WarmupDone)
-                    {
-                        _managertoken.Token.WaitHandle.WaitOne(5);
-                    }
-                }
-                LogMessage($"Auto scale Thread Wait initial {SamplesBase}");
-                try
-                {
-                    await Task.Delay(SamplesBase, _managertoken.Token);
-                }
-                catch (OperationCanceledException)
-                {
-                    //ingnore
-                }
-                var metricBuffer = new List<int>();
+                await Task.Delay(SamplesBase, _lifetime.Token).ConfigureAwait(false);
                 var delay = TimeSpan.FromMilliseconds(SamplesBase.TotalMilliseconds / SamplesCount);
-                while (!_managertoken.IsCancellationRequested)
+                while (!_lifetime.IsCancellationRequested)
                 {
-                    if (!_autoscaleRunning)
-                    {
-                        metricBuffer.Add(AvailableBuffer);
-                    }
-                    if (!_autoscaleRunning && metricBuffer.Count >= SamplesCount)
-                    {
-                        var tmp = metricBuffer.OrderBy(x => x).ToArray();
-                        double median = 0;
-                        if (tmp.Length % 2 == 0)
-                        {
-                            var pos = tmp.Length / 2;
-                            median = (tmp[pos - 1] + tmp[pos]) / 2.0;
-                        }
-                        else
-                        {
-                            var pos = (tmp.Length + 1) / 2;
-                            median = tmp[pos - 1];
-                        }
-                        metricBuffer.Clear();
-                        var medianint = Convert.ToInt32(Math.Ceiling(median));
-                        if (!_autoscaleRunning && IsInitCapacity && medianint >= ScaleDownInit)
-                        {
-                            await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                            var qtd = _currentCapacity - MinCapacity;
-                            _currentCapacity = MinCapacity;
-                            _semaphoreBuffer.Release();
-                            await ScaleDownProcessAsync(new ScaleParameters(null, ScaleSwitch.InitCapacity, qtd, _managertoken.Token));
-                        }
-                        else if (!_autoscaleRunning && IsMaxCapacity && medianint > ScaleDownMax)
-                        {
-                            await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                            var qtd = _currentCapacity - Capacity;
-                            _currentCapacity = Capacity;
-                            _semaphoreBuffer.Release();
-                            await ScaleDownProcessAsync(new ScaleParameters(null, ScaleSwitch.MaxCapacity, qtd, _managertoken.Token));
-                        }
-                    }
-                    try
-                    {
-                        if (_autoscaleRunning && metricBuffer.Count > 0)
-                        {
-                            metricBuffer.Clear();
-                        }
-                        await Task.Delay(delay, _managertoken.Token);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        //ingnore
-                    }
+                    _commands.Writer.TryWrite(EngineCommand.Tick());
+                    await Task.Delay(delay, _lifetime.Token).ConfigureAwait(false);
                 }
-            });
-        }
-
-        private void CreateTaskbufferNoLockAutoScale()
-        {
-            _taskbufferNoLockautoscale = Task.Run(async () =>
-            {
-                LogMessage($"Buffer no lock auto scale Thread Created");
-                //wait Warmup
-                if (!_managertoken.IsCancellationRequested && !_WarmupDone)
-                {
-                    LogMessage($"Auto scale Thread Wait Warmup done");
-                    while (!_managertoken.IsCancellationRequested && !_WarmupDone)
-                    {
-                        _managertoken.Token.WaitHandle.WaitOne(5);
-                    }
-                }
-                try
-                {
-                    foreach (var item in _blockScale.GetConsumingEnumerable(_managertoken.Token))
-                    {
-                        switch (item.Scale)
-                        {
-                            case null:
-
-                            case ScaleSwitch.MinCapacity when !IsMinCapacity:
-                                await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                                _currentCapacity = MinCapacity;
-                                _semaphoreBuffer.Release();
-                                await ScaleDownProcessAsync(new ScaleParameters(null, item.Origin, item.Quantity, item.Token));
-                                break;
-                            case ScaleSwitch.MaxCapacity when !IsMaxCapacity:
-                                await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                                _currentCapacity = MaxCapacity;
-                                _semaphoreBuffer.Release();
-                                await ScaleUpProcessAsync(new ScaleParameters(null, item.Origin, item.Quantity, item.Token), true);
-                                break;
-                            case ScaleSwitch.InitCapacity when !IsInitCapacity:
-                                if (item.Quantity < 0)
-                                {
-                                    await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                                    _currentCapacity = Capacity;
-                                    _semaphoreBuffer.Release();
-                                    await ScaleDownProcessAsync(new ScaleParameters(null, item.Origin, item.Quantity, item.Token));
-                                }
-                                else
-                                {
-                                    await _semaphoreBuffer.WaitAsync(_managertoken.Token);
-                                    _currentCapacity = Capacity;
-                                    _semaphoreBuffer.Release();
-                                    await ScaleUpProcessAsync(new ScaleParameters(null, item.Origin, item.Quantity, item.Token), true);
-                                }
-                                break;
-                        }
-                    }
-                }
-                catch (OperationCanceledException)
-                {
-                    //ignore
-                }
-                finally
-                {
-                    //clear buffer scale
-                    while (_blockScale.TryTake(out _)) { };
-                }
-            });
-        }
-
-        private async Task ScaleUpProcessAsync(ScaleParameters item, bool hastimeout)
-        {
-            if (item.Quantity == 0)
-            {
-                _autoscaleRunning = false;
-                return;
-            }
-
-            var localbuffer = new List<T>();
-            var qtd = 0;
-            try
-            {
-                await _semaphoreBuffer.WaitAsync(item.Token);
-                _autoscaleRunning = true;
-                LogMessage($"Starting ScaleUp {item.Quantity}.");
-                using var tokenScaleUp = CancellationTokenSource.CreateLinkedTokenSource(item.Token);
-                if (hastimeout)
-                {
-                    tokenScaleUp.CancelAfter(SamplesBase);
-                }
-
-                while (qtd < item.Quantity && !tokenScaleUp.IsCancellationRequested)
-                {
-                    using var tokentimeoutfactory = CancellationTokenSource.CreateLinkedTokenSource(tokenScaleUp.Token);
-                    tokentimeoutfactory.CancelAfter(FactoryTimeout);
-                    try
-                    {
-                        while (!tokentimeoutfactory.IsCancellationRequested)
-                        {
-                            var newitem = await Factory(tokenScaleUp.Token);
-                            if (newitem is not null && !tokenScaleUp.IsCancellationRequested)
-                            {
-                                localbuffer.Add(newitem);
-                                qtd++;
-                                break;
-                            }
-                            else
-                            {
-                                if (newitem is not null && newitem is IDisposable itemdispose)
-                                {
-                                    itemdispose?.Dispose();
-                                }
-                            }
-                        }
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        if (tokentimeoutfactory.IsCancellationRequested)
-                        {
-                            var err = new TimeoutException("Timeout factory");
-                            LogError(err);
-                        }
-                        if (tokenScaleUp.IsCancellationRequested)
-                        {
-                            foreach (var itemtoadd in localbuffer)
-                            {
-                                if (itemtoadd is IDisposable itemdispose)
-                                {
-                                    itemdispose?.Dispose();
-                                }
-                            }
-                            var err = new TimeoutException($"Timeout ScaleUp {qtd}/{item.Quantity}.");
-                            LogError(err);
-                            if (qtd < item.Quantity && qtd != 0)
-                            {
-                                switch (item.Origin)
-                                {
-                                    case ScaleSwitch.MinCapacity:
-                                        _currentCapacity = MinCapacity;
-                                        break;
-                                    case ScaleSwitch.MaxCapacity:
-                                        _currentCapacity = MaxCapacity;
-                                        break;
-                                    case ScaleSwitch.InitCapacity:
-                                        _currentCapacity = Capacity;
-                                        break;
-                                }
-                            }
-                        }
-                        localbuffer.Clear();
-                        return;
-                    }
-                }
-                foreach (var itemtoadd in localbuffer)
-                {
-                    _availableBuffer.Enqueue(itemtoadd);
-                }
-                localbuffer.Clear();
             }
             catch (OperationCanceledException)
             {
-                localbuffer.Clear();
-                return;
-            }
-            finally
-            {
-                _autoscaleRunning = false;
-                _semaphoreBuffer.Release();
-                LogMessage("End ScaleUp.");
+                //ignore: manager disposed
             }
         }
 
-        private async Task ScaleDownProcessAsync(ScaleParameters item)
+        private async Task RunLoggerAsync()
         {
-            if (item.Quantity == 0)
-            {
-                _autoscaleRunning = false;
-                return;
-            }
-            using var tokenScaleDown = CancellationTokenSource.CreateLinkedTokenSource(item.Token);
-            tokenScaleDown.CancelAfter(SamplesBase);
-            var qtd = 0;
-            var removeBufferItem = new List<T>();
             try
             {
-                await _semaphoreBuffer.WaitAsync(item.Token);
-                _autoscaleRunning = true;
-                LogMessage($"Starting ScaleDown {item.Quantity}.");
-                try
+                await foreach (var item in _logQueue.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
                 {
-                    while (qtd < item.Quantity && !tokenScaleDown.IsCancellationRequested)
+                    if (!string.IsNullOrEmpty(item.Message))
                     {
-                        if (_availableBuffer.TryDequeue(out var itembuffer))
+                        if (item.LogLevel == LogLevel.Debug)
                         {
-                            removeBufferItem.Add(itembuffer);
-                            qtd++;
+                            logMessageForDbg(Logger!, Name, item.Message, null);
+                        }
+                        else if (item.LogLevel == LogLevel.Warning)
+                        {
+                            logMessageFoWrn(Logger!, Name, item.Message, null);
+                        }
+                    }
+                    if (item.Error is not null)
+                    {
+                        if (ErrorHandler is null)
+                        {
+                            var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {item.Error.Message} ";
+                            logMessageForErr(Logger!, Name, msg, item.Error);
                         }
                         else
                         {
-                            await Task.Delay(2, tokenScaleDown.Token);
+                            ErrorHandler.Invoke(Logger, item.Error);
                         }
                     }
-                    foreach (var itemdtoispose in removeBufferItem)
-                    {
-                        if (itemdtoispose is IDisposable itemdispose)
-                        {
-                            itemdispose.Dispose();
-                        }
-                    }
-                    removeBufferItem.Clear();
                 }
-                catch (OperationCanceledException)
-                {
-                    if (!_managertoken.Token.IsCancellationRequested)
-                    {
-                        var err = new TimeoutException($"Timeout ScaleDown {qtd}/{item.Quantity}.");
-                        LogError(err);
-                    }
-                    foreach (var itemtoadd in removeBufferItem)
-                    {
-                        _availableBuffer.Enqueue(itemtoadd);
-                    }
-                    if (qtd < item.Quantity && qtd != 0)
-                    {
-                        switch (item.Origin)
-                        {
-                            case ScaleSwitch.MaxCapacity:
-                                _currentCapacity = MaxCapacity;
-                                break;
-                            case ScaleSwitch.InitCapacity:
-                                _currentCapacity = Capacity;
-                                break;
-                        }
-                    }
-                    removeBufferItem.Clear();
-                    return;
-                }
-
             }
             catch (OperationCanceledException)
             {
-                removeBufferItem.Clear();
-                return;
-            }
-            finally
-            {
-                _autoscaleRunning = false;
-                _semaphoreBuffer.Release();
-                LogMessage($"End ScaleDown.");
+                //ignore
             }
         }
+
+        #endregion
+
+        #region logging
 
         private void LogMessage(string message)
         {
+            if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            try
+            if (BackgroundLogger)
             {
-                if (Logger is null || string.IsNullOrEmpty(msg)) return;
-
-                if (BackgroundLogger)
-                {
-                    _blockLogger.Add(new LogMessageBackground(LogLevel.Debug,msg, null));
-                }
-                else
-                {
-                    logMessageForDbg(Logger!, Name, msg, null);
-                }
-
+                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Debug, msg, null));
             }
-            catch (ObjectDisposedException)
+            else
             {
-                //ingnore
+                logMessageForDbg(Logger, Name, msg, null);
             }
         }
 
-        private void LogWaring(string message)
+        private void LogWarning(string message)
         {
+            if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            try
+            if (BackgroundLogger)
             {
-                if (Logger is null || string.IsNullOrEmpty(msg)) return;
-
-                if (BackgroundLogger)
-                {
-                    _blockLogger.Add(new LogMessageBackground(LogLevel.Warning, msg, null));
-                }
-                else
-                {
-                    logMessageFoWrn(Logger!, Name, msg, null);
-                }
+                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Warning, msg, null));
             }
-            catch (ObjectDisposedException)
+            else
             {
-                //ignore
+                logMessageFoWrn(Logger, Name, msg, null);
             }
         }
 
         private void LogError(Exception error)
         {
-            var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {error.Message} ";
-
-            try
+            if (Logger is null && ErrorHandler is null) return;
+            if (BackgroundLogger)
             {
-                if (Logger is null && ErrorHandler is null) return;
-
-                if (BackgroundLogger)
-                {
-                    _blockLogger.Add(new LogMessageBackground(LogLevel.Error, null, error));
-                }
-                else
-                {
-                    if (ErrorHandler == null)
-                    {
-                        logMessageForErr(Logger!, Name, msg, error);
-                    }
-                    else
-                    {
-                        ErrorHandler?.Invoke(Logger, error);
-                    }
-                }
+                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Error, null, error));
             }
-            catch (ObjectDisposedException)
+            else if (ErrorHandler is null)
             {
-                //ignore
+                var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {error.Message} ";
+                logMessageForErr(Logger!, Name, msg, error);
+            }
+            else
+            {
+                ErrorHandler.Invoke(Logger, error);
             }
         }
 
@@ -1057,6 +691,28 @@ namespace RingBufferPlus.Core
         private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferManager({source}) : {message}");
         private static readonly Action<ILogger, string, string, Exception?> logMessageFoWrn = LoggerMessage.Define<string, string>(LogLevel.Warning, 0, "RingBufferManager({source}) : {message}");
 
+        #endregion
+
+        private enum EngineCommandKind { Warmup, Switch, Fault, ReplaceOne, Tick }
+
+        private sealed record EngineCommand
+        {
+            public required EngineCommandKind Kind { get; init; }
+            public ScaleSwitch? Target { get; init; }
+            public TaskCompletionSource<bool>? Accepted { get; init; }
+            public TaskCompletionSource<bool>? Completion { get; init; }
+
+            public static EngineCommand Warmup(TaskCompletionSource<bool> completion) =>
+                new() { Kind = EngineCommandKind.Warmup, Completion = completion };
+
+            public static EngineCommand Switch(ScaleSwitch target, TaskCompletionSource<bool> accepted, TaskCompletionSource<bool> completion) =>
+                new() { Kind = EngineCommandKind.Switch, Target = target, Accepted = accepted, Completion = completion };
+
+            public static EngineCommand Fault() => new() { Kind = EngineCommandKind.Fault };
+
+            public static EngineCommand ReplaceOne() => new() { Kind = EngineCommandKind.ReplaceOne };
+
+            public static EngineCommand Tick() => new() { Kind = EngineCommandKind.Tick };
+        }
     }
 }
-

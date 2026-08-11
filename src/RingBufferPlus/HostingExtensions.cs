@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -21,55 +21,57 @@ namespace Microsoft.Extensions.DependencyInjection
         /// Add RingBuffer in ServiceCollection.
         /// </summary>
         /// <typeparam name="T">Type of buffer.</typeparam>
-        /// <param name="ServiceCollection">The <see cref="IServiceCollection"/>.</param>
+        /// <param name="serviceCollection">The <see cref="IServiceCollection"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="userfunc">The Handler to return the <see cref="IRingBufferService{T}"/>.</param>
         /// <returns><see cref="IServiceCollection"/>.</returns>
         /// <exception cref="ArgumentNullException">Buffer name null or empty</exception>
-
-        public static IServiceCollection AddRingBuffer<T>(this IServiceCollection ServiceCollection, string buffername, Func<IRingBuffer<T>,  IServiceProvider, IRingBufferService<T>> userfunc)
+        public static IServiceCollection AddRingBuffer<T>(this IServiceCollection serviceCollection, string buffername, Func<IRingBufferBuilder<T>, IServiceProvider, IRingBufferService<T>> userfunc)
         {
             ArgumentNullException.ThrowIfNull(buffername);
 
-            ServiceCollection.AddSingleton((service) =>
+            serviceCollection.AddSingleton((service) =>
             {
                 var loggerFactory = service.GetService<ILoggerFactory>();
                 return userfunc.Invoke(new RingBufferBuilder<T>(buffername, loggerFactory), service);
             });
-            return ServiceCollection;
+            return serviceCollection;
         }
 
         /// <summary>
-        /// Warms up with full capacity ready or reaching timeout (default 30 seconds).
+        /// Warms up with full capacity ready or reaching timeout.
         /// </summary>
         /// <remarks>
         /// It is recommended to use this method in the initialization of the application.
-        /// <para>If you do not use the 'Warmup Ring Buffer' command, the first access to buffer servives(<see cref="IRingBufferService{T}"/>) will be Warmup (not recommended)</para>
-        /// <para>If the time limit is reached, the task will continue on to another internal task until it reaches the defined capacity.</para>
+        /// <para>If you do not use this command, the first access to buffer services (<see cref="IRingBufferService{T}"/>) will trigger warmup instead (not recommended).</para>
         /// </remarks>
         /// <typeparam name="T">Type of buffer.</typeparam>
         /// <param name="appbluild">The <see cref="IHost"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="token">The <see cref="CancellationToken"/>. Default value is <see cref="IHostApplicationLifetime.ApplicationStopping"/>.</param>
-        /// <exception cref="ArgumentNullException">Buffer name null or empty</exception>
-        /// <exception cref="ArgumentNullException">Buffer not found</exception>
+        /// <exception cref="ArgumentNullException">Buffer name null or empty, or buffer not found.</exception>
         public static async Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, CancellationToken? token = null)
         {
             ArgumentNullException.ThrowIfNull(buffername);
-            var applifetime = appbluild.Services.GetService<IHostApplicationLifetime>();
-            var rb = appbluild.Services.GetServices<IRingBufferService<T>>().Where(x => x.Name == buffername).FirstOrDefault();
+
+            var rb = appbluild.Services.GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name == buffername);
             if (rb is null)
             {
-                ArgumentNullException.ThrowIfNull($"RingBuffer({buffername}) not found");
+                throw new ArgumentNullException(nameof(buffername), $"RingBuffer({buffername}) not found");
+            }
+
+            CancellationToken effectiveToken;
+            if (token is not null)
+            {
+                effectiveToken = token.Value;
             }
             else
             {
-                if (applifetime != null && token is null)
-                {
-                    await rb.WarmupAsync(applifetime.ApplicationStopping);
-                }
-                await rb.WarmupAsync(applifetime?.ApplicationStopping ?? CancellationToken.None);
+                var applifetime = appbluild.Services.GetService<IHostApplicationLifetime>();
+                effectiveToken = applifetime?.ApplicationStopping ?? CancellationToken.None;
             }
+
+            await rb.WarmupAsync(effectiveToken);
         }
     }
 }

@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -16,17 +16,17 @@ namespace RingBufferPlus
     /// <param name="elapsedTime">Elapsed time to acquire the value.</param>
     /// <param name="succeeded">Successful Acquire.</param>
     /// <param name="value">The buffer value.</param>
-    /// <param name="turnback">The action handler to turn back buffer when disposed.</param>
-    public sealed class RingBufferValue<T>(string name, TimeSpan elapsedTime, bool succeeded, T value, Action<RingBufferValue<T>>? turnback) : IDisposable
+    /// <param name="turnback">The async handler to turn back the buffer when disposed.</param>
+    public sealed class RingBufferValue<T>(string name, TimeSpan elapsedTime, bool succeeded, T value, Func<RingBufferValue<T>, ValueTask>? turnback) : IAsyncDisposable
     {
-        private readonly Action<RingBufferValue<T>>? _turnback = turnback;
+        private readonly Func<RingBufferValue<T>, ValueTask>? _turnback = turnback;
         private readonly string _name = name;
         private bool _disposed;
 
         /// <summary>
         /// Name of RingBuffer.
         /// </summary>
-        public string? Name => _name;
+        public string Name => _name;
 
         /// <summary>
         /// Elapsed time to acquire the value.
@@ -44,8 +44,8 @@ namespace RingBufferPlus
         public T Current { get; init; } = value;
 
         /// <summary>
-        /// Invalidates the return of the value to the buffer. Another instance will be created.
-        /// <br>This command will be ignored if the return was unsuccessful.</br>
+        /// Invalidates the return of the value to the buffer. A replacement instance will be created.
+        /// <br>This command will be ignored if the acquire was unsuccessful.</br>
         /// </summary>
         public void Invalidate()
         {
@@ -56,22 +56,23 @@ namespace RingBufferPlus
         }
 
         /// <summary>
-        /// Turnback value to buffer.
+        /// Turns back the value to the buffer asynchronously.
         /// </summary>
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             if (!_disposed)
             {
                 _disposed = true;
-                _turnback?.Invoke(this);
+                if (_turnback is not null)
+                {
+                    await _turnback(this).ConfigureAwait(false);
+                }
             }
-            GC.SuppressFinalize(this);
         }
 
         /// <summary>
         /// Indicates whether to skip turning back the value to the buffer.
         /// </summary>
         internal bool SkipTurnback { get; set; }
-
     }
 }

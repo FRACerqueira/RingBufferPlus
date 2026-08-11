@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -7,7 +7,16 @@ using Microsoft.Extensions.Logging;
 
 namespace RingBufferPlus.Core
 {
-    internal sealed class RingBufferBuilder<T> : IRingBuffer<T>, IRingBufferScaleCapacity<T>
+    // One mutable builder backs all four public views (ADR007): the mode-switch methods
+    // (FixedCapacity/ElasticCapacity/AutoScaleAcquireFault) narrow which interface the caller
+    // sees next, so the compiler enforces mutual exclusivity even though a single instance
+    // implements everything. Explicit interface implementation is required wherever the same
+    // method name returns a different interface type depending on which view is in scope.
+    internal sealed class RingBufferBuilder<T> :
+        IRingBufferBuilder<T>,
+        IRingBufferFixedBuilder<T>,
+        IRingBufferElasticBuilder<T>,
+        IRingBufferAutoScaleBuilder<T>
     {
         #region Fields
 
@@ -20,18 +29,17 @@ namespace RingBufferPlus.Core
         private int? _scaledownInit;
         private int? _scaledownMin;
         private int? _scaledownMax;
-        private bool _triggerfault;
-        private byte _numberfault;
+        private bool _elastic;
+        private bool _autoScaleFault;
+        private byte _numberFault;
         private bool _backgroundLogger;
-        private bool _lockAcquire;
-
+        private bool _lockWhenScaling;
 
         private TimeSpan _samplebasetime;
         private TimeSpan _factoryTimeout;
         private TimeSpan _pulseHeartBeat;
         private TimeSpan _acquireTimeout;
 
-        private TimeSpan _acquireDelayAttempts;
         private Action<ILogger?, Exception>? _errorHandler;
         private Action<RingBufferValue<T>>? _bufferHeartBeat;
         private Func<CancellationToken, Task<T>>? _factory;
@@ -51,89 +59,137 @@ namespace RingBufferPlus.Core
             _samplebasetime = RingBufferDefault.SamplesBaseTime;
             _sampleUnit = RingBufferDefault.SampleUnit;
             _acquireTimeout = RingBufferDefault.AcquireTimeout;
-            _acquireDelayAttempts = RingBufferDefault.AcquireDelayAttempts;
         }
 
         #endregion
 
-        public IRingBufferScaleCapacity<T> MaxCapacity(int value)
-        {
-            _maxCapacity = value;
-            return this;
-        }
+        #region shared mutators
 
-        public IRingBufferScaleCapacity<T> MinCapacity(int value)
-        {
-            _minCapacity = value;
-            return this;
-        }
-
-        public IRingBuffer<T> OnError(Action<ILogger?, Exception> errorHandler)
-        {
-            _errorHandler = errorHandler;
-            return this;
-        }
-
-        public IRingBufferScaleCapacity<T> AutoScaleAcquireFault(byte numberfault = 1)
-        {
-            _triggerfault = true;
-            _numberfault = numberfault;
-            return this;
-        }
-
-        public IRingBuffer<T> AcquireTimeout(TimeSpan value, TimeSpan? delayattempts = null)
-        {
-            _acquireTimeout = value;
-            _acquireDelayAttempts = delayattempts ?? RingBufferDefault.AcquireDelayAttempts;
-            return this;
-        }
-
-        public IRingBuffer<T> HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse = null)
-        {
-            _bufferHeartBeat = value;
-            _pulseHeartBeat = pulse ?? RingBufferDefault.PulseHeartBeat;
-            return this;
-        }
-
-        public IRingBuffer<T> Capacity(int value)
-        {
-            _initcapacity = _maxCapacity = _minCapacity = value;
-            return this;
-        }
-
-        public IRingBuffer<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null)
+        private void SetFactory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout)
         {
             _factory = value;
             _factoryTimeout = timeout ?? RingBufferDefault.FactoryTimeout;
+        }
+
+        private void SetHeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse)
+        {
+            _bufferHeartBeat = value;
+            _pulseHeartBeat = pulse ?? RingBufferDefault.PulseHeartBeat;
+        }
+
+        private void SetLogger(ILogger? value) => _logger = value;
+
+        private void SetBackgroundLogger(bool value) => _backgroundLogger = value;
+
+        private void SetAcquireTimeout(TimeSpan value) => _acquireTimeout = value;
+
+        private void SetOnError(Action<ILogger?, Exception> errorHandler) => _errorHandler = errorHandler;
+
+        private void SetLockWhenScaling(bool value) => _lockWhenScaling = value;
+
+        #endregion
+
+        #region IRingBufferBuilder<T>
+
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+
+        IRingBufferFixedBuilder<T> IRingBufferBuilder<T>.FixedCapacity(int value)
+        {
+            _initcapacity = _minCapacity = _maxCapacity = value;
+            _elastic = false;
             return this;
         }
 
-        public IRingBuffer<T> Logger(ILogger? value)
+        IRingBufferElasticBuilder<T> IRingBufferBuilder<T>.ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples, TimeSpan? baseTimer)
         {
-            _logger = value;
-            return this;
-        }
-
-        public IRingBuffer<T> BackgroundLogger(bool value = true)
-        {
-            _backgroundLogger = value;
-            return this;
-        }
-
-        public IRingBufferScaleCapacity<T> LockWhenScaling(bool value = true)
-        {
-            _lockAcquire = value;
-            return this;
-        }
-
-        public IRingBufferScaleCapacity<T> ScaleTimer(int? numberSamples = null, TimeSpan? baseTimer = null)
-        {
+            _initcapacity = initialCapacity;
+            _minCapacity = minCapacity;
+            _maxCapacity = maxCapacity;
             _sampleUnit = numberSamples ?? RingBufferDefault.SampleUnit;
             _samplebasetime = baseTimer ?? RingBufferDefault.SamplesBaseTime;
+            _elastic = true;
             return this;
         }
 
-        public IRingBufferService<T> Build(CancellationToken token = default)
+        #endregion
+
+        #region IRingBufferFixedBuilder<T>
+
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+
+        IRingBufferService<T> IRingBufferFixedBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
+
+        async Task<IRingBufferService<T>> IRingBufferFixedBuilder<T>.BuildWarmupAsync(CancellationToken cancellation)
+        {
+            var srv = BuildCore(cancellation);
+            await srv.WarmupAsync(cancellation).ConfigureAwait(false);
+            return srv;
+        }
+
+        #endregion
+
+        #region IRingBufferElasticBuilder<T>
+
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.LockWhenScaling(bool value) { SetLockWhenScaling(value); return this; }
+
+        IRingBufferAutoScaleBuilder<T> IRingBufferElasticBuilder<T>.AutoScaleAcquireFault(byte numberOfFaults)
+        {
+            _autoScaleFault = true;
+            _numberFault = numberOfFaults;
+            return this;
+        }
+
+        IRingBufferManualScaleService<T> IRingBufferElasticBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
+
+        async Task<IRingBufferManualScaleService<T>> IRingBufferElasticBuilder<T>.BuildWarmupAsync(CancellationToken cancellation)
+        {
+            var srv = BuildCore(cancellation);
+            await srv.WarmupAsync(cancellation).ConfigureAwait(false);
+            return srv;
+        }
+
+        #endregion
+
+        #region IRingBufferAutoScaleBuilder<T>
+
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.LockWhenScaling(bool value) { SetLockWhenScaling(value); return this; }
+
+        IRingBufferService<T> IRingBufferAutoScaleBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
+
+        async Task<IRingBufferService<T>> IRingBufferAutoScaleBuilder<T>.BuildWarmupAsync(CancellationToken cancellation)
+        {
+            var srv = BuildCore(cancellation);
+            await srv.WarmupAsync(cancellation).ConfigureAwait(false);
+            return srv;
+        }
+
+        #endregion
+
+        #region build
+
+        private RingBufferManager<T> BuildCore(CancellationToken token)
         {
             ValidateBuild();
             LogMessage("Build successfully and Created RingBuffer Manager");
@@ -141,8 +197,8 @@ namespace RingBufferPlus.Core
             {
                 Name = _uniqueName,
                 Capacity = _initcapacity,
-                MinCapacity = _minCapacity,
-                MaxCapacity = _maxCapacity,
+                MinCapacity = _elastic ? _minCapacity : _initcapacity,
+                MaxCapacity = _elastic ? _maxCapacity : _initcapacity,
                 FactoryTimeout = _factoryTimeout,
                 PulseHeartBeat = _pulseHeartBeat,
                 SamplesBase = _samplebasetime,
@@ -150,11 +206,11 @@ namespace RingBufferPlus.Core
                 ScaleDownInit = _scaledownInit,
                 ScaleDownMin = _scaledownMin,
                 ScaleDownMax = _scaledownMax,
-                TriggerFault = _triggerfault,
-                NumberFault = _numberfault,
+                AutoScaleFault = _autoScaleFault,
+                NumberFault = _numberFault,
                 AcquireTimeout = _acquireTimeout,
-                AcquireDelayAttempts = _acquireDelayAttempts,
-                LockAcquire = _lockAcquire,
+                LockWhenScaling = _lockWhenScaling,
+                ManualSwitchAllowed = _elastic && !_autoScaleFault,
                 Logger = _logger,
                 BackgroundLogger = _backgroundLogger,
                 ErrorHandler = _errorHandler,
@@ -163,18 +219,11 @@ namespace RingBufferPlus.Core
             };
         }
 
-        public async Task<IRingBufferService<T>> BuildWarmupAsync(CancellationToken token = default)
-        {
-            var srv = Build(token);
-            await srv.WarmupAsync(token);
-            return srv;
-        }
-
         private void ValidateBuild()
         {
             if (_factory is null)
             {
-                var err = new InvalidOperationException("The command SetFactory is not defined.");
+                var err = new InvalidOperationException("The command Factory is not defined.");
                 LogError(err);
                 throw err;
             }
@@ -184,49 +233,53 @@ namespace RingBufferPlus.Core
                 LogError(err);
                 throw err;
             }
-            if (_minCapacity < 2)
+            if (_elastic)
             {
-                var err = new InvalidOperationException("The min capacity is less than 2.");
-                LogError(err);
-                throw err;
+                if (_minCapacity < 2)
+                {
+                    var err = new InvalidOperationException("The min capacity is less than 2.");
+                    LogError(err);
+                    throw err;
+                }
+                if (_maxCapacity < 2)
+                {
+                    var err = new InvalidOperationException("The max capacity is less than 2.");
+                    LogError(err);
+                    throw err;
+                }
+                if (_minCapacity > _maxCapacity)
+                {
+                    var err = new InvalidOperationException("The min capacity is greater than the max capacity.");
+                    LogError(err);
+                    throw err;
+                }
+                if (_minCapacity > _initcapacity)
+                {
+                    var err = new InvalidOperationException("The min capacity is greater than the initial capacity.");
+                    LogError(err);
+                    throw err;
+                }
+                if (_maxCapacity < _initcapacity)
+                {
+                    var err = new InvalidOperationException("The max capacity is less than the initial capacity.");
+                    LogError(err);
+                    throw err;
+                }
+                if (_sampleUnit < 1)
+                {
+                    var err = new IndexOutOfRangeException("numberSamples in command ElasticCapacity must be greater or equal 1");
+                    LogError(err);
+                    throw err;
+                }
+                if (_samplebasetime.TotalMilliseconds / _sampleUnit < 100)
+                {
+                    var err = new IndexOutOfRangeException("baseTimer / numberSamples in command ElasticCapacity must be greater or equal 100ms");
+                    LogError(err);
+                    throw err;
+                }
             }
-            if (_maxCapacity < 2)
-            {
-                var err = new InvalidOperationException("The max capacity is less than 2.");
-                LogError(err);
-                throw err;
-            }
-            if (_minCapacity > _maxCapacity)
-            {
-                var err = new InvalidOperationException("The min capacity is greater than the max capacity.");
-                LogError(err);
-                throw err;
-            }
-            if (_minCapacity > _initcapacity)
-            {
-                var err = new InvalidOperationException("The min capacity is greater than the initial capacity.");
-                LogError(err);
-                throw err;
-            }
-            if (_maxCapacity < _initcapacity)
-            {
-                var err = new InvalidOperationException("The max capacity is less than the initial capacity.");
-                LogError(err);
-                throw err;
-            }
-            if (_sampleUnit < 1)
-            {
-                var err = new IndexOutOfRangeException("numberSamples in command SetScaleUnit must be greater or equal 1");
-                LogError(err);
-                throw err;
-            }
-            if (_samplebasetime.TotalMilliseconds / _sampleUnit < 100)
-            {
-                var err = new IndexOutOfRangeException("baseTimer / numberSamples in command SetScaleUnit must be greater or equal 100ms");
-                LogError(err);
-                throw err;
-            }
-            if (_triggerfault)
+
+            if (_autoScaleFault)
             {
                 var localmin = _minCapacity - 2;
                 if (localmin < 1)
@@ -244,6 +297,8 @@ namespace RingBufferPlus.Core
                 _scaledownMax = null;
             }
         }
+
+        #endregion
 
         private void LogMessage(string message)
         {
@@ -265,7 +320,6 @@ namespace RingBufferPlus.Core
                 _errorHandler?.Invoke(_logger, message);
             }
         }
-
 
         private static readonly Action<ILogger, string, string, Exception?> logMessageForDbg = LoggerMessage.Define<string, string>(LogLevel.Debug, 0, "RingBufferBuilder({source}) : {message}");
         private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferBuilder({source}) : {message}");

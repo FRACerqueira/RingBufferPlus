@@ -26,11 +26,6 @@ namespace RingBufferPlus
         public readonly static TimeSpan AcquireTimeout = TimeSpan.FromSeconds(5);
 
         /// <summary>
-        /// The default delay time to attempt to acquire the buffer on failure.
-        /// </summary>
-        public readonly static TimeSpan AcquireDelayAttempts = TimeSpan.FromMilliseconds(10);
-
-        /// <summary>
         /// The default sample unit for calculating autoscale.
         /// </summary>
         public readonly static int SampleUnit = 100;
