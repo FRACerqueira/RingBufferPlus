@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -11,7 +11,7 @@ namespace RingBufferPlus.Tests
     public class RingBufferTests
     {
         [Fact]
-        public void New_WithValidBufferName_ReturnsIRingBuffer()
+        public void New_WithValidBufferName_ReturnsIRingBufferBuilder()
         {
             // Arrange
             string bufferName = "TestBuffer";
@@ -21,7 +21,7 @@ namespace RingBufferPlus.Tests
 
             // Assert
             Assert.NotNull(result);
-            Assert.IsAssignableFrom<IRingBuffer<string>>(result);
+            Assert.IsAssignableFrom<IRingBufferBuilder<string>>(result);
         }
 
         [Fact]
@@ -36,7 +36,7 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public void New_WithValidBufferNameAndLoggerFactory_ReturnsIRingBuffer()
+        public void New_WithValidBufferNameAndLoggerFactory_ReturnsIRingBufferBuilder()
         {
             // Arrange
             string bufferName = "TestBuffer";
@@ -47,7 +47,7 @@ namespace RingBufferPlus.Tests
 
             // Assert
             Assert.NotNull(result);
-            Assert.IsAssignableFrom<IRingBuffer<string>>(result);
+            Assert.IsAssignableFrom<IRingBufferBuilder<string>>(result);
         }
 
         [Fact]

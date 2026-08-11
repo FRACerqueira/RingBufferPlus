@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -14,7 +14,7 @@ namespace RingBufferPlus.Tests
             var elapsedTime = TimeSpan.FromSeconds(1);
             var value = 42;
             var succeeded = true;
-            static void turnback(RingBufferValue<int> _) { }
+            static ValueTask turnback(RingBufferValue<int> _) => ValueTask.CompletedTask;
 
             var ringBufferValue = new RingBufferValue<int>(name, elapsedTime, succeeded, value, turnback);
 
@@ -45,41 +45,44 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public void Dispose_ShouldInvokeTurnback()
+        public async Task DisposeAsync_ShouldInvokeTurnback()
         {
-            bool turnbackInvoked = false;
-            void turnback(RingBufferValue<int> _) => turnbackInvoked = true;
+            var turnbackInvoked = false;
+            ValueTask turnback(RingBufferValue<int> _) { turnbackInvoked = true; return ValueTask.CompletedTask; }
 
             var ringBufferValue = new RingBufferValue<int>("TestBuffer", TimeSpan.Zero, true, 42, turnback);
 
-            ringBufferValue.Dispose();
+            await ringBufferValue.DisposeAsync();
 
             Assert.True(turnbackInvoked);
         }
 
         [Fact]
-        public void Dispose_MultipleTimes_ShouldInvokeTurnbackOnce()
+        public async Task DisposeAsync_MultipleTimes_ShouldInvokeTurnbackOnce()
         {
-            int turnbackCount = 0;
-            void turnback(RingBufferValue<int> _) => turnbackCount++;
+            var turnbackCount = 0;
+            ValueTask turnback(RingBufferValue<int> _) { turnbackCount++; return ValueTask.CompletedTask; }
 
             var ringBufferValue = new RingBufferValue<int>("TestBuffer", TimeSpan.Zero, true, 42, turnback);
 
-            ringBufferValue.Dispose();
-            ringBufferValue.Dispose();
+            await ringBufferValue.DisposeAsync();
+            await ringBufferValue.DisposeAsync();
 
             Assert.Equal(1, turnbackCount);
         }
 
         [Fact]
-        public void Dispose_Unsuccessful_ShouldInvokeTurnback()
+        public async Task DisposeAsync_Unsuccessful_ShouldStillInvokeTurnbackDelegate()
         {
-            bool turnbackInvoked = false;
-            void turnback(RingBufferValue<int> _) => turnbackInvoked = true;
+            // RingBufferValue itself does not gate on Successful - that decision belongs to
+            // whoever supplies the turnback delegate (RingBufferManager.TurnbackAsync, which
+            // passes null for unsuccessful acquires in practice).
+            var turnbackInvoked = false;
+            ValueTask turnback(RingBufferValue<int> _) { turnbackInvoked = true; return ValueTask.CompletedTask; }
 
             var ringBufferValue = new RingBufferValue<int>("TestBuffer", TimeSpan.Zero, false, 42, turnback);
 
-            ringBufferValue.Dispose();
+            await ringBufferValue.DisposeAsync();
 
             Assert.True(turnbackInvoked);
         }
