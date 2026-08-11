@@ -32,14 +32,11 @@ namespace RingBufferPlusBasicTriggerScale
             Random rnd = new();
 
             var rb = await RingBuffer<int>.New("MyBuffer")
-                .Capacity(3)
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
                 .AcquireTimeout(TimeSpan.FromMilliseconds(500))
-                .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                    .AutoScaleAcquireFault(0)
-                    .MinCapacity(2)
-                    .MaxCapacity(4)
+                .ElasticCapacity(3, 2, 4, 50, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(0)
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -58,12 +55,12 @@ namespace RingBufferPlusBasicTriggerScale
 
             //simulate 3 AcquireAsync to expire free resources
             Console.WriteLine("Try 3 AcquireAsync");
-            using (var buffer1 = await rb.AcquireAsync(cts.Token))
+            await using (var buffer1 = await rb.AcquireAsync(cts.Token))
             {
-                using (var buffer2 = await rb.AcquireAsync(cts.Token))
+                await using (var buffer2 = await rb.AcquireAsync(cts.Token))
                 {
                     //AcquireAsync fault
-                    using (var buffer3 = await rb.AcquireAsync(cts.Token))
+                    await using (var buffer3 = await rb.AcquireAsync(cts.Token))
                     {
                         Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
                         Console.WriteLine($"Buffer is ok({buffer2.Successful}:{buffer2.ElapsedTime}) value: {buffer2.Current}");
@@ -79,14 +76,14 @@ namespace RingBufferPlusBasicTriggerScale
 
             Console.WriteLine("Try 4 AcquireAsync");
             //simulate 4 AcquireAsync to expire free resources
-            using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
+            await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
-                using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
+                await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
                 {
                     //AcquireAsync fault
-                    using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
+                    await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
                     {
-                        using (var buffer4 = await rb.AcquireAsync(tokenapplifetime))
+                        await using (var buffer4 = await rb.AcquireAsync(tokenapplifetime))
                         {
                             Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
                             Console.WriteLine($"Buffer is ok({buffer2.Successful}:{buffer2.ElapsedTime}) value: {buffer2.Current}");
@@ -117,14 +114,9 @@ namespace RingBufferPlusBasicTriggerScale
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
             Console.WriteLine($"Dispose Ring Buffer...");
+            await rb.DisposeAsync();
             cts.Cancel();
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current is {rb.CurrentCapacity}");
-            }
-            sw.Reset();
+            cts.Dispose();
         }
         #pragma warning restore IDE0063 // Use simple 'using' statement
 

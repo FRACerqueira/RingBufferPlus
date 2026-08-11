@@ -2,7 +2,6 @@
 // Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
 // ***************************************************************************************
 
-using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -73,14 +72,11 @@ namespace RingBufferPlusRabbitSample
 
             //create ring buffer    
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Capacity(10)
                 .Logger(hostApp.Services.GetService<ILogger<Program>>())
                 .BackgroundLogger()
                 .Factory((cts) => ChannelFactory(cts)!)
-                .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                    .MaxCapacity(20)
-                    .MinCapacity(5)
-                    .AutoScaleAcquireFault()
+                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault()
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -111,7 +107,7 @@ namespace RingBufferPlusRabbitSample
                             Thread.Sleep(TimeSpan.FromSeconds(60));
                             break;
                         }
-                        using var bufferedItem = await rb!.AcquireAsync();
+                        await using var bufferedItem = await rb!.AcquireAsync();
                         if (bufferedItem.Successful)
                         {
                             var body = new ReadOnlyMemory<byte>(messageBodyBytes);
@@ -139,32 +135,23 @@ namespace RingBufferPlusRabbitSample
             }
 
             Console.WriteLine("Dispose ring buffer");
+            await rb!.DisposeAsync();
             cts.Cancel();
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 10000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer {rb!.Name} current capacity : {rb!.CurrentCapacity}");
-            }
-            sw.Reset();
 
             threads.Clear();
 
-            cts.Dispose();          
+            cts.Dispose();
             cts = CancellationTokenSource.CreateLinkedTokenSource(tokenapplifetime);
 
             Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread using lock Acquire");
 
             rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                    .Capacity(10)
                     .Logger(hostApp.Services.GetService<ILogger<Program>>())
                     .BackgroundLogger()
                     .Factory((cts) => ChannelFactory(cts)!)
-                    .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                        .MaxCapacity(20)
-                        .MinCapacity(5)
-                        .LockWhenScaling()
-                        .AutoScaleAcquireFault()
+                    .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
+                    .LockWhenScaling()
+                    .AutoScaleAcquireFault()
                     .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -194,7 +181,7 @@ namespace RingBufferPlusRabbitSample
                             Thread.Sleep(TimeSpan.FromSeconds(60));
                             break;
                         }
-                        using var bufferedItem = await rb!.AcquireAsync();
+                        await using var bufferedItem = await rb!.AcquireAsync();
                         if (bufferedItem.Successful)
                         {
                             var body = new ReadOnlyMemory<byte>(messageBodyBytes);
@@ -222,14 +209,9 @@ namespace RingBufferPlusRabbitSample
             }
 
             Console.WriteLine("Dispose ring buffer");
+            await rb!.DisposeAsync();
             cts.Cancel();
-            sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 10000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer {rb!.Name} current capacity : {rb!.CurrentCapacity}");
-            }
-            sw.Reset();
+            cts.Dispose();
         }
 
         public static string RandomString(int length)

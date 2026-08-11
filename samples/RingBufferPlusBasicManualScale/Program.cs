@@ -29,12 +29,9 @@ namespace RingBufferPlusBasicManualScale
             var cts = new CancellationTokenSource();
 
             var rb = await RingBuffer<int>.New("MyBuffer")
-                .Capacity(6)
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-                .ScaleTimer()
-                    .MinCapacity(3)
-                    .MaxCapacity(9)
+                .ElasticCapacity(6, 3, 9)
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -125,18 +122,9 @@ namespace RingBufferPlusBasicManualScale
 
             Console.WriteLine("Dispose ring buffer");
 
-            cts.Cancel();
-
             Console.WriteLine($"Dispose Ring Buffer...");
+            await rb.DisposeAsync();
             cts.Cancel();
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current is {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-
             cts.Dispose();
 
             Console.WriteLine("Starting Manual scale with lock");
@@ -144,13 +132,10 @@ namespace RingBufferPlusBasicManualScale
             cts = new CancellationTokenSource();
 
             rb = await RingBuffer<int>.New("MyBuffer")
-                .Capacity(6)
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-                .ScaleTimer()
-                    .LockWhenScaling()
-                    .MinCapacity(3)
-                    .MaxCapacity(9)
+                .ElasticCapacity(6, 3, 9)
+                .LockWhenScaling()
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -239,17 +224,10 @@ namespace RingBufferPlusBasicManualScale
 
             Console.WriteLine("Dispose ring buffer");
 
-            cts.Cancel();
-
             Console.WriteLine($"Dispose Ring Buffer...");
+            await rb.DisposeAsync();
             cts.Cancel();
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current is {rb.CurrentCapacity}");
-            }
-            sw.Reset();
+            cts.Dispose();
         }
 
         private static IHostBuilder CreateHostBuilder(string[] args) =>

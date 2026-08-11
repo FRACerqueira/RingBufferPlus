@@ -24,7 +24,7 @@ namespace RingBufferPlusApiSample.Controllers
         public async Task<IEnumerable<WeatherForecast>> Get(CancellationToken token)
         {
 
-            using (var buffer = await  _ringBufferService.AcquireAsync(token))
+            await using (var buffer = await _ringBufferService.AcquireAsync(token))
             {
                 _toInvalidade = !_toInvalidade;
                 if (_toInvalidade)
@@ -46,7 +46,15 @@ namespace RingBufferPlusApiSample.Controllers
         [Route("/ChangeCapacity")]
         public async Task<ActionResult> ChangeCapacity(ScaleSwitch scaleUnit)
         {
-            await _ringBufferService.SwitchToAsync(scaleUnit);
+            // This buffer is registered as the base IRingBufferService<int> (ADR007: manual switching
+            // is not part of that type). This buffer was built via ElasticCapacity without
+            // AutoScaleAcquireFault, so it does support manual switching at runtime - opt back in
+            // explicitly rather than casting blindly.
+            if (_ringBufferService is not IRingBufferManualScaleService<int> manualScaleService)
+            {
+                return BadRequest("Manual scale switching is not available for this buffer.");
+            }
+            await manualScaleService.SwitchToAsync(scaleUnit);
             return Ok(_ringBufferService.CurrentCapacity);
         }
     }
