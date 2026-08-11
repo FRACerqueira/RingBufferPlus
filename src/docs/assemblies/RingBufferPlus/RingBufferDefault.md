@@ -14,7 +14,6 @@ public static class RingBufferDefault
 
 | name | description |
 | --- | --- |
-| static readonly [AcquireDelayAttempts](RingBufferDefault/AcquireDelayAttempts.md) | The default delay time to attempt to acquire the buffer on failure. |
 | static readonly [AcquireTimeout](RingBufferDefault/AcquireTimeout.md) | The default timeout for acquiring the buffer. |
 | static readonly [Capacity](RingBufferDefault/Capacity.md) | The default capacity for buffer. |
 | static readonly [FactoryTimeout](RingBufferDefault/FactoryTimeout.md) | The default timeout for the factory handler. |

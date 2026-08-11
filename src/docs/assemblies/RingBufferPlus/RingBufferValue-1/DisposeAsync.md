@@ -1,13 +1,13 @@
 ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png)
 
-### RingBufferValue&lt;T&gt;.Name property
+### RingBufferValue&lt;T&gt;.DisposeAsync method
 </br>
 
 
-#### Name of RingBuffer.
+#### Turns back the value to the buffer asynchronously.
 
 ```csharp
-public string Name { get; }
+public ValueTask DisposeAsync()
 ```
 
 ### See Also

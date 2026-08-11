@@ -4,7 +4,7 @@
 </br>
 
 
-#### Invalidates the return of the value to the buffer. Another instance will be created. This command will be ignored if the return was unsuccessful.
+#### Invalidates the return of the value to the buffer. A replacement instance will be created. This command will be ignored if the acquire was unsuccessful.
 
 ```csharp
 public void Invalidate()

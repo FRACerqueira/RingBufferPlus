@@ -13,9 +13,11 @@
 
 | public type | description |
 | --- | --- |
-| interface [IRingBuffer&lt;T&gt;](./RingBufferPlus/IRingBuffer-1.md) | Represents the commands to RingBufferPlus. |
-| interface [IRingBufferBuild&lt;T&gt;](./RingBufferPlus/IRingBufferBuild-1.md) | Provides methods to build and configure a RingBufferPlus instance. |
-| interface [IRingBufferScaleCapacity&lt;T&gt;](./RingBufferPlus/IRingBufferScaleCapacity-1.md) | Represents the scale capacity commands to RingBufferPlus. |
+| interface [IRingBufferAutoScaleBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferAutoScaleBuilder-1.md) | Represents a RingBufferPlus builder committed to an elastic capacity with autoscale-on-fault enabled. |
+| interface [IRingBufferBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferBuilder-1.md) | Represents the entry point to configure and build a RingBufferPlus instance. |
+| interface [IRingBufferElasticBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferElasticBuilder-1.md) | Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity, producing an [`IRingBufferManualScaleService`](./RingBufferPlus/IRingBufferManualScaleService-1.md) unless [`AutoScaleAcquireFault`](./RingBufferPlus/IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md) is used. |
+| interface [IRingBufferFixedBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferFixedBuilder-1.md) | Represents a RingBufferPlus builder committed to a fixed capacity. |
+| interface [IRingBufferManualScaleService&lt;T&gt;](./RingBufferPlus/IRingBufferManualScaleService-1.md) | Represents a RingBufferPlus service that can be manually switched between capacities. |
 | interface [IRingBufferService&lt;T&gt;](./RingBufferPlus/IRingBufferService-1.md) | Represents the commands to RingBufferPlus service. |
 | static class [RingBuffer&lt;T&gt;](./RingBufferPlus/RingBuffer-1.md) | Represents the RingBufferPlus extensions. |
 | static class [RingBufferDefault](./RingBufferPlus/RingBufferDefault.md) | Represents the default values for the ring buffer. |

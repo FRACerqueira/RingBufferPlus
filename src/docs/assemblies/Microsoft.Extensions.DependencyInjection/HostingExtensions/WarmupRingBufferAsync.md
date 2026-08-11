@@ -4,7 +4,7 @@
 </br>
 
 
-#### Warms up with full capacity ready or reaching timeout (default 30 seconds).
+#### Warms up with full capacity ready or reaching timeout.
 
 ```csharp
 public static Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, 
@@ -22,16 +22,13 @@ public static Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffern
 
 | exception | condition |
 | --- | --- |
-| ArgumentNullException | Buffer name null or empty |
-| ArgumentNullException | Buffer not found |
+| ArgumentNullException | Buffer name null or empty, or buffer not found. |
 
 ### Remarks
 
 It is recommended to use this method in the initialization of the application.
 
-If you do not use the 'Warmup Ring Buffer' command, the first access to buffer servives([`IRingBufferService`](../../RingBufferPlus/IRingBufferService-1.md)) will be Warmup (not recommended)
-
-If the time limit is reached, the task will continue on to another internal task until it reaches the defined capacity.
+If you do not use this command, the first access to buffer services ([`IRingBufferService`](../../RingBufferPlus/IRingBufferService-1.md)) will trigger warmup instead (not recommended).
 
 ### See Also
 

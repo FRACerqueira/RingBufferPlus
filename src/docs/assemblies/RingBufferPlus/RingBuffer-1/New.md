@@ -7,7 +7,7 @@
 #### Create a new instance to commands of RingBufferPlus.
 
 ```csharp
-public static IRingBuffer<T> New(string buffername)
+public static IRingBufferBuilder<T> New(string buffername)
 ```
 
 | parameter | description |
@@ -16,11 +16,11 @@ public static IRingBuffer<T> New(string buffername)
 
 ### Return Value
 
-[`IRingBuffer`](../IRingBuffer-1.md)
+[`IRingBufferBuilder`](../IRingBufferBuilder-1.md).
 
 ### See Also
 
-* interface [IRingBuffer&lt;T&gt;](../IRingBuffer-1.md)
+* interface [IRingBufferBuilder&lt;T&gt;](../IRingBufferBuilder-1.md)
 * class [RingBuffer&lt;T&gt;](../RingBuffer-1.md)
 * namespace [RingBufferPlus](../../RingBufferPlus.md)
 
@@ -31,7 +31,7 @@ public static IRingBuffer<T> New(string buffername)
 #### Create a new instance to commands of RingBufferPlus.
 
 ```csharp
-public static IRingBuffer<T> New(string? buffername, ILoggerFactory loggerFactory)
+public static IRingBufferBuilder<T> New(string? buffername, ILoggerFactory loggerFactory)
 ```
 
 | parameter | description |
@@ -41,11 +41,11 @@ public static IRingBuffer<T> New(string? buffername, ILoggerFactory loggerFactor
 
 ### Return Value
 
-[`IRingBuffer`](../IRingBuffer-1.md)
+[`IRingBufferBuilder`](../IRingBufferBuilder-1.md).
 
 ### See Also
 
-* interface [IRingBuffer&lt;T&gt;](../IRingBuffer-1.md)
+* interface [IRingBufferBuilder&lt;T&gt;](../IRingBufferBuilder-1.md)
 * class [RingBuffer&lt;T&gt;](../RingBuffer-1.md)
 * namespace [RingBufferPlus](../../RingBufferPlus.md)
 

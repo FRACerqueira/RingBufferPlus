@@ -6,7 +6,7 @@
 
 #### ```csharp
 public RingBufferValue(string name, TimeSpan elapsedTime, bool succeeded, T value, 
-    Action<RingBufferValue>? turnback)
+    Func<RingBufferValue, ValueTask>? turnback)
 ```
 
 ### See Also

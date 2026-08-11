@@ -59,9 +59,14 @@ namespace RingBufferPlus
         IRingBufferElasticBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
 
         /// <summary>
-        /// Sets acquisition/switch lock while a scale-up/scale-down operation is running.
+        /// Sets whether <see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch)"/> awaits the
+        /// scale operation's completion before returning, instead of returning as soon as it is scheduled.
         /// </summary>
-        /// <param name="value">True to lock acquire/manual switch while scaling. Default true.</param>
+        /// <remarks>
+        /// Does not affect <see cref="IRingBufferService{T}.AcquireAsync(CancellationToken)"/>: acquisition is
+        /// never blocked by an in-progress scale operation, with or without this setting.
+        /// </remarks>
+        /// <param name="value">True to wait for the scale operation to finish before <c>SwitchToAsync</c> returns. Default true.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> LockWhenScaling(bool value = true);
 
