@@ -49,43 +49,12 @@ A ring buffer makes a bounded queue when separate indices are used for inserting
 - Simple and clear fluent syntax
 
 ### What's new in the latest version 
-- **v4.0.1 (latest version)**
-    -  Added support for .Net10
 
-- v4.0.0
-    - Added support for .Net9, maintained support.Net8 
-    - Removed support for .Net6, .Net7 and netstandard2.1
-    - Some properties and commands have been refactored for readability or syntax errors. (Break changes)
-    - Optimized several parts of the code to improve performance and consistency during auto/manual scaling.
-    - Improved several commands to be asynchronous
-    - Documentation updated
-    - Bug fixed when used with Rabbitmq.
-      - Removed need to set Automatic Recovery to false for use with Rabbitmq
-    - Removed Master/Slave, ReportScale, BufferHealth,  ScaleWhen..., RollbackWhen... and TriggerByAccqWhen... concept (Break changes)
-    - Added command LockWhenScaling 
-    - Added command AutoScaleAcquireFault
-    - Added command HeartBeat
-    - Added command BackgroundLogger
-    - Renamed command ScaleUnit ScaleTimer (Break changes)
-    
-- **v3.2.0 (Deprecated)**
-    - Renamed command 'MasterScale' to 'ScaleUnit'
-        - Added parameter 'ScaleUnit' to set the scale type (automatic/manual/Slave)
-            - Now the user can manually set the scale change mode
-    - Removed command 'SlaveScale'
-        - Now use 'ScaleUnit' command with scale type Slave
-    - Removed command 'SampleUnit'
-        - Now time base unit and number of samples collected are parameters of the command 'ScaleUnit'
-    - Added new command 'Slave' to set Slave Ringbuffer
-        - Better clarity of command intent 
-    - Removed mandatory commands 'ScaleWhenFreeLessEq' , 'RollbackWhenFreeGreaterEq' for MaxCapacity commands
-        - Now it is automatically set when 'MaxCapacity' is set  
-    - Removed mandatory commands 'ScaleWhenFreeGreaterEq' , 'RollbackWhenFreeLessEq' for MinCapacity commands
-        - Now it is automatically set when 'MinCapacity' is set  
-    - Added new command 'SwithTo' for Ringbuffer service
-        - Now the user can manually set the scale change when scale type is manual
-    - Improvement: Downscaling does not need to remove all buffer when no slave control
-        - Better performance and availability 
+Full version history has moved to [CHANGELOG.md](./CHANGELOG.md).
+
+**v4.0.1 (latest released version)** added .NET 10 support.
+
+**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [Action Plan](doc/action-plan.md) and the [ADRs](doc/adr) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
 
 ## Installing
 [**Top**](#table-of-contents)
