@@ -370,15 +370,12 @@ namespace RingBufferPlus.Core
             {
                 return;
             }
-            var median = ComputeMedian(_samples);
+            var median = AutoScaleDecision.Median(_samples);
             _samples.Clear();
-            if (IsInitCapacity && median >= ScaleDownInit)
+            var target = AutoScaleDecision.EvaluateScaleDown(median, IsInitCapacity, IsMaxCapacity, MinCapacity, Capacity, ScaleDownInit, ScaleDownMax);
+            if (target.HasValue)
             {
-                await MoveToCapacityAsync(MinCapacity, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
-            }
-            else if (IsMaxCapacity && median > ScaleDownMax)
-            {
-                await MoveToCapacityAsync(Capacity, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
             }
         }
 
@@ -517,18 +514,6 @@ namespace RingBufferPlus.Core
             {
                 disposable.Dispose();
             }
-        }
-
-        private static double ComputeMedian(List<int> samples)
-        {
-            var sorted = samples.OrderBy(x => x).ToArray();
-            if (sorted.Length % 2 == 0)
-            {
-                var pos = sorted.Length / 2;
-                return (sorted[pos - 1] + sorted[pos]) / 2.0;
-            }
-            var mid = (sorted.Length + 1) / 2;
-            return sorted[mid - 1];
         }
 
         #endregion
