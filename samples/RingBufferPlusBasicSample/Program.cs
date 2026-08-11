@@ -40,7 +40,7 @@ namespace RingBufferPlusBasicSample
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
-            Console.WriteLine("Press anykey to start 2 Acquire buffer");
+            Console.WriteLine("Press any key to start 2 Acquire buffer");
             Console.ReadKey();
             await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
@@ -51,7 +51,7 @@ namespace RingBufferPlusBasicSample
                 }
             }
 
-            Console.WriteLine("Press anykey to Acquire buffer and invalidate item buffer");
+            Console.WriteLine("Press any key to Acquire buffer and invalidate item buffer");
             Console.ReadKey();
             await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
             {

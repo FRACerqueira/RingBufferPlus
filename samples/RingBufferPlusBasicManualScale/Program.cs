@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -34,95 +34,18 @@ namespace RingBufferPlusBasicManualScale
                 .ElasticCapacity(6, 3, 9)
                 .BuildWarmupAsync(cts.Token);
 
-            Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-            Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+            ReportCreated(rb);
 
             Console.WriteLine("Starting Manual scale with non lock");
 
-            Console.WriteLine("Swith to MinCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MinCapacity);
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MaxCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-           
-            Console.WriteLine("Swith to initial Capacity");
-            await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MaxCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MinCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MinCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to defaut Capacity");
-            await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+            await DemoSwitchAsync(rb, ScaleSwitch.MinCapacity, "MinCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MaxCapacity, "MaxCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.InitCapacity, "initial capacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MaxCapacity, "MaxCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MinCapacity, "MinCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.InitCapacity, "default capacity");
 
             Console.WriteLine("Dispose ring buffer");
-
-            Console.WriteLine($"Dispose Ring Buffer...");
             await rb.DisposeAsync();
             cts.Cancel();
             cts.Dispose();
@@ -138,96 +61,49 @@ namespace RingBufferPlusBasicManualScale
                 .LockWhenScaling()
                 .BuildWarmupAsync(cts.Token);
 
-            Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-            Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+            ReportCreated(rb);
 
-            Console.WriteLine("Swith to MinCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MinCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MaxCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to initial Capacity");
-            await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MaxCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to MinCapacity");
-            await rb.SwitchToAsync(ScaleSwitch.MinCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine("Swith to defaut Capacity");
-            await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
-            sw.Start();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current capacity switch to {rb.CurrentCapacity}");
-            }
-            sw.Reset();
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
+            await DemoSwitchAsync(rb, ScaleSwitch.MinCapacity, "MinCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MaxCapacity, "MaxCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.InitCapacity, "initial capacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MaxCapacity, "MaxCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.MinCapacity, "MinCapacity");
+            await DemoSwitchAsync(rb, ScaleSwitch.InitCapacity, "default capacity");
 
             Console.WriteLine("Dispose ring buffer");
-
-            Console.WriteLine($"Dispose Ring Buffer...");
             await rb.DisposeAsync();
             cts.Cancel();
             cts.Dispose();
+        }
+
+        // Switches capacity, then polls for 5 seconds so you can watch it move (or, with
+        // LockWhenScaling(), SwitchToAsync itself already waited - the poll loop still shows
+        // the settled value either way).
+        private static async Task DemoSwitchAsync(IRingBufferManualScaleService<int> rb, ScaleSwitch target, string label)
+        {
+            Console.WriteLine($"Switch to {label}");
+            await rb.SwitchToAsync(target);
+            var sw = Stopwatch.StartNew();
+            while (sw.ElapsedMilliseconds < 5000)
+            {
+                Thread.Sleep(1000);
+                Console.WriteLine($"Ring Buffer Current capacity is {rb.CurrentCapacity}");
+            }
+            ReportState(rb);
+        }
+
+        private static void ReportCreated(IRingBufferManualScaleService<int> rb)
+        {
+            Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
+            Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
+            ReportState(rb);
+        }
+
+        private static void ReportState(IRingBufferManualScaleService<int> rb)
+        {
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
+            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
         }
 
         private static IHostBuilder CreateHostBuilder(string[] args) =>

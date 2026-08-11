@@ -18,7 +18,7 @@ namespace RingBufferPlusApiSample.Controllers
         ];
 
         private readonly IRingBufferService<int> _ringBufferService = ringBufferService;
-        private static bool _toInvalidade = true;
+        private static bool _toInvalidate = true;
 
         [HttpGet(Name = "GetWeatherForecast")]
         public async Task<IEnumerable<WeatherForecast>> Get(CancellationToken token)
@@ -26,12 +26,12 @@ namespace RingBufferPlusApiSample.Controllers
 
             await using (var buffer = await _ringBufferService.AcquireAsync(token))
             {
-                _toInvalidade = !_toInvalidade;
-                if (_toInvalidade)
+                _toInvalidate = !_toInvalidate;
+                if (_toInvalidate)
                 {
                     buffer.Invalidate();
                 }
-                token.WaitHandle.WaitOne(100);
+                await Task.Delay(100, token);
             }
             return Enumerable.Range(1, 5).Select(index => new WeatherForecast
             {

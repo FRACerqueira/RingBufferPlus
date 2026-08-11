@@ -32,7 +32,7 @@ How do we fix this without compromising the product's central pitch ("lock-free 
 
 ## Decision Drivers
 
-* Fix correctness bugs with minimal regression risk, without breaking the public API (breaking-change cost is high — see [[ADR004]]).
+* Fix correctness bugs with minimal regression risk, without breaking the public API (breaking-change cost is high — see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)).
 * Preserve the "background scaling without blocking `AcquireAsync`/`SwitchToAsync`" philosophy (the `LockWhenScaling` command already documents this trade-off for whoever wants the opposite).
 * Avoid a full rewrite of the core without concurrency-test coverage, which does not exist today (see Action Plan, Phase 3).
 * Reduce, in the medium term, the number of distinct primitives guarding the same state (`_currentCapacity`, `_autoscaleRunning`).
