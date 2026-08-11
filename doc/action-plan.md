@@ -81,7 +81,7 @@ All design decisions needed for this phase are already closed (ADR001, ADR005, a
 | # | Item | Action | Where |
 |---|---|---|---|
 | 3.1 | Tests only run on net10.0 | Change `<TargetFramework>net10.0</TargetFramework>` to `<TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>` (plural) — applies to the Phase 1 contract suite too | `src/RingBufferPlus.Tests/RingBufferPlus.Tests.csproj` |
-| 3.2 | `dotnet test` needs to cover all 3 TFMs in CI | Confirm whether `dotnet test` runs all TFMs of the test project by default; if not, add a matrix `strategy` to the workflow or 3 explicit steps | `.github/workflows/build.yml` |
+| 3.2 | `dotnet test` needs to cover all 3 TFMs in CI | **Confirmed (Phase 3):** `dotnet test` on a multi-targeted project iterates every TFM automatically with no flag needed — verified locally (three separate "Test run for..." blocks, 55/55 on each of net8.0/net9.0/net10.0). No TFM matrix was added to the workflow for this reason; the only change needed was installing all 3 SDKs/runtimes side by side so net8.0/net9.0 binaries can actually execute, not just build | `.github/workflows/build.yml` |
 | 3.3 | Confirm whether the rewrite removes `#if NET9_0_OR_GREATER` | During Phase 2, check whether the new Channel-based design still needs the conditional `System.Threading.Lock` — document the outcome in the revision note of [ADR002](./adr/ADR002V01-multi-targeting-policy-for-net8-net9-net10-and-test-matrix.md#revision-note--v5-mandate-adr006) | `RingBufferManager.cs` |
 | 3.4 | CI only validates ubuntu-latest | Add a matrix `os: [ubuntu-latest, windows-latest]` | `.github/workflows/build.yml` |
 | 3.5 | No coverage report | Add `dotnet test --collect:"XPlat Code Coverage"` + artifact upload | `.github/workflows/build.yml` |
