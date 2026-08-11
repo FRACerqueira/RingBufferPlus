@@ -63,7 +63,7 @@ Since the [ADR006](./ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-wit
 
 ### Negative Consequences
 
-* Widens the scope of the v4→v5 migration guide (Action Plan, Phase 6.1) — every builder call site in samples and in external consumers needs to be rewritten, regardless of which option is chosen.
+* Widens the scope of the CHANGELOG's breaking-changes entry (Action Plan, Phase 5.4 — no dedicated migration guide, see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note) — every builder call site in samples and in external consumers needs to be rewritten, regardless of which option is chosen.
 * Type redesign carries a risk of introducing new ambiguity if mode exclusivity is not modeled carefully (e.g. exploding into one interface per flag combination).
 
 ## Pros and Cons of the Options

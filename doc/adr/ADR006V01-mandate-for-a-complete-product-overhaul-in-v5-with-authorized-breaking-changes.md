@@ -57,9 +57,11 @@ Explicitly **out of scope** for this breaking-change window (a deliberate scope 
 * Fixes public API surface bugs at their root (signature), not just palliatively.
 * Preserves net8/9/10 consumer reach (no runtime compatibility loss, only API).
 
+**Revised on 2026-08-11 — migration communication scope:** the maintainer decided against a dedicated v4→v5 migration guide document (Action Plan, Phase 6, item 6.1 as originally scoped) — see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) for the detailed rationale. This does not follow from "no commitment to the current version" — that phrase authorizes breaking compatibility, it says nothing about whether the break is documented for existing consumers. `CHANGELOG.md`'s "Breaking changes v5.0.0" section is now the sole migration reference; the negative consequence below is updated to reflect that deliberately smaller scope, not removed.
+
 ### Negative Consequences
 
-* Requires a robust v4→v5 migration guide and explicit communication (CHANGELOG + release notes) — the breaking change is broad and needs to be publicly justified.
+* Requires explicit communication of the breaking changes via `CHANGELOG.md`'s dedicated "Breaking changes v5.0.0" section (published with the release, not after) — no separate migration guide document is produced (see the revision note above); the breaking change is still broad and needs to be publicly justified, just through a narrower communication surface than originally planned.
 * Rewriting the concurrency core without today's existing test safety net is a real risk — mitigated by requiring behavioral contract tests *before* the rewrite (see Action Plan, Phase 1).
 * Scope-creep risk — mitigated by the explicit "out of scope" list above; any additional item requires its own ADR, it does not get in by inertia.
 

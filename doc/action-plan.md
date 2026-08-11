@@ -12,7 +12,7 @@ Decisions confirmed by the maintainer:
 - **Concurrency**: the core is rewritten with `System.Threading.Channels` as a single state machine, replacing the current 3 primitives ([ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)).
 - **Public fluent API surface**: redesign of `IRingBuffer`/`IRingBufferScaleCapacity`/`IRingBufferBuild` collapsing into explicit, type-level modes (`FixedCapacity`/`ElasticCapacity`) — the one item in the whole analysis whose blocker was purely compatibility cost, now removed and **decided** ([ADR007](./adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)).
 - **Out of scope for v5** (a deliberate cut based on evidence/demand, not compatibility — see [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md)): the median-based autoscaling algorithm ([ADR003](./adr/ADR003V01-median-sample-autoscaling-algorithm.md)) and native observability (Phase 7, backlog).
-- **Documentation** will be restructured to be clear, objective, and instructive, with elevated priority for the v4→v5 migration guide (Phase 6).
+- **Documentation** will be restructured to be clear, objective, and instructive. **Revised (2026-08-11):** no dedicated v4→v5 migration guide document is produced — `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Phase 5.4) is the sole migration reference, a deliberate scope/effort decision, not one derived from the ADR006 mandate (see [ADR004](./adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
 
 ## How to read this plan
 
@@ -34,7 +34,7 @@ Items that are valid independently of v5 and can go into a small PR today, witho
 |---|---|---|---|
 | 0.1 | `SECURITY.md` out of date | Update the supported-versions table to `4.x` (and anticipate `5.x` at the v5 release) | `SECURITY.md` |
 | 0.2 | Dead dependency contradicts stated policy | Remove `Microsoft.AspNetCore.Http.Abstractions` from the 3 csproj `ItemGroup`s (zero usage confirmed via grep) | `src/RingBufferPlus/RingBufferPlus.csproj` |
-| 0.3 | No dedicated CHANGELOG | Create `CHANGELOG.md` (Keep a Changelog format) with the history currently in the README's "What's new" section. It will gain the "Breaking changes v5.0.0" section in Phase 6 | `CHANGELOG.md`, `README.md` |
+| 0.3 | No dedicated CHANGELOG | Create `CHANGELOG.md` (Keep a Changelog format) with the history currently in the README's "What's new" section. It will gain the "Breaking changes v5.0.0" section in Phase 5 (item 5.4) — the sole migration reference, per the revision note above | `CHANGELOG.md`, `README.md` |
 
 **Acceptance criterion:** no behavior change; pure housekeeping.
 
@@ -116,17 +116,19 @@ Out of scope for the v5 rewrite by explicit decision — the median algorithm **
 | 5.6 | **Total cutoff of v4.x support** (decision confirmed by the maintainer: no backport) | Update `SECURITY.md`: only the latest major (v5.x onward) receives vulnerability fixes — v4.x and earlier marked unsupported, including the concurrency bugs already documented in [ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md) | `SECURITY.md` | **At the v5.0.0 release** |
 | 5.7 | Signal the cutoff on NuGet | The already-published v4.x packages **cannot be deleted** (NuGet only allows unlisting/deprecating) — evaluate marking the v4.x versions as "deprecated" on NuGet, pointing to v5.x, so whoever installs them isn't migrating blind | NuGet.org (package dashboard) | **At the v5.0.0 release** |
 
-**Acceptance criterion:** a `v*` tag pointing at a commit with failing tests cannot publish to NuGet (test on a fork/dry-run); v5.0.0 is published with the CHANGELOG and migration guide already available at release time; `SECURITY.md` explicitly states v4.x no longer receives fixes.
+**Acceptance criterion:** a `v*` tag pointing at a commit with failing tests cannot publish to NuGet (test on a fork/dry-run); v5.0.0 is published with the CHANGELOG's "Breaking changes v5.0.0" section — the sole migration reference (see Phase 6's revision note) — already available at release time; `SECURITY.md` explicitly states v4.x no longer receives fixes.
 
 ---
 
-## Phase 6 — Documentation restructuring (P0 for the migration guide, P1 for the rest; decision in [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md))
+## Phase 6 — Documentation restructuring (P1; decision in [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md))
 
-Current problem: `README.md` mixes pitch, changelog, tutorial, and reference in the same file (>350 lines); API documentation is generated without a consolidated architecture view; and now, with v5 being a sweeping breaking change, **the absence of a migration guide stopped being a quality gap and became a release blocker** — without it, no consumer can migrate.
+Current problem: `README.md` mixes pitch, changelog, tutorial, and reference in the same file (>350 lines); API documentation is generated without a consolidated architecture view.
+
+**Revised (2026-08-11):** item 6.1 below (a dedicated `doc/guides/migration/v4-to-v5.md` document) is **cancelled** — the maintainer decided `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Phase 5.4) is the sole migration reference. This is a deliberate scope/effort decision, not one derived from [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md)'s mandate — see [ADR004](./adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note for the distinction between "authorized to break compatibility" and "obligated to document the break." The release-blocking P0 that used to sit here now lives entirely in Phase 5, item 5.4 (CHANGELOG published together with the release). The row below is kept, struck through, for traceability.
 
 | # | Item | Action | Where | Priority |
 |---|---|---|---|---|
-| 6.1 | **v4→v5 migration guide** | Dedicated document covering the 3 breaking-change fronts: exclusive `IAsyncDisposable` ([ADR005](./adr/ADR005V01-async-disposal-strategy-and-graceful-shutdown.md)), the redesigned builder surface ([ADR007](./adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)), and the fixed `WarmupRingBufferAsync` — a before/after example for each, and a migration checklist for each of the 6 usage scenarios currently documented in the README | `doc/guides/migration/v4-to-v5.md` | **P0 — blocks the release** |
+| ~~6.1~~ | ~~**v4→v5 migration guide**~~ **(cancelled — see revision note above)** | ~~Dedicated document covering the 3 breaking-change fronts: exclusive `IAsyncDisposable` ([ADR005](./adr/ADR005V01-async-disposal-strategy-and-graceful-shutdown.md)), the redesigned builder surface ([ADR007](./adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)), and the fixed `WarmupRingBufferAsync` — a before/after example for each, and a migration checklist for each of the 6 usage scenarios currently documented in the README~~ | ~~`doc/guides/migration/v4-to-v5.md`~~ | ~~P0~~ Cancelled |
 | 6.2 | Overloaded README | Reduce `README.md` to: pitch (1 paragraph), installation, **one** minimal example ("Quickstart") already in `await using`, and links to the guides below | `README.md` → `doc/guides/*.md` | P1 |
 | 6.3 | No single mental model before the API reference | Create `doc/guides/concepts.md`: lifecycle (build → warmup → acquire → scale up/down → `DisposeAsync`), the role of `Capacity`/`MinCapacity`/`MaxCapacity`, a (mermaid) diagram of the state flow in the new Channel-based design | `doc/guides/concepts.md` | P1 |
 | 6.4 | Usage guides with no fixed structure | Every scenario guide follows the same template: **When to use → Minimal example (v5, async-first) → What happens internally → Trade-offs/limitations → Common errors** | `doc/guides/usage-*.md` | P1 |
@@ -134,7 +136,7 @@ Current problem: `README.md` mixes pitch, changelog, tutorial, and reference in 
 | 6.6 | No thread-safety/DI guidance | Document usage as a singleton via `AddRingBuffer`, and "when NOT to use" scenarios | `doc/guides/concepts.md` | P2 |
 | 6.7 | Link-rot risk | Add a markdown link check to CI (`markdown-link-check` or `lychee`) | `.github/workflows/build.yml` | P2 |
 
-**Acceptance criterion:** (a) the v4→v5 migration guide covers 100% of the API changes listed in [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md); (b) a new contributor understands the mental model in `concepts.md` without reading code; (c) any design decision is traceable to its corresponding ADR.
+**Acceptance criterion:** (a) `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Phase 5.4) covers 100% of the API changes listed in [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) — this is now the migration-completeness bar, replacing the cancelled 6.1; (b) a new contributor understands the mental model in `concepts.md` without reading code; (c) any design decision is traceable to its corresponding ADR.
 
 ---
 
@@ -159,9 +161,9 @@ Phase 1 (contract tests) ──► Phase 2 (Channel-based + async-first rewrite)
                                         ▼
                     ┌───────────────────┼───────────────────┐
                     ▼                   ▼                   ▼
-         Phase 4 (testable       Phase 5 (v5 release:  Phase 6 (docs +
-         autoscale+benchmark,    publish gate +        migration guide,
-         out of v5 scope)        CHANGELOG)             P0 blocker)
+         Phase 4 (testable       Phase 5 (v5 release:  Phase 6 (docs
+         autoscale+benchmark,    gate + CHANGELOG as   restructuring,
+         out of v5 scope)        sole migration ref)   P1)
                     │                   │                   │
                     └───────────────────┴───────────────────┘
                                         │
@@ -171,7 +173,7 @@ Phase 1 (contract tests) ──► Phase 2 (Channel-based + async-first rewrite)
 Phase 7 (observability) ── backlog, not prioritized
 ```
 
-**Change from the earlier version of this plan:** Phase 1 and Phase 3 (old numbering) swapped roles — concurrency tests now come **before** the code change, not after, because the code change stopped being "patch the 7 bugs" and became "complete rewrite" ([ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)). The migration guide (Phase 6.1) moved from "backlog" to "release blocker".
+**Change from the earlier version of this plan:** Phase 1 and Phase 3 (old numbering) swapped roles — concurrency tests now come **before** the code change, not after, because the code change stopped being "patch the 7 bugs" and became "complete rewrite" ([ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)). The migration-communication obligation (originally Phase 6.1, "backlog" → "release blocker") was later narrowed to a `CHANGELOG.md`-only commitment living in Phase 5.4 — see the revision notes in [ADR004](./adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) and [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md).
 
 ## Related ADRs
 

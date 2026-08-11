@@ -61,7 +61,7 @@ Chosen option (revised): "Rewrite `RingBufferManager` as a single state machine 
 ### Negative Consequences
 
 * High-risk rewrite without today's concurrency test safety net — mitigated by the mandatory sequencing above (contract tests before code).
-* Breaks `IRingBufferService<T>`/`IDisposable` for current consumers — cost managed via the v4→v5 migration guide (Action Plan, Phase 6).
+* Breaks `IRingBufferService<T>`/`IDisposable` for current consumers — cost managed via `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Action Plan, Phase 5.4), not a dedicated migration guide (see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
 * May introduce new, subtle ordering bugs in the new model if test coverage is not equivalent to or better than the current model's.
 
 ## Pros and Cons of the Options
