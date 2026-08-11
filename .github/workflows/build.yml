@@ -41,3 +41,23 @@ jobs:
         name: coverage-${{ matrix.os }}
         path: ./coverage
         retention-days: 14
+
+  # Phase 6, item 6.7: catch link rot across README/CHANGELOG/doc/guides/doc/architecture
+  # before it reaches a released tag. Runs once, independently of the build matrix above.
+  # Deliberately --offline: this repo already links to a few external hosts that are flaky
+  # or redirect (an old MSDN doc page, shields.io badges) - checking those is out of scope
+  # here and would make this job flaky for reasons unrelated to our own docs. --offline
+  # restricts lychee to local file/anchor links, which is exactly what the doc restructuring
+  # in this phase needs covered.
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v5
+
+    - name: Check markdown links
+      uses: lycheeverse/lychee-action@v2
+      with:
+        args: >-
+          --no-progress --offline --exclude-mail
+          README.md CHANGELOG.md CONTRIBUTING.md "doc/**/*.md"
+        fail: true
