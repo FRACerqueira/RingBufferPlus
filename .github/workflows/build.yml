@@ -1,6 +1,12 @@
 name: Build
 
-on: [push, pull_request]
+on:
+  push:
+    # Tag pushes are covered by publish.yml, which calls this workflow itself (workflow_call)
+    # as its quality gate - skip the direct trigger here to avoid running it twice per tag.
+    tags-ignore: [ 'v*' ]
+  pull_request:
+  workflow_call:
 
 jobs:
   build:
