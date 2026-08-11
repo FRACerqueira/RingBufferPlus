@@ -12,8 +12,8 @@ namespace RingBufferPlus.Benchmarks
 {
     // ADR008 claims the built-in Meter/ActivitySource instrumentation is near-zero-cost when
     // nothing is listening, and that attaching a listener costs something but not much - this
-    // benchmark is the evidence for both halves of that claim (action-plan.md Phase 7, item 7.3),
-    // instead of leaving it as an assumption.
+    // benchmark is the evidence for both halves of that claim, instead of leaving it as an
+    // assumption.
     [MemoryDiagnoser]
     public class ObservabilityOverheadBenchmarks
     {

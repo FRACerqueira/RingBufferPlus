@@ -9,7 +9,7 @@ using RingBufferPlus;
 namespace RingBufferPlus.Benchmarks
 {
     // Measures raw AcquireAsync/turnback throughput on a warmed-up, fixed-capacity buffer -
-    // the steady-state cost path that has nothing to do with scaling (action-plan.md Phase 4).
+    // the steady-state cost path that has nothing to do with scaling.
     [MemoryDiagnoser]
     public class AcquireThroughputBenchmarks
     {

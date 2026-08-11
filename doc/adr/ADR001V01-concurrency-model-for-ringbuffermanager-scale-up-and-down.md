@@ -34,7 +34,7 @@ How do we fix this without compromising the product's central pitch ("lock-free 
 
 * Fix correctness bugs with minimal regression risk, without breaking the public API (breaking-change cost is high — see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)).
 * Preserve the "background scaling without blocking `AcquireAsync`/`SwitchToAsync`" philosophy (the `LockWhenScaling` command already documents this trade-off for whoever wants the opposite).
-* Avoid a full rewrite of the core without concurrency-test coverage, which does not exist today (see Action Plan, Phase 3).
+* Avoid a full rewrite of the core without concurrency-test coverage, which does not exist today.
 * Reduce, in the medium term, the number of distinct primitives guarding the same state (`_currentCapacity`, `_autoscaleRunning`).
 
 ## Considered Options
@@ -49,7 +49,7 @@ How do we fix this without compromising the product's central pitch ("lock-free 
 
 Chosen option (revised): "Rewrite `RingBufferManager` as a single state machine built on `System.Threading.Channels`", instead of a surgical fix to the 3 current primitives. With breaking changes authorized, fixing the structural root cause (multiple primitives guarding the same state) in v5 is preferable to fixing 4 point bugs in a design that would remain prone to the same class of error.
 
-**Mandatory sequencing (non-negotiable):** the rewrite can only start once the behavioral contract tests (Action Plan, Phase 1) are written against the system's *intended* behavior (not against the current implementation, where the bugs live). Those tests are the rewrite's acceptance criterion — without them, rewriting the concurrency core is exactly the risk that the original version of this ADR used to justify not rewriting now. This is reflected in the revised Phase 1 of `action-plan.md`.
+**Mandatory sequencing (non-negotiable):** the rewrite can only start once the behavioral contract tests are written against the system's *intended* behavior (not against the current implementation, where the bugs live). Those tests are the rewrite's acceptance criterion — without them, rewriting the concurrency core is exactly the risk that the original version of this ADR used to justify not rewriting now.
 
 ### Positive Consequences
 
@@ -61,7 +61,7 @@ Chosen option (revised): "Rewrite `RingBufferManager` as a single state machine 
 ### Negative Consequences
 
 * High-risk rewrite without today's concurrency test safety net — mitigated by the mandatory sequencing above (contract tests before code).
-* Breaks `IRingBufferService<T>`/`IDisposable` for current consumers — cost managed via `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Action Plan, Phase 5.4), not a dedicated migration guide (see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
+* Breaks `IRingBufferService<T>`/`IDisposable` for current consumers — cost managed via `CHANGELOG.md`'s "Breaking changes v5.0.0" section, not a dedicated migration guide (see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
 * May introduce new, subtle ordering bugs in the new model if test coverage is not equivalent to or better than the current model's.
 
 ## Pros and Cons of the Options

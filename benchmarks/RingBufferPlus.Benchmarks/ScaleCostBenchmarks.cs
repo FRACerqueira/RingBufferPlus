@@ -11,8 +11,7 @@ using RingBufferPlus;
 namespace RingBufferPlus.Benchmarks
 {
     // Measures the engine's own cost of moving between capacities via SwitchToAsync, isolated
-    // from factory latency (the factory here just returns an int instantly) - action-plan.md
-    // Phase 4, "scale up/down cost".
+    // from factory latency (the factory here just returns an int instantly).
     //
     // RunStrategy.Monitoring pins InvocationCount to 1: the default job's UnrollFactor/
     // InvocationCount tuning calls the benchmarked method many times per [IterationSetup], and

@@ -49,7 +49,7 @@ Since the [ADR006](./ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-wit
 
 **Decided on 2026-08-11 by the maintainer:** "Collapse into fewer interfaces with explicit, mutually exclusive, type-level modes" (option 2 — this ADR's original recommendation), because it resolves the 4 concrete defects from the context (silent overwrite, overloaded name, uncommunicated exclusivity, hidden weight of `LockWhenScaling`) without abandoning the "fluent syntax" product pillar. The options-object option (option 3) remains registered as a non-chosen alternative — it would abandon a currently documented differentiator for no reason beyond style preference.
 
-**Concrete design to implement in Action Plan Phase 2.6:**
+**Concrete design:**
 * `.FixedCapacity(n)` and `.ElasticCapacity(min, max)` as distinct builder methods, replacing the implicit inference today done by `Capacity()` + `ScaleTimer()` — each returns a type that only exposes what makes sense for that mode (fixed capacity does not expose `MinCapacity`/`MaxCapacity`/`AutoScaleAcquireFault`).
 * `AutoScaleAcquireFault(...)`, when called, returns a type that **no longer** exposes the manual `SwitchToAsync` equivalent — the exclusivity becomes a compile-time error, not a silent runtime `false`.
 * `LockWhenScaling` remains an explicit method, but only available from `.ElasticCapacity(...)` (it makes no sense in fixed mode), making it visible in the type that this is an elastic-mode-specific decision.
@@ -63,7 +63,7 @@ Since the [ADR006](./ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-wit
 
 ### Negative Consequences
 
-* Widens the scope of the CHANGELOG's breaking-changes entry (Action Plan, Phase 5.4 — no dedicated migration guide, see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note) — every builder call site in samples and in external consumers needs to be rewritten, regardless of which option is chosen.
+* Widens the scope of the CHANGELOG's breaking-changes entry (no dedicated migration guide, see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note) — every builder call site in samples and in external consumers needs to be rewritten, regardless of which option is chosen.
 * Type redesign carries a risk of introducing new ambiguity if mode exclusivity is not modeled carefully (e.g. exploding into one interface per flag combination).
 
 ## Pros and Cons of the Options

@@ -6,7 +6,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ## [Unreleased]
 
-v5.0.0 is a complete, coordinated product overhaul with sweeping breaking changes — see [doc/action-plan.md](doc/action-plan.md) and the ADRs in [doc/adr](doc/adr) for full context. Planned breaking changes:
+v5.0.0 is a complete, coordinated product overhaul with sweeping breaking changes — see the ADRs in [doc/adr](doc/adr/indexadrs.md) for full context. Planned breaking changes:
 
 - Concurrency core rewritten on `System.Threading.Channels` as a single state machine ([ADR001](doc/adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)). All `RingBufferManager<T>` mutable scale state is now owned exclusively by one consumer loop — no lock/semaphore is used or needed.
 - `IDisposable` removed; `IAsyncDisposable` becomes the sole disposal contract on `IRingBufferService<T>` and `RingBufferValue<T>` ([ADR005](doc/adr/ADR005V01-async-disposal-strategy-and-graceful-shutdown.md)). `using`/`Dispose()` call sites must become `await using`/`DisposeAsync()`.

@@ -12,7 +12,7 @@ namespace RingBufferPlus.Benchmarks
 {
     // Measures reaction time to a synthetic load change: exhaust the pool so the next acquire
     // times out, then time how long it takes AutoScaleAcquireFault to react and actually reach
-    // MaxCapacity (action-plan.md Phase 4, "reaction time to synthetic load change").
+    // MaxCapacity.
     //
     // AutoScaleAcquireFault(0) means the very first timed-out acquire crosses the fault
     // threshold, so the measured duration is dominated by AcquireTimeout plus the actual

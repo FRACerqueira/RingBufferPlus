@@ -38,7 +38,7 @@ Production code has TFM-conditional behavior (e.g. `#if NET9_0_OR_GREATER` in `R
 
 ## Decision Outcome
 
-Chosen option: "Keep multi-targeting net8.0/net9.0/net10.0 on the library and change tests to the same matrix", because it is the only option that preserves the already-published consumer reach (explicit maintainer decision) while still closing the coverage gap that triggered the review. Resulting action (see Action Plan, Phase 3): change `RingBufferPlus.Tests.csproj` to a plural `TargetFrameworks` with the three TFMs, and adjust `.github/workflows/build.yml` so `dotnet test` runs (by default, or via an explicit `--framework <tfm>`, to be validated empirically) the suite against all three targets, failing the build on any TFM regression.
+Chosen option: "Keep multi-targeting net8.0/net9.0/net10.0 on the library and change tests to the same matrix", because it is the only option that preserves the already-published consumer reach (explicit maintainer decision) while still closing the coverage gap that triggered the review. Resulting action: change `RingBufferPlus.Tests.csproj` to a plural `TargetFrameworks` with the three TFMs, and adjust `.github/workflows/build.yml` so `dotnet test` runs (by default, or via an explicit `--framework <tfm>`, to be validated empirically) the suite against all three targets, failing the build on any TFM regression.
 
 ### Positive Consequences
 

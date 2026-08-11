@@ -23,7 +23,7 @@ Full version history has moved to [CHANGELOG.md](CHANGELOG.md).
 
 **v4.0.1 (latest released version)** added .NET 10 support.
 
-**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [Action Plan](doc/action-plan.md), the [ADRs](doc/adr/indexadrs.md), and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is planned) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
+**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [ADRs](doc/adr/indexadrs.md) and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is planned) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
 
 ## Installing
 

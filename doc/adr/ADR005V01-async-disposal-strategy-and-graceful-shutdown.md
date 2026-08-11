@@ -53,7 +53,7 @@ Fixes that remain valid, now as part of the single `DisposeAsync`'s design (no l
 ### Negative Consequences
 
 * Breaks every current consumer using synchronous `using var rb = ...` — including all 5 samples in this repository (`samples/*`), which need to be migrated to `await using` as part of v5 itself.
-* Migration cost managed via `CHANGELOG.md`'s "Breaking changes v5.0.0" section (Action Plan, Phase 5.4) — not free, a design decision consistent with the mandate, not an absence of trade-off; no dedicated migration guide is produced (see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
+* Migration cost managed via `CHANGELOG.md`'s "Breaking changes v5.0.0" section — not free, a design decision consistent with the mandate, not an absence of trade-off; no dedicated migration guide is produced (see [ADR004](./ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)'s revision note).
 
 ## Pros and Cons of the Options
 

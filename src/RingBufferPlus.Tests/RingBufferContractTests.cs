@@ -3,14 +3,14 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 //
-// Behavioral contract tests for the v4 -> v5 concurrency rewrite (see doc/action-plan.md, Phase 1/2,
-// and doc/adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md).
+// Behavioral contract tests for the v4 -> v5 concurrency rewrite (see
+// doc/adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md).
 //
-// This suite started (Phase 1) as a set of tests describing the INTENDED v5 behavior, with every
+// This suite started as a set of tests describing the INTENDED v5 behavior, with every
 // regression case marked [Fact(Skip = "...")] because it failed against the v4 implementation.
-// Phase 2 replaced RingBufferManager<T> with the Channel-based, single-consumer engine these
-// contracts describe, so every test below is now ported to the v5 API and unskipped - this file
-// IS the Phase 2 acceptance gate (action-plan.md, Phase 2 "Acceptance criterion"), and it is green.
+// The Channel-based, single-consumer engine (ADR001) later replaced RingBufferManager<T>, so
+// every test below is now ported to the v5 API and unskipped - this file is the rewrite's
+// acceptance gate, and it is green.
 //
 // Notably, 1.3 (concurrent SwitchToAsync) is no longer "best-effort": because the new engine is a
 // single sequential consumer, "exactly one accepted caller" is now a deterministic guarantee, not
