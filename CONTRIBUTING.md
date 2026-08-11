@@ -6,6 +6,7 @@
   * [Code style](#code-style)
   * [Dependencies](#dependencies)
   * [Unit tests](#unit-tests)
+* [API stability policy](#api-stability-policy)
 * [Contributing process](#contributing-process)
   * [Get buyoff or find open community issues or features](#get-buyoff-or-find-open-community-issues-or-features)
   * [Set up your environment](#Set-up-your-environment)
@@ -49,6 +50,17 @@ The assembly `RingBufferPlus` should have no dependencies except the .NET BCL li
 
 Make sure to run all unit tests before creating a pull request.
 Any new code should also have reasonable unit test coverage.
+
+## API stability policy
+
+Starting from **v5.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)):
+
+* No public symbol (type, member, or overload) is removed, or has its behavior changed in a breaking way, without first being marked `[Obsolete("migration message")]` for at least one full release cycle.
+* A breaking change without a prior deprecation cycle is not a default option — it requires its own ADR explicitly justifying the exception.
+* v5.0.0 itself is exempt from this policy: it is a single, deliberate "clean slate" reset explicitly authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md), with no `[Obsolete]` bridge from v4.x. This exemption applies only to that one release and does not repeat for any future major.
+* v4.x and earlier receive no further fixes once v5.0.0 ships (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md).
+
+If your contribution removes or changes the behavior of a public symbol, call this out explicitly in the pull request description so it can be checked against this policy.
 
 ## Contributing process
 ### Get buyoff or find open community issues or features
