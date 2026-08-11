@@ -49,7 +49,7 @@ Chosen option: "v5.0.0 as a single, coordinated, deliberate rewrite, resuming st
 Explicitly **out of scope** for this breaking-change window (a deliberate scope cut, to avoid inflating v5). Note that under "no commitment to the current version", compatibility is **no longer a valid reason** to exclude anything — so each exclusion below is justified by a different criterion, independent of compatibility:
 
 * **The median-based autoscaling algorithm** — excluded for **lack of evidence**, not for compatibility cost: there is no benchmark demonstrating that swapping the algorithm would improve the product (see [ADR003](./ADR003V01-median-sample-autoscaling-algorithm.md)). If the Action Plan's Phase 4 benchmark shows a need, the exclusion is revisited — with data, not with "since it can break anyway, might as well".
-* **Native observability (OpenTelemetry)** — excluded for **lack of demonstrated user demand**, not for compatibility cost. It remains in the backlog (Action Plan Phase 7), without its own ADR yet, until there is a real signal of need.
+* **Native observability (OpenTelemetry)** — excluded for **lack of demonstrated user demand**, not for compatibility cost. It remains in the backlog (Action Plan Phase 7), without its own ADR yet, until there is a real signal of need. **Revisited on 2026-08-11 — see [ADR008](./ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md):** the signal that ended up triggering the candidate ADR was not an external consumer request as this bullet anticipated — it was the maintainer's own cost/benefit assessment once the concrete implementation cost was scoped out (additive, no new dependency, no breaking change). Recorded here for traceability rather than silently treated as if "demonstrated user demand" had literally occurred.
 
 ### Positive Consequences
 
@@ -91,3 +91,4 @@ Explicitly **out of scope** for this breaking-change window (a deliberate scope 
 * Refines: [ADR005](./ADR005V01-async-disposal-strategy-and-graceful-shutdown.md) — exclusive `IAsyncDisposable` authorized for v5.
 * Refines: [ADR007](./ADR007V01-redesign-of-the-public-fluent-api-surface.md) — fluent surface redesign authorized and decided (explicit, type-level modes).
 * Related: [ADR002](./ADR002V01-multi-targeting-policy-for-net8-net9-net10-and-test-matrix.md) — net8/9/10 multi-targeting reaffirmed, unaffected by this mandate.
+* Refined by: [ADR008](./ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) — the observability exclusion above is revisited; see this ADR's revision note.

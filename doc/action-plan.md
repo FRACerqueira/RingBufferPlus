@@ -140,9 +140,20 @@ Current problem: `README.md` mixes pitch, changelog, tutorial, and reference in 
 
 ---
 
-## Phase 7 — Observability (P2, backlog, out of scope for v5 by explicit decision)
+## Phase 7 — Observability (P2; decision in [ADR008](./adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md))
 
-Not prioritized in this round. Registered as a candidate for a new ADR once there is real user demand (today there is only manual `ILogger`/`HeartBeat`). See the scope cut in [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md).
+**Revised (2026-08-11):** originally backlog, out of scope for v5 per [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md)'s scope cut ("lack of demonstrated user demand"). Revisited and accepted via [ADR008](./adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) once the concrete implementation cost was scoped out: additive, no new dependency (`System.Diagnostics.Metrics`/`ActivitySource` ship in the .NET shared framework since .NET 5), no breaking change. Not yet implemented — this phase covers the implementation work the ADR authorizes.
+
+| # | Item | Action | Where | Priority |
+|---|---|---|---|---|
+| 7.1 | No structured metrics | Add a per-instance `Meter` (constant `Name`, `"RingBufferPlus"`, one instance per buffer, disposed with it) with `acquire.duration`, `acquire.faults`, `capacity.current` (observable gauge, callback closes over the owning instance), `scale.operations`, `scale.duration` — all tagged `buffer.name`. No `_total` suffix on counters (most Prometheus-family exporters append it themselves) | `src/RingBufferPlus/Core/RingBufferManager.cs` | P2 |
+| 7.2 | No structured tracing | Add a per-instance `ActivitySource` (same `"RingBufferPlus"` name, disposed with the instance) with one `Activity` per `AcquireAsync` call and one per scale operation | `src/RingBufferPlus/Core/RingBufferManager.cs` | P2 |
+| 7.3 | Verify near-zero-cost when unobserved | Extend `benchmarks/RingBufferPlus.Benchmarks` with a throughput comparison (listener attached vs. none) — this substantiates ADR008's own performance claim, not optional polish | `benchmarks/RingBufferPlus.Benchmarks/` | P2 |
+| 7.4 | No test coverage for the new signals | Add `MeterListener`/`ActivityListener`-based assertions that the expected instruments/activities fire with the expected tags, including that disposing one buffer does not silence another's still-live `Meter`/`ActivitySource` | `src/RingBufferPlus.Tests/` | P2 |
+| 7.5 | No usage guide | Create `doc/guides/usage-observability.md` following the same template as the other Phase 6 guides; add a mention in `doc/architecture/overview.md` | `doc/guides/usage-observability.md` | P2 |
+| 7.6 | CHANGELOG not yet updated | Add an "Added" entry once this phase actually ships, under whichever version it lands in (`[Unreleased]` if bundled into v5.0.0, or a new entry if it fast-follows) | `CHANGELOG.md` | P2 |
+
+**Acceptance criterion:** (a) every instrument/activity in 7.1/7.2 fires with the tags described in ADR008 under test; (b) the Phase 4 benchmark harness shows no meaningful throughput regression with no listener attached; (c) `dotnet build`/`dotnet test` remain green across net8.0/net9.0/net10.0 with no new `PackageReference` added to `RingBufferPlus.csproj`; (d) disposing one buffer instance does not affect another live buffer's telemetry (per-instance `Meter`/`ActivitySource` lifetime, not shared).
 
 ---
 
@@ -170,10 +181,10 @@ Phase 1 (contract tests) ──► Phase 2 (Channel-based + async-first rewrite)
                                         ▼
                               v5.0.0 Release
 
-Phase 7 (observability) ── backlog, not prioritized
+Phase 7 (observability) ── additive, non-breaking; can ship in v5.0.0 or fast-follow (ADR008)
 ```
 
-**Change from the earlier version of this plan:** Phase 1 and Phase 3 (old numbering) swapped roles — concurrency tests now come **before** the code change, not after, because the code change stopped being "patch the 7 bugs" and became "complete rewrite" ([ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)). The migration-communication obligation (originally Phase 6.1, "backlog" → "release blocker") was later narrowed to a `CHANGELOG.md`-only commitment living in Phase 5.4 — see the revision notes in [ADR004](./adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) and [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md).
+**Change from the earlier version of this plan:** Phase 1 and Phase 3 (old numbering) swapped roles — concurrency tests now come **before** the code change, not after, because the code change stopped being "patch the 7 bugs" and became "complete rewrite" ([ADR001](./adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)). The migration-communication obligation (originally Phase 6.1, "backlog" → "release blocker") was later narrowed to a `CHANGELOG.md`-only commitment living in Phase 5.4 — see the revision notes in [ADR004](./adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) and [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md). Phase 7 (observability) was later un-cancelled by [ADR008](./adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) — it is additive/non-breaking, so it does not require waiting for a future major.
 
 ## Related ADRs
 
@@ -186,12 +197,13 @@ Phase 7 (observability) ── backlog, not prioritized
 | [ADR005](./adr/ADR005V01-async-disposal-strategy-and-graceful-shutdown.md) | Disposal — exclusive async-first | **Accepted** (2026-08-11) |
 | [ADR006](./adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) | **v5 mandate — no commitment to the current version** | **Accepted** (2026-08-11) |
 | [ADR007](./adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md) | Redesign of the fluent API surface — explicit, type-level modes | **Accepted** (2026-08-11) |
+| [ADR008](./adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) | Native observability — BCL-only metrics/tracing, un-cancels Phase 7 | **Accepted** (2026-08-11) |
 
-All 7 ADRs have been formally approved (`adrplus approve`) as of 2026-08-11 — no design decision pending. Phase 2 can start with no approval blocker. Index automatically kept up to date at [`doc/adr/indexadrs.md`](./adr/indexadrs.md) by the `AdrIndexer` plugin.
+All 8 ADRs have been formally approved (`adrplus approve`) as of 2026-08-11 — no design decision pending. Index automatically kept up to date at [`doc/adr/indexadrs.md`](./adr/indexadrs.md) by the `AdrIndexer` plugin.
 
 ### ADR necessity review (per maintainer request)
 
-No ADR was removed. Each of the 7 governs a distinct, independent decision axis — removing any one of them would either lose a real decision or force it to be rebuilt as a loose paragraph elsewhere:
+No ADR was removed. Each of the 8 governs a distinct, independent decision axis — removing any one of them would either lose a real decision or force it to be rebuilt as a loose paragraph elsewhere:
 
 | ADR | Unique decision axis |
 |---|---|
@@ -202,5 +214,6 @@ No ADR was removed. Each of the 7 governs a distinct, independent decision axis 
 | ADR005 | Disposal contract (sync vs. async) |
 | ADR006 | Strategic mandate — what it authorizes and what it cuts from scope |
 | ADR007 | Shape of the builder's public surface |
+| ADR008 | Whether/how to add native observability, and why now instead of on external demand |
 
 The one real overlap was ADR006 *restating* the content of ADRs 001/002/004/005 instead of just linking to them — fixed in this revision (ADR006's list is now one line + link per item, not a duplicated summary).
