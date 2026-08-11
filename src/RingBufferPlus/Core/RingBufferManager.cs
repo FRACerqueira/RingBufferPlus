@@ -19,8 +19,18 @@
 //    failure: an instance whose warmup throws is permanently broken by design; construct a new
 //    instance to retry (v4's retry path was itself broken: a failed Startup() left
 //    _WarmupRunning stuck true forever).
+//
+// Observability (ADR008): _meter and _activitySource are per-instance, not static, and both
+// share the constant Name "RingBufferPlus" - a listener subscribing to that name still sees
+// every live buffer, but disposing one buffer's Meter/ActivitySource (in DisposeAsync) can never
+// silence another's. Both APIs are "pay for play": with no listener attached, Add/Record/
+// StartActivity calls are near-zero-cost, so this always runs, unconditionally - there is no
+// opt-in/opt-out on the builder surface. Warmup's own MoveToCapacityAsync call intentionally
+// carries no scaleTrigger (see below) - the initial fill is not a "scale operation" in the
+// manual/auto sense the scale.* metrics describe.
 
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Threading.Channels;
 using Microsoft.Extensions.Logging;
 
@@ -37,6 +47,13 @@ namespace RingBufferPlus.Core
         private readonly Lazy<Task> _warmup;
         private readonly Task _engineTask;
         private readonly List<int> _samples = [];
+
+        private readonly Meter _meter = new("RingBufferPlus");
+        private readonly ActivitySource _activitySource = new("RingBufferPlus");
+        private readonly Histogram<double> _acquireDuration;
+        private readonly Counter<long> _acquireFaults;
+        private readonly Counter<long> _scaleOperations;
+        private readonly Histogram<double> _scaleDuration;
 
         private Task? _heartbeatTask;
         private Task? _sampleTickTask;
@@ -116,6 +133,15 @@ namespace RingBufferPlus.Core
         {
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetimecancellation);
             _warmup = new Lazy<Task>(WarmupCoreAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+
+            _acquireDuration = _meter.CreateHistogram<double>("ringbufferplus.acquire.duration", unit: "s", description: "Duration of AcquireAsync calls, in seconds.");
+            _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
+            _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction and trigger.");
+            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds.");
+            _meter.CreateObservableGauge("ringbufferplus.capacity.current",
+                () => new Measurement<int>(CurrentCapacity, new KeyValuePair<string, object?>("buffer.name", Name)),
+                description: "Current capacity of the buffer.");
+
             _engineTask = Task.Run(RunEngineAsync);
         }
 
@@ -124,25 +150,53 @@ namespace RingBufferPlus.Core
             ObjectDisposedException.ThrowIf(_disposed, this);
             await EnsureWarmupAsync().ConfigureAwait(false);
 
+            using var activity = _activitySource.StartActivity("RingBufferPlus.Acquire");
+            activity?.SetTag("buffer.name", Name);
+
             var sw = Stopwatch.StartNew();
             using var timeoutCts = new CancellationTokenSource(AcquireTimeout);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _lifetime.Token, cancellation);
             try
             {
                 var item = await _availableItems.Reader.ReadAsync(linked.Token).ConfigureAwait(false);
+                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("acquire.success", true));
+                activity?.SetTag("success", true);
+                activity?.SetTag("timed_out", false);
                 return new RingBufferValue<T>(Name, sw.Elapsed, true, item, TurnbackAsync);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
-                if (timeoutCts.IsCancellationRequested)
+                var timedOut = timeoutCts.IsCancellationRequested;
+                if (timedOut)
                 {
                     LogWarning("RingBuffer without resource");
                     if (AutoScaleFault)
                     {
                         _commands.Writer.TryWrite(EngineCommand.Fault());
                     }
+                    _acquireFaults.Add(1, new KeyValuePair<string, object?>("buffer.name", Name));
                 }
+                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("acquire.success", false));
+                activity?.SetTag("success", false);
+                activity?.SetTag("timed_out", timedOut);
                 return new RingBufferValue<T>(Name, sw.Elapsed, false, default!, null);
+            }
+            catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+            {
+                // The caller's own token fired, not a timeout/disposal - this rethrows unchanged
+                // (see the sibling catch above), but the activity/duration must still record an
+                // outcome before it does, or a trace shows an outcome-less span for this call.
+                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("acquire.success", false));
+                activity?.SetTag("success", false);
+                activity?.SetTag("timed_out", false);
+                activity?.SetTag("cancelled", true);
+                throw;
             }
         }
 
@@ -226,6 +280,8 @@ namespace RingBufferPlus.Core
             }
 
             _lifetime.Dispose();
+            _meter.Dispose();
+            _activitySource.Dispose();
         }
 
         private Task EnsureWarmupAsync() => _warmup.Value;
@@ -334,7 +390,7 @@ namespace RingBufferPlus.Core
                         break;
                     }
                     cmd.Accepted?.TrySetResult(true);
-                    var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                    var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "manual").ConfigureAwait(false);
                     cmd.Completion?.TrySetResult(moved);
                     break;
 
@@ -344,7 +400,7 @@ namespace RingBufferPlus.Core
                     {
                         _faultCount = 0;
                         var next = CurrentCapacity == MinCapacity ? Capacity : MaxCapacity;
-                        await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                        await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
                     }
                     break;
 
@@ -375,7 +431,7 @@ namespace RingBufferPlus.Core
             var target = AutoScaleDecision.EvaluateScaleDown(median, IsInitCapacity, IsMaxCapacity, MinCapacity, Capacity, ScaleDownInit, ScaleDownMax);
             if (target.HasValue)
             {
-                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
             }
         }
 
@@ -386,23 +442,29 @@ namespace RingBufferPlus.Core
             _ => Capacity
         };
 
-        private async Task<bool> MoveToCapacityAsync(int target, bool hasTimeout, CancellationToken token)
+        private async Task<bool> MoveToCapacityAsync(int target, bool hasTimeout, CancellationToken token, string? scaleTrigger = null)
         {
             var current = CurrentCapacity;
             if (target == current) return true;
 
+            var direction = target > current ? "up" : "down";
+            using var activity = scaleTrigger is null ? null : _activitySource.StartActivity("RingBufferPlus.Scale");
+            activity?.SetTag("buffer.name", Name);
+            activity?.SetTag("direction", direction);
+            activity?.SetTag("trigger", scaleTrigger);
+            var sw = scaleTrigger is null ? null : Stopwatch.StartNew();
+
             _scaling = true;
             try
             {
+                bool ok;
                 if (target > current)
                 {
                     var quantity = target - current;
                     LogMessage($"Starting ScaleUp {quantity}.");
                     var created = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
                     LogMessage("End ScaleUp.");
-                    if (created != quantity) return false;
-                    Volatile.Write(ref _currentCapacity, target);
-                    return true;
+                    ok = created == quantity;
                 }
                 else
                 {
@@ -410,14 +472,27 @@ namespace RingBufferPlus.Core
                     LogMessage($"Starting ScaleDown {quantity}.");
                     var removed = await RemoveItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
                     LogMessage("End ScaleDown.");
-                    if (removed != quantity) return false;
-                    Volatile.Write(ref _currentCapacity, target);
-                    return true;
+                    ok = removed == quantity;
                 }
+                if (ok)
+                {
+                    Volatile.Write(ref _currentCapacity, target);
+                }
+                return ok;
             }
             finally
             {
                 _scaling = false;
+                if (scaleTrigger is not null)
+                {
+                    _scaleOperations.Add(1,
+                        new KeyValuePair<string, object?>("buffer.name", Name),
+                        new KeyValuePair<string, object?>("direction", direction),
+                        new KeyValuePair<string, object?>("trigger", scaleTrigger));
+                    _scaleDuration.Record(sw!.Elapsed.TotalSeconds,
+                        new KeyValuePair<string, object?>("buffer.name", Name),
+                        new KeyValuePair<string, object?>("direction", direction));
+                }
             }
         }
 

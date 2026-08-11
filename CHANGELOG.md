@@ -18,6 +18,10 @@ v5.0.0 is a complete, coordinated product overhaul with sweeping breaking change
 - `WarmupRingBufferAsync` signature fixed (the `token` parameter is now honored; missing-buffer now throws `ArgumentNullException` as documented, instead of silently no-oping).
 - **v4.x and earlier receive no further fixes once v5.0.0 ships** — including the concurrency bugs listed under v4.0.1 below. See [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) and `SECURITY.md`.
 
+### Added
+
+- Native observability: every buffer now emits OpenTelemetry-compatible metrics (`System.Diagnostics.Metrics.Meter`, name `"RingBufferPlus"`) and traces (`System.Diagnostics.ActivitySource`, same name) — `acquire.duration`, `acquire.faults`, `capacity.current`, `scale.operations`, `scale.duration`, and one `Activity` per acquire/scale operation, all tagged `buffer.name` ([ADR008](doc/adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md)). No new dependency: both APIs ship in the .NET shared framework since .NET 5, and RingBufferPlus does not depend on the `OpenTelemetry` package itself — see the [observability guide](doc/guides/usage-observability.md).
+
 ## [4.0.1] - 2025-11-14
 
 ### Added

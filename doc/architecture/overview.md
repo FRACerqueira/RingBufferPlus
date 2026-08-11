@@ -45,6 +45,7 @@ flowchart TB
 - **`RingBufferManager<T>`** (`src/RingBufferPlus/Core/RingBufferManager.cs`) is the only concrete implementation of `IRingBufferService<T>`/`IRingBufferManualScaleService<T>`. It owns three `System.Threading.Channels.Channel<T>`-family queues (available items, engine commands, background log messages) and a single consumer loop that is the sole writer of scale state. See [ADR001](../adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md).
 - **`AutoScaleDecision`** (`src/RingBufferPlus/Core/AutoScaleDecision.cs`) is a pure static class — `Median(samples)` and `EvaluateScaleDown(...)` take primitive inputs and return a decision with no dependency on the engine, specifically so the autoscale algorithm can be unit-tested and benchmarked in isolation. See [ADR003](../adr/ADR003V01-median-sample-autoscaling-algorithm.md).
 - **`RingBufferValue<T>`** (`src/RingBufferPlus/RingBufferValue.cs`) is the rented-item wrapper returned by `AcquireAsync`. Disposing it (`await using`) invokes the manager's turnback callback, which either returns the item to the pool or, if `Invalidate()` was called, discards it and queues a replacement.
+- **Observability**: each `RingBufferManager<T>` owns its own `Meter`/`ActivitySource` (not one static instance for the whole assembly), both named `"RingBufferPlus"` — per-instance so disposing one buffer can never silence another's telemetry, while a single exporter subscription by name still sees every buffer, disambiguated by a `buffer.name` tag. See [ADR008](../adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) and the [observability guide](../guides/usage-observability.md).
 
 ## Where things live
 
@@ -55,7 +56,8 @@ flowchart TB
 | DI integration (`AddRingBuffer`, `WarmupRingBufferAsync`) | `src/RingBufferPlus/HostingExtensions.cs` |
 | Behavioral contract tests (the acceptance gate for any engine change) | `src/RingBufferPlus.Tests/RingBufferContractTests.cs` |
 | Autoscale algorithm unit tests | `src/RingBufferPlus.Tests/AutoScaleDecisionTests.cs` |
-| Quantitative benchmarks (throughput, scale cost, autoscale reaction time) | `benchmarks/RingBufferPlus.Benchmarks/` |
+| Observability (metrics/tracing) tests | `src/RingBufferPlus.Tests/RingBufferObservabilityTests.cs` |
+| Quantitative benchmarks (throughput, scale cost, autoscale reaction time, observability overhead) | `benchmarks/RingBufferPlus.Benchmarks/` |
 | All architecture decisions, with context/trade-offs/consequences | `doc/adr/` |
 
 ## Contributing to the engine
