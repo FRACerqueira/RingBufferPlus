@@ -83,6 +83,17 @@ For runnable samples, see the [Samples directory](./samples):
 
 Generated per-type/per-member reference: [src/docs/docindex.md](./src/docs/docindex.md).
 
+## Architecture Decision Records (ADR)
+
+RingBufferPlus documents its significant architectural and design decisions as
+**Architecture Decision Records (ADR)**, following the
+[AdrPlus](https://github.com/FRACerqueira/AdrPlus) convention. Each record
+captures the context, the decision, the alternatives considered, and the
+consequences — so the reasoning behind the library's design stays traceable over
+time.
+
+👉 See the **[ADR index](doc/adr/indexadrs.md)** for the full list of decisions.
+
 ## Code of Conduct
 
 This project has adopted the code of conduct defined by the Contributor Covenant to clarify expected behavior in our community.
