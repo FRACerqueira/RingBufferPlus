@@ -1,48 +1,63 @@
-name: Publish
+name: Release
 
 on:
   push:
-    tags: [ v* ]
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+  packages: write
 
 jobs:
-  # Phase 5, item 5.2: reject a tag that doesn't match vMAJOR.MINOR.PATCH before anything
-  # else runs - no pre-release/build-metadata suffixes, matching ADR004's policy. This gates
-  # `build` below so a malformed tag fails fast instead of burning the full test matrix first.
-  validate-tag:
+  release:
+    name: Pack & Publish to NuGet
     runs-on: ubuntu-latest
+
     steps:
-    - name: Validate tag format
-      run: |
-        TAG="${GITHUB_REF#refs/tags/}"
-        if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Tag '$TAG' does not match the required vMAJOR.MINOR.PATCH format." >&2
-          exit 1
-        fi
+      # Shallow checkout: no step here needs git history — generate_release_notes
+      # is a server-side GitHub API feature, not derived from the local clone.
+      # A full fetch-depth: 0 was pulling this repo's ~800MB of since-removed
+      # docs/images/*.gif history for no reason.
+      - name: Checkout
+        uses: actions/checkout@v4
 
-  # Phase 5, item 5.1: publish now depends on build.yml succeeding on this exact commit,
-  # instead of running independently. Calling it as a reusable workflow (rather than
-  # duplicating its steps here) means it can never drift out of sync with the real gate.
-  build:
-    needs: validate-tag
-    uses: ./.github/workflows/build.yml
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
 
-  publish:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v5
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
 
-    - name: Setup dotnet
-      uses: actions/setup-dotnet@v5
-      with:
-        dotnet-version: '10.0.x' # SDK Version to use.
+      - name: Build (Release)
+        run: dotnet build src/RingBufferPlus.csproj --configuration Release -p:Version=${{ steps.version.outputs.VERSION }}
 
-    - name: Setup Version
-      id: setup_version
-      run: echo "VERSION=${GITHUB_REF/refs\/tags\/v/}" >> $GITHUB_OUTPUT
+      - name: Pack tool
+        run: >
+          dotnet pack src/RingBufferPlus.csproj
+          --no-build
+          --configuration Release
+          -p:Version=${{ steps.version.outputs.VERSION }}
+          --output ./artifacts
 
-    - name: Pack NuGet Package
-      run: dotnet pack ./src/RingBufferPlus/RingBufferPlus.csproj -c Release -o ./dist -p:Version=${{ steps.setup_version.outputs.VERSION }}
+      - name: Publish to NuGet.org
+        run: >
+          dotnet nuget push ./artifacts/*.nupkg
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
 
-    - name: Publish
-      run: dotnet nuget push dist/*.nupkg -k ${{ secrets.NUGET_API_KEY }} -s https://api.nuget.org/v3/index.json
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "RingBufferPlus ${{ github.ref_name }}"
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          files: ./artifacts/*.nupkg
+

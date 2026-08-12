@@ -1,43 +1,72 @@
-name: Build
+name: CI
 
 on:
   push:
-    # Tag pushes are covered by publish.yml, which calls this workflow itself (workflow_call)
-    # as its quality gate - skip the direct trigger here to avoid running it twice per tag.
-    tags-ignore: [ 'v*' ]
+    branches: [ "main", "develop" ]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "**/*.slnx"
+      - "**/*.csproj"
+      - ".github/workflows/ci.yml"
   pull_request:
-  workflow_call:
+    branches: [ "main", "develop" ]
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "**/*.slnx"
+      - "**/*.csproj"
+      - ".github/workflows/ci.yml"
+
+permissions:
+  contents: read
 
 jobs:
-  build:
+  build-and-test:
+    name: Build & Test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+        os: [ ubuntu-latest, windows-latest, macos-latest ]
+
     steps:
-    - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Setup dotnet
-      uses: actions/setup-dotnet@v5
-      with:
-        # The test project multi-targets net8.0/net9.0/net10.0 (ADR002) - dotnet test runs
-        # every TFM automatically, but actually EXECUTING net8.0/net9.0 binaries needs their
-        # runtimes installed side by side with net10.0, not just the SDK used to build.
-        dotnet-version: |
-          8.0.x
-          9.0.x
-          10.0.x
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
 
-    - name: Build project
-      run: dotnet build RingBufferPlus.sln -c Release
+      - name: Restore dependencies
+        run: dotnet restore
 
-    - name: Run test cases
-      run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage" --results-directory ./coverage
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
 
-    - name: Upload coverage artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: coverage-${{ matrix.os }}
-        path: ./coverage
-        retention-days: 14
+      - name: Test
+        run: >
+          dotnet test
+          --no-build
+          --configuration Release
+          --verbosity normal
+          --logger "trx;LogFileName=test-results.trx"
+          --collect:"XPlat Code Coverage"
+          --results-directory TestResults
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.os }}
+          path: "**/TestResults/**/*.trx"
+          retention-days: 7
+
+      - name: Upload coverage reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage-${{ matrix.os }}
+          path: "**/TestResults/**/coverage.cobertura.xml"
+          retention-days: 7
