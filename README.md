@@ -21,9 +21,7 @@ RingBufferPlus is a bounded, thread-safe pool of reusable instances of `T` — b
 
 Full version history has moved to [CHANGELOG.md](CHANGELOG.md).
 
-**v4.0.1 (latest released version)** added .NET 10 support.
-
-**v5.0.0 (in progress)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [ADRs](doc/adr/indexadrs.md) and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is planned) for full context. v4.x will no longer receive fixes once v5.0.0 ships.
+**v5.0.0 (latest released version)** is a complete, coordinated product overhaul with sweeping breaking changes — see the [ADRs](doc/adr/indexadrs.md) and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is provided) for full context. v4.x no longer receives fixes now that v5.0.0 has shipped.
 
 ## Installing
 

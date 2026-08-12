@@ -1,12 +1,12 @@
-﻿========================================================================================
-  _____   _                ____           __   __             _____   _                 
- |  __ \ (_)              |  _ \         / _| / _|           |  __ \ | |                
- | |__) | _  _ __    __ _ | |_) | _   _ | |_ | |_  ___  _ __ | |__) || |     _   _  ___ 
+========================================================================================
+  _____   _                ____           __   __             _____   _
+ |  __ \ (_)              |  _ \         / _| / _|           |  __ \ | |
+ | |__) | _  _ __    __ _ | |_) | _   _ | |_ | |_  ___  _ __ | |__) || |     _   _  ___
  |  _  / | || '_ \  / _` ||  _ < | | | ||  _||  _|/ _ \| '__||  ___/ | |    | | | |/ __|
  | | \ \ | || | | || (_| || |_) || |_| || |  | | |  __/| |   | |     | |____| |_| |\__ \
  |_|  \_\|_||_| |_| \__, ||____/  \__,_||_|  |_|  \___||_|   |_|     |______|\__,_||___/
-                     __/ |                                                              
-                    |___/                                                               
+                     __/ |
+                    |___/
 
 ========================================================================================
 
@@ -19,68 +19,57 @@ Project Description
 ====================
 
 A ring buffer is a memory allocation scheme where memory is reused (reclaimed) when an index, incremented modulo the buffer size, writes over a previously used location. A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
-A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
 The RingBufferPlus implementation follows the basic principle. The principle was expanded to have a scale capacity to optimize the consumption of the resources used.
 
 Features
 ========
 - Conscious use of resources
     - Designed to reduce buffer resources when unused
-        - **Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal. 
-        - **Under low usage conditions**, The RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.  
-- Set unique name for same buffer type
-- Set the initial, minimum and maximum capacity
-- ScaleUp / ScaleDown Automatic or manual (elastic buffer)
-- Sets the HeartBeat : At each pulse, an item is acquired from the buffer for evaluation asynchronously.
+        - **Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal.
+        - **Under low usage conditions**, the RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.
+- Set a unique name per buffer instance
+- Explicit FixedCapacity or ElasticCapacity (initial/min/max) modes
+- ScaleUp / ScaleDown, automatic (on acquire fault) or manual (elastic buffer)
+- HeartBeat: at each pulse, an item is acquired from the buffer for evaluation asynchronously
+- Native observability: OpenTelemetry-compatible metrics (Meter) and traces (ActivitySource), no extra dependency
 - Set a user function for errors (optional)
-- Set logger to execute in a separate thread asynchronously
-- Command to Invalidate and renew the buffer
-- Command to Warm up to full capacity before starting application (optional but **recommended**)
-- Receive item from buffer with **success/failure** information and **elapsed time** for acquisition
+- Set logger to execute in a separate thread asynchronously (BackgroundLogger)
+- Command to invalidate and renew an acquired item
+- Command to warm up to full capacity before starting the application (optional but **recommended**)
+- Receive an item from the buffer with **success/failure** information and **elapsed time** for acquisition
 - Sets a **time limit** for acquiring the item in the buffer
-- Simple and clear fluent syntax
+- Simple and clear fluent syntax, fully async (IAsyncDisposable)
 
-What's new in the latest version 
-================================
-- v4.0.1 (latest version)
-    -  Added support for .Net10
-
-- v4.0.0
-    - Added support for .Net9, maintained support.Net8 
-    - Removed support for .Net6, .Net7 and netstandard2.1
-    - Some properties and commands have been refactored for readability or syntax errors. (Break changes)
-    - Optimized several parts of the code to improve performance and consistency during auto/manual scaling.
-    - Improved several commands to be asynchronous
-    - Documentation updated
-    - Bug fixed when used with Rabbitmq.
-      - Removed need to set Automatic Recovery to false for use with Rabbitmq
-    - Removed Master/Slave, ReportScale, BufferHealth,  ScaleWhen..., RollbackWhen... and TriggerByAccqWhen... concept (Break changes)
-    - Added command LockWhenScaling 
-    - Added command AutoScaleAcquireFault
-    - Added command HeartBeat
-    - Added command BackgroundLogger
-    - Renamed command ScaleUnit ScaleTimer (Break changes)
-    
+What's new in the latest version
+=================================
+- v5.0.0 (latest version) - complete, coordinated product overhaul with sweeping breaking changes.
+  See CHANGELOG.md's "Breaking changes v5.0.0" section for the full list; highlights:
+    - Concurrency core rewritten on System.Threading.Channels as a single state machine - no lock/semaphore.
+    - IDisposable removed; IAsyncDisposable is now the sole disposal contract (await using / DisposeAsync()).
+    - Public fluent builder surface redesigned around explicit, mutually exclusive FixedCapacity/ElasticCapacity modes,
+      replacing Capacity/ScaleTimer/MinCapacity/MaxCapacity.
+    - AutoScaleAcquireFault(...) and manual SwitchToAsync are mutually exclusive at the type level.
+    - AcquireTimeout's delayAttempts parameter removed - a Channel-based acquire has no polling loop to pace.
+    - Acquire no longer blocks while a scale operation is in progress, regardless of LockWhenScaling.
+    - Added native observability (Meter/ActivitySource) - see doc/guides/usage-observability.md.
+    - v4.x and earlier receive no further fixes now that v5.0.0 has shipped.
 
 Basic Usage
 ===========
-This example uses the RingBufferPlus with non scale (non elastic buffer)
+This example uses RingBufferPlus with a fixed (non-elastic) capacity.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(3)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .BuildWarmupAsync(token);
+           .Logger(logger)
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .FixedCapacity(3)
+           .BuildWarmupAsync(cancellation);
 
 Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
 Console.WriteLine($"Ring Buffer Current capacity is : {rb.CurrentCapacity}");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity({rb.Capacity}) = {rb.IsInitCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity({rb.MaxCapacity}) = {rb.IsMaxCapacity}.");
-Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity({rb.MinCapacity}) = {rb.IsMinCapacity}.");
 
-using (var buffer = await rb.AcquireAsync(token))
+await using (var buffer = await rb.AcquireAsync(cancellation))
 {
     if (buffer.Successful)
     {
@@ -92,79 +81,86 @@ using (var buffer = await rb.AcquireAsync(token))
     }
 }
 
+await rb.DisposeAsync();
+
 Manual Scale Usage
 ===================
-This example uses the RingBufferPlus with manual scale (elastic buffer). 
-The manual scaling up and down process is done on brackgroud without locking buffer acquisition or SwitchTo command.
+This example uses RingBufferPlus with an elastic capacity and manual scale.
+The manual scaling up and down process is done in the background without locking buffer acquisition or the SwitchToAsync command.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(6)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer()
-                .MinCapacity(3)
-                .MaxCapacity(9)
-           .BuildWarmupAsync(token);
+           .Logger(logger)
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .ElasticCapacity(initialCapacity: 6, minCapacity: 3, maxCapacity: 9)
+           .BuildWarmupAsync(cancellation);
 
-if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity)) 
+if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity))
 {
     //manual scale was not scheduled
     //do something
 }
 
+// ... later, e.g. once load has passed ...
+await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
+
+await rb.DisposeAsync();
+
 Trigger Scale Usage
 ===================
-This example uses RingBufferPlus with autoscaling. Autoscaling (scaling up) occurs when there is a capacity acquisition failure. Scaling down automatically occurs in the background when a resource availability is reached.
-The auto scale up and down process is done on brackgroud without locking buffer acquisition.
-The Manual scaling up and down will be disabled (always returns false) when using the AutoScaleAcquireFault command
+This example uses RingBufferPlus with autoscaling. Autoscaling (scaling up) occurs when there is a capacity acquisition failure. Scaling down occurs automatically in the background once resource availability is reached.
+The background auto scale up/down process does not lock buffer acquisition.
+Manual scaling (SwitchToAsync) is unavailable at the type level when using AutoScaleAcquireFault.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(6)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(2)
-                .MinCapacity(3)
-                .MaxCapacity(9)
-           .BuildWarmupAsync(token);
+           .Logger(logger)
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .AcquireTimeout(TimeSpan.FromMilliseconds(500))
+           .ElasticCapacity(initialCapacity: 3, minCapacity: 2, maxCapacity: 4, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
+           .AutoScaleAcquireFault(numberOfFaults: 2)
+           .BuildWarmupAsync(cancellation);
+
+// no SwitchToAsync here - rb is a plain IRingBufferService<int>
+
+await rb.DisposeAsync();
 
 Lock Acquire/Switch Usage
 ===================================
-When the scaling up or down process is executed, acquisition or scale switching is not blocked.
-In scenarios where there is a lot of stress on the buffer resource, it may not be possible to perform these actions. In these scenarios, it is preferable to block acquisition or scale switching to ensure the desired execution.
+When a scaling up or down operation is executed, acquisition or scale switching is not blocked by default.
+In scenarios with heavy stress on the buffer resource, it may be preferable to wait for the switch to actually complete before proceeding - use LockWhenScaling() for that.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(6)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                .LockAcquireWhenAutoScale()
-                .MinCapacity(3)
-                .MaxCapacity(9)
-           .BuildWarmupAsync(token);
+           .Logger(logger)
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .ElasticCapacity(6, 3, 9)
+           .LockWhenScaling()
+           .BuildWarmupAsync(cancellation);
+
+// with LockWhenScaling(): returns only after the buffer has actually reached MaxCapacity
+// (or the scale-up was undone on timeout, reflected in the false result)
+var reached = await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
 
 HeartBeat Usage
 ===============
 
 There may be scenarios where you want to inspect an item in the buffer for some action (such as checking its health status). When this option is used periodically, an item is made available in the buffer for this need.
-**You should not execute the dispose of the acquired item! This is done internally by the component.**
+**You should not dispose of the acquired item yourself! This is done internally by the component.**
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(6)
-           .HeartBeat(MyHeartBeat)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .BuildWarmupAsync(token);
+           .Logger(logger)
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .HeartBeat(MyHeartBeat, pulse: TimeSpan.FromSeconds(10))
+           .FixedCapacity(6)
+           .BuildWarmupAsync(cancellation);
 
-private void MyHeartBeat(RingBufferValue<int> item)
+static void MyHeartBeat(RingBufferValue<int> item)
 {
      //do anything ex: health check
 }
@@ -172,27 +168,26 @@ private void MyHeartBeat(RingBufferValue<int> item)
 Background Logger Usage
 =======================
 
-Log execution is done automatically by the component (Level Debug, Warning and Error) in the same execution thread. This process can burden execution if the log recording process takes a long time. 
-For this scenario, you can use the log execution in the background in an asynchronous process done by the component.
+Log execution is done automatically by the component (Debug, Warning and Error levels) on the same execution thread by default. This can add latency to whatever operation triggered the log if the sink is slow.
+Use BackgroundLogger() to move the actual write off that path, onto a dedicated background task.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
-           .Capacity(6)
-           .Logger(HostApp.Services.GetService<ILogger<Program>>())
+           .Logger(logger)
            .BackgroundLogger()
-           .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-           .BuildWarmupAsync(token);
+           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+           .FixedCapacity(6)
+           .BuildWarmupAsync(cancellation);
 
 RabbitMQ Usage
 ==============
 
-This example uses RingBufferPlus for Rabbit channels to publish messages with improved performance using automatic scaling when an acquisition failure occurs. 
-Scaling down is performed automatically in the background when a resource availability is reached.
-The auto scale up and down process is done on brackgroud without locking buffer acquisition.
-The Manual scaling up and down will be disabled (always returns false) when using the AutoScaleAcquireFault command
+This example uses RingBufferPlus to pool RabbitMQ channels for publishing with improved performance, using automatic scaling when an acquisition failure occurs.
+Scaling down is performed automatically in the background once resource availability is reached.
+Manual scaling (SwitchToAsync) is unavailable at the type level when using AutoScaleAcquireFault.
 
-var ConnectionFactory = new ConnectionFactory()
+var connectionFactory = new ConnectionFactory()
 {
     Port = 8087,
     HostName = "localhost",
@@ -201,47 +196,41 @@ var ConnectionFactory = new ConnectionFactory()
     ClientProvidedName = "PublisherRoleProgram"
 };
 
-var connectionRabbit = await ConnectionFactory!.CreateConnectionAsync(token);
+var connectionRabbit = await connectionFactory.CreateConnectionAsync(cancellation);
 
-var rb = await RingBuffer<IChannel>.New("RabbitChanels")
-           .Capacity(10)
-           .Logger(applogger!)
+static async Task<IChannel> ChannelFactory(IConnection connectionRabbit, CancellationToken cancellation) =>
+    await connectionRabbit.CreateChannelAsync(cancellationToken: cancellation);
+
+var rb = await RingBuffer<IChannel>.New("RabbitChannels")
+           .Logger(logger)
            .BackgroundLogger()
-           .Factory((cts) => ChannelFactory(cts))
-           .ScaleTimer(100, TimeSpan.FromSeconds(10))
-                .MaxCapacity(20)
-                .MinCapacity(5)
-                .AutoScaleAcquireFault()
-            .BuildWarmupAsync(token);
+           .Factory((token) => ChannelFactory(connectionRabbit, token))
+           .ElasticCapacity(initialCapacity: 10, minCapacity: 5, maxCapacity: 20, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(10))
+           .AutoScaleAcquireFault()
+           .BuildWarmupAsync(cancellation);
 
-using (var buffer = await rb.AcquireAsync(token))
+await using (var buffer = await rb.AcquireAsync(cancellation))
 {
     if (buffer.Successful)
     {
         var body = new ReadOnlyMemory<byte>(Encoding.UTF8.GetBytes("Test"));
-        await buffer.Current!.BasicPublishAsync("", "log", body);    
+        await buffer.Current!.BasicPublishAsync("", "log", body);
     }
     else
     {
         //do something
     }
-}  
-
-private async Task<IChannel> ChannelFactory(CancellationToken cancellation)
-{
-    return await connectionRabbit!.CreateChannelAsync(cancellationToken: cancellation);
 }
 
 Examples
 ========
-For more examples, please refer to the [Samples directory](https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples) :
+For more examples, please refer to the Samples directory: https://github.com/FRACerqueira/RingBufferPlus/tree/main/samples
 
 Documentation
 =============
-The documentation is available in the [Docs directory](https://github.com/FRACerqueira/RingBufferPlus/blob/main/src/docs/docindex.md).
+The documentation is available in the Docs directory: https://github.com/FRACerqueira/RingBufferPlus/blob/main/src/docs/docindex.md
 
 License
 =======
 Copyright 2022 @ Fernando Cerqueira
-RingBufferPlus is licensed under the MIT license. See [LICENSE](https://github.com/FRACerqueira/RingBufferPlus/blob/master/LICENSE).
-
+RingBufferPlus is licensed under the MIT license. See https://github.com/FRACerqueira/RingBufferPlus/blob/main/LICENSE
