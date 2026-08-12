@@ -25,6 +25,7 @@ jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -55,6 +56,8 @@ jobs:
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
+          --blame-hang-timeout 90s
+          --blame-hang-dump-type full
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -63,6 +66,17 @@ jobs:
           name: test-results-${{ matrix.os }}
           path: "**/TestResults/**/*.trx"
           retention-days: 7
+
+      - name: Upload hang dump
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: hang-dump-${{ matrix.os }}
+          path: |
+            **/TestResults/**/*.dmp
+            **/TestResults/**/Sequence.xml
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
