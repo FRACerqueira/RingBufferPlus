@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -9,7 +9,7 @@ namespace RingBufferPlus
     /// Represents the commands to RingBufferPlus service.
     /// </summary>
     /// <typeparam name="T">Type of buffer.</typeparam>
-    public interface IRingBufferService<T> : IDisposable
+    public interface IRingBufferService<T> : IAsyncDisposable
     {
         /// <summary>
         /// Unique name of the RingBuffer.
@@ -60,20 +60,6 @@ namespace RingBufferPlus
         ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default);
 
         /// <summary>
-        /// Try manually switch scale.
-        /// </summary>
-        /// <remarks>
-        /// Manually change scale will always return false if autoscale is enabled.
-        /// </remarks>
-        /// <param name="value">New scale capacity.</param>
-        /// <returns> A <see cref="Task"/> representing the asynchronous operation with result (true/false).
-        /// <para>
-        /// When there is already a running scale process, false is returned otherwise true
-        /// </para>
-        /// </returns>
-        Task<bool> SwitchToAsync(ScaleSwitch value);
-
-        /// <summary>
         /// Warms up with full capacity ready.
         /// <remarks>
         /// It is recommended to use this method in the initialization of the application.
@@ -81,7 +67,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>
         /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
-        /// <exception cref="InvalidOperationException">The RingBuffer did not reach initial capacity(TimeSpan Timeout of ScaleTimer)</exception>
+        /// <exception cref="InvalidOperationException">The RingBuffer did not reach initial capacity.</exception>
         Task WarmupAsync(CancellationToken cancellation = default);
     }
 }

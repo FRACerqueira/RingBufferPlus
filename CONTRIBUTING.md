@@ -6,11 +6,12 @@
   * [Code style](#code-style)
   * [Dependencies](#dependencies)
   * [Unit tests](#unit-tests)
+* [API stability policy](#api-stability-policy)
 * [Contributing process](#contributing-process)
   * [Get buyoff or find open community issues or features](#get-buyoff-or-find-open-community-issues-or-features)
-  * [Set up your environment](#Set-up-your-environment)
+  * [Set up your environment](#set-up-your-environment)
   * [Prepare commits](#prepare-commits)
-  * [Submit pull request](#Submit-pull-request)
+  * [Submit pull request](#submit-pull-request)
   * [Respond to feedback on pull request](#respond-to-feedback-on-pull-request)
 * [Other general information](#other-general-information)
 * [Acknowledgement](#acknowledgement)
@@ -22,7 +23,7 @@ By contributing to **RingBufferPlus**, you assert that:
 * The contribution is your own original work.
 * You have the right to assign the copyright for the work (it is not owned by your employer, or
   you have been given copyright assignment in writing).
-* You [license](LICENSE.md) the contribution under the terms applied to the rest of the RingBufferPlus project.
+* You [license](LICENSE) the contribution under the terms applied to the rest of the RingBufferPlus project.
 * You agree to follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Definition of trivial contributions
@@ -39,16 +40,27 @@ What is generally considered trivial:
 ### Code style
 
 Normal .NET coding guidelines apply.
-See the [Framework Design Guidelines](https://msdn.microsoft.com/en-us/library/ms229042%28v=vs.110%29.aspx) for more information.
+See the [.NET Framework Design Guidelines](https://learn.microsoft.com/en-us/dotnet/standard/design-guidelines/) for more information.
 
 ### Dependencies
 
-The assembly `RingBufferPlus` should have no dependencies except the .NET BCL library.
+The `RingBufferPlus` assembly keeps its dependency footprint minimal: today it references only `Microsoft.Extensions.Logging.Abstractions` and `Microsoft.Extensions.Hosting.Abstractions` (both lightweight, dependency-free abstraction packages) plus the .NET BCL. Don't add a dependency on a concrete implementation package (e.g. a specific logging provider, a specific DI container) — abstractions only, and only when the alternative is reimplementing something the BCL already gives every consumer for free.
 
 ### Unit tests
 
 Make sure to run all unit tests before creating a pull request.
 Any new code should also have reasonable unit test coverage.
+
+## API stability policy
+
+Starting from **v5.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)):
+
+* No public symbol (type, member, or overload) is removed, or has its behavior changed in a breaking way, without first being marked `[Obsolete("migration message")]` for at least one full release cycle.
+* A breaking change without a prior deprecation cycle is not a default option — it requires its own ADR explicitly justifying the exception.
+* v5.0.0 itself is exempt from this policy: it is a single, deliberate "clean slate" reset explicitly authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md), with no `[Obsolete]` bridge from v4.x. This exemption applies only to that one release and does not repeat for any future major.
+* v4.x and earlier receive no further fixes once v5.0.0 ships (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md).
+
+If your contribution removes or changes the behavior of a public symbol, call this out explicitly in the pull request description so it can be checked against this policy.
 
 ## Contributing process
 ### Get buyoff or find open community issues or features
@@ -57,7 +69,7 @@ Any new code should also have reasonable unit test coverage.
    you talk about a feature you would like to see (or a bug), and why it should be in RingBufferPlus.
    * If approved through the GitHub discussions, ensure an accompanying GitHub issue is created with
      information and a link back to the discussion.
-  * Once you get a nod from someone in the PrompPLus Team, you can start on the feature.
+  * Once you get a nod from someone in the RingBufferPlus Team, you can start on the feature.
   * Alternatively, if a feature is on the issues list with the
    [Up For Grabs](https://github.com/FRACerqueira/RingBufferPlus/labels/up-for-grabs) label,
    it is open for a community member (contributor) to patch. You should comment that you are signing up for it on

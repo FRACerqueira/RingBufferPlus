@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -12,13 +12,11 @@ namespace RingBufferPlus.Tests
     public class RingBufferManagerTests
     {
         private readonly Mock<ILogger> _loggerMock;
-        private readonly Mock<Func<CancellationToken, Task<int?>>> _factoryMock;
         private readonly CancellationTokenSource _cancellationTokenSource;
 
         public RingBufferManagerTests()
         {
             _loggerMock = new Mock<ILogger>();
-            _factoryMock = new Mock<Func<CancellationToken, Task<int?>>>();
             _cancellationTokenSource = new CancellationTokenSource();
         }
 
@@ -37,10 +35,9 @@ namespace RingBufferPlus.Tests
                 ScaleDownInit = 3,
                 ScaleDownMin = 2,
                 ScaleDownMax = 15,
-                TriggerFault = true,
+                AutoScaleFault = true,
                 NumberFault = 3,
                 AcquireTimeout = TimeSpan.FromSeconds(1),
-                AcquireDelayAttempts = TimeSpan.FromMilliseconds(100),
                 Logger = _loggerMock.Object,
                 BackgroundLogger = true,
                 Factory = (_) => Task.FromResult(1)
@@ -60,35 +57,36 @@ namespace RingBufferPlus.Tests
             // Assert
             Assert.True(result.Successful);
             Assert.Equal(1, result.Current);
+
+            await manager.DisposeAsync();
         }
 
         [Fact]
-        public async Task AcquireAsync_ShouldReturnUnsuccessful_WhenCancelled()
+        public async Task AcquireAsync_ShouldThrow_WhenAlreadyCancelled()
         {
             // Arrange
             var manager = CreateRingBufferManager();
+            await manager.WarmupAsync();
             var cts = new CancellationTokenSource();
             cts.Cancel();
 
-            // Act
-            var result = await manager.AcquireAsync(cts.Token);
+            // Act & Assert: a caller-supplied, already-cancelled token is a genuine
+            // cancellation, not an "unsuccessful acquire" - it must propagate.
+            await Assert.ThrowsAsync<TaskCanceledException>(() => manager.AcquireAsync(cts.Token).AsTask());
 
-            // Assert
-            Assert.False(result.Successful);
+            await manager.DisposeAsync();
         }
 
         [Fact]
         public async Task SwitchToAsync_ShouldScaleToMinCapacity()
         {
             // Arrange
-            var builder = new RingBufferBuilder<int>("TestBuffer",null);
-            builder.Capacity(5);
-            builder.LockWhenScaling();
-            builder.MaxCapacity(10);
-            builder.MinCapacity(2);
-            builder.Factory((_) => Task.FromResult(0));
-            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
-            var service = builder.Build();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
             await service.WarmupAsync();
 
             // Act
@@ -96,47 +94,51 @@ namespace RingBufferPlus.Tests
 
             // Assert
             Assert.True(service.IsMinCapacity);
+
+            await service.DisposeAsync();
         }
 
         [Fact]
         public async Task SwitchToAsync_ShouldScaleToMaxCapacity()
         {
             // Arrange
-            var builder = new RingBufferBuilder<int>("TestBuffer", null);
-            builder.Capacity(5);
-            builder.LockWhenScaling();
-            builder.MaxCapacity(10);
-            builder.MinCapacity(2);
-            builder.Factory((_) => Task.FromResult(0));
-            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
-            var service = builder.Build();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
             await service.WarmupAsync();
+
             // Act
             await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
 
             // Assert
             Assert.True(service.IsMaxCapacity);
+
+            await service.DisposeAsync();
         }
 
         [Fact]
         public async Task SwitchToAsync_ShouldScaleToInitCapacity()
         {
             // Arrange
-            var builder = new RingBufferBuilder<int>("TestBuffer", null);
-            builder.Capacity(5);
-            builder.LockWhenScaling();
-            builder.MaxCapacity(10);
-            builder.MinCapacity(2);
-            builder.Factory((_) => Task.FromResult(0));
-            builder.ScaleTimer(1, TimeSpan.FromSeconds(5));
-            var service = builder.Build();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
             await service.WarmupAsync();
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
 
             // Act
             await service.SwitchToAsync(ScaleSwitch.InitCapacity);
 
             // Assert
             Assert.True(service.IsInitCapacity);
+
+            await service.DisposeAsync();
         }
 
         [Fact]
@@ -150,19 +152,22 @@ namespace RingBufferPlus.Tests
 
             // Assert
             Assert.True(manager.IsInitCapacity);
+
+            await manager.DisposeAsync();
         }
 
         [Fact]
-        public void Dispose_ShouldCleanupResources()
+        public async Task DisposeAsync_ShouldMarkDisposed()
         {
             // Arrange
             var manager = CreateRingBufferManager();
+            await manager.WarmupAsync();
 
             // Act
-            manager.Dispose();
+            await manager.DisposeAsync();
 
             // Assert
-            var disposedfield = manager.GetType().GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance )!;
+            var disposedfield = manager.GetType().GetField("_disposed", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!;
             Assert.True((bool)disposedfield.GetValue(manager)!);
         }
     }

@@ -7,14 +7,15 @@
 #### Add RingBuffer in ServiceCollection.
 
 ```csharp
-public static IServiceCollection AddRingBuffer<T>(this IServiceCollection ServiceCollection, 
-    string buffername, Func<IRingBuffer<T>, IServiceProvider, IRingBufferService<T>> userfunc)
+public static IServiceCollection AddRingBuffer<T>(this IServiceCollection serviceCollection, 
+    string buffername, 
+    Func<IRingBufferBuilder<T>, IServiceProvider, IRingBufferService<T>> userfunc)
 ```
 
 | parameter | description |
 | --- | --- |
 | T | Type of buffer. |
-| ServiceCollection | The IServiceCollection. |
+| serviceCollection | The IServiceCollection. |
 | buffername | The unique name to RingBuffer. |
 | userfunc | The Handler to return the [`IRingBufferService`](../../RingBufferPlus/IRingBufferService-1.md). |
 
@@ -30,7 +31,7 @@ IServiceCollection.
 
 ### See Also
 
-* interface [IRingBuffer&lt;T&gt;](../../RingBufferPlus/IRingBuffer-1.md)
+* interface [IRingBufferBuilder&lt;T&gt;](../../RingBufferPlus/IRingBufferBuilder-1.md)
 * interface [IRingBufferService&lt;T&gt;](../../RingBufferPlus/IRingBufferService-1.md)
 * class [HostingExtensions](../HostingExtensions.md)
 * namespace [Microsoft.Extensions.DependencyInjection](../../RingBufferPlus.md)

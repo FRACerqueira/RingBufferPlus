@@ -7,7 +7,7 @@
 #### Represents acquired the value in the buffer.
 
 ```csharp
-public sealed class RingBufferValue<T> : IDisposable
+public sealed class RingBufferValue<T> : IAsyncDisposable
 ```
 
 | parameter | description |
@@ -17,7 +17,7 @@ public sealed class RingBufferValue<T> : IDisposable
 | elapsedTime | Elapsed time to acquire the value. |
 | succeeded | Successful Acquire. |
 | value | The buffer value. |
-| turnback | The action handler to turn back buffer when disposed. |
+| turnback | The async handler to turn back the buffer when disposed. |
 
 ### Public Members
 
@@ -28,8 +28,8 @@ public sealed class RingBufferValue<T> : IDisposable
 | [ElapsedTime](RingBufferValue-1/ElapsedTime.md) { get; } | Elapsed time to acquire the value. |
 | [Name](RingBufferValue-1/Name.md) { get; } | Name of RingBuffer. |
 | [Successful](RingBufferValue-1/Successful.md) { get; } | Successful Acquire. |
-| [Dispose](RingBufferValue-1/Dispose.md)() | Turnback value to buffer. |
-| [Invalidate](RingBufferValue-1/Invalidate.md)() | Invalidates the return of the value to the buffer. Another instance will be created. This command will be ignored if the return was unsuccessful. |
+| [DisposeAsync](RingBufferValue-1/DisposeAsync.md)() | Turns back the value to the buffer asynchronously. |
+| [Invalidate](RingBufferValue-1/Invalidate.md)() | Invalidates the return of the value to the buffer. A replacement instance will be created. This command will be ignored if the acquire was unsuccessful. |
 
 ### Remarks
 

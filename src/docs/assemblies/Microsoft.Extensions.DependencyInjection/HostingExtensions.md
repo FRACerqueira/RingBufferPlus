@@ -15,7 +15,7 @@ public static class HostingExtensions
 | name | description |
 | --- | --- |
 | static [AddRingBuffer&lt;T&gt;](HostingExtensions/AddRingBuffer.md)(…) | Add RingBuffer in ServiceCollection. |
-| static [WarmupRingBufferAsync&lt;T&gt;](HostingExtensions/WarmupRingBufferAsync.md)(…) | Warms up with full capacity ready or reaching timeout (default 30 seconds). |
+| static [WarmupRingBufferAsync&lt;T&gt;](HostingExtensions/WarmupRingBufferAsync.md)(…) | Warms up with full capacity ready or reaching timeout. |
 
 ### See Also
 

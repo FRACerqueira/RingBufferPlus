@@ -22,7 +22,7 @@ A Task representing the asynchronous operation.
 
 | exception | condition |
 | --- | --- |
-| InvalidOperationException | The RingBuffer did not reach initial capacity(TimeSpan Timeout of ScaleTimer) |
+| InvalidOperationException | The RingBuffer did not reach initial capacity. |
 
 ### See Also
 

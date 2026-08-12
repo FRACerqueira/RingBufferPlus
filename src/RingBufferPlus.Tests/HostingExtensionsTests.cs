@@ -17,7 +17,7 @@ namespace RingBufferPlus.Tests
             // Arrange
             var bufferName = "testBuffer";
             var services = new ServiceCollection();
-            Func<IRingBuffer<int>, IServiceProvider, IRingBufferService<int>> userFunc = (buffer, provider) => Mock.Of<IRingBufferService<int>>();
+            Func<IRingBufferBuilder<int>, IServiceProvider, IRingBufferService<int>> userFunc = (buffer, provider) => Mock.Of<IRingBufferService<int>>();
 
             // Act
             services.AddRingBuffer(bufferName, userFunc);

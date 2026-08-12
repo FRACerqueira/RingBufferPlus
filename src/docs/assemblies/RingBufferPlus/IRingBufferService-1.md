@@ -7,7 +7,7 @@
 #### Represents the commands to RingBufferPlus service.
 
 ```csharp
-public interface IRingBufferService<T> : IDisposable
+public interface IRingBufferService<T> : IAsyncDisposable
 ```
 
 | parameter | description |
@@ -27,7 +27,6 @@ public interface IRingBufferService<T> : IDisposable
 | [MinCapacity](IRingBufferService-1/MinCapacity.md) { get; } | The Value Minimum capacity of the RingBuffer. |
 | [Name](IRingBufferService-1/Name.md) { get; } | Unique name of the RingBuffer. |
 | [AcquireAsync](IRingBufferService-1/AcquireAsync.md)(…) | Try to acquire a value from the buffer. Will wait for a buffer item to become available or timeout (default 5 seconds). |
-| [SwitchToAsync](IRingBufferService-1/SwitchToAsync.md)(…) | Try manually switch scale. |
 | [WarmupAsync](IRingBufferService-1/WarmupAsync.md)(…) | Warms up with full capacity ready.  It is recommended to use this method in the initialization of the application. |
 
 ### See Also

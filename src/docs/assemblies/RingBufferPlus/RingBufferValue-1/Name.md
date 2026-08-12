@@ -7,7 +7,7 @@
 #### Name of RingBuffer.
 
 ```csharp
-public string? Name { get; }
+public string Name { get; }
 ```
 
 ### See Also

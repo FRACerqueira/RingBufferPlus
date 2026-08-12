@@ -1,4 +1,4 @@
-﻿// ***************************************************************************************
+// ***************************************************************************************
 // MIT LICENCE
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
@@ -21,74 +21,113 @@ namespace RingBufferPlus.Tests
             _loggerFactoryMock.Setup(f => f.CreateLogger(It.IsAny<string>())).Returns(_loggerMock.Object);
         }
 
+        private IRingBufferBuilder<int> CreateBuilder() => new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+
         [Fact]
         public void Constructor_ShouldInitializeWithDefaults()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var builder = CreateBuilder();
 
             Assert.NotNull(builder);
         }
 
         [Fact]
-        public void MaxCapacity_ShouldSetMaxCapacity()
+        public void FixedCapacity_ShouldSetCapacityMinAndMax()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .FixedCapacity(7)
+                .Build();
 
-            builder.MaxCapacity(100);
-            builder.Factory((_) => Task.FromResult(0));
-            var service = builder.Build();
-            Assert.Equal(100, service.MaxCapacity);
+            Assert.Equal(7, service.Capacity);
+            Assert.Equal(7, service.MinCapacity);
+            Assert.Equal(7, service.MaxCapacity);
         }
 
         [Fact]
-        public void MinCapacity_ShouldSetMinCapacity()
+        public void ElasticCapacity_ShouldSetDistinctMinInitAndMax()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            builder.Capacity(5);
-            builder.MinCapacity(2);
-            builder.Factory((_) => Task.FromResult(0));
-            var service = builder.Build();
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10)
+                .Build();
+
+            Assert.Equal(5, service.Capacity);
             Assert.Equal(2, service.MinCapacity);
+            Assert.Equal(10, service.MaxCapacity);
+        }
+
+        [Fact]
+        public void ElasticCapacity_ReturnsManualScaleService()
+        {
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10)
+                .Build();
+
+            Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
+        }
+
+        [Fact]
+        public async Task ElasticCapacity_WithAutoScaleAcquireFault_HidesManualSwitchAtCompileTime_AndThrowsIfCastBack()
+        {
+            IRingBufferService<int> service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10)
+                .AutoScaleAcquireFault(3)
+                .Build();
+
+            // ADR007: Build() above statically returns IRingBufferService<int> - SwitchToAsync is not
+            // in scope at compile time. A caller that casts back to IRingBufferManualScaleService<int>
+            // must not silently no-op; it must fail loudly (see the advisor note on the escaped-cast path).
+            var escaped = Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
+            await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity));
+
+            await service.DisposeAsync();
         }
 
         [Fact]
         public void OnError_ShouldSetErrorHandler()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
             Action<ILogger?, Exception> errorHandler = (logger, ex) => { };
 
-            builder.OnError(errorHandler);
-            builder.Factory((_) => Task.FromResult(0));
-            var service = builder.Build();
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .OnError(errorHandler)
+                .FixedCapacity(2)
+                .Build();
+
             var errorHandlerfield = service.GetType().GetProperty("ErrorHandler")!;
             Assert.NotNull(errorHandlerfield.GetValue(service));
         }
 
         [Fact]
-        public void AutoScaleAcquireFault_ShouldSetTriggerFault()
+        public void AutoScaleAcquireFault_ShouldSetAutoScaleFault()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10)
+                .AutoScaleAcquireFault(5)
+                .Build();
 
-            builder.AutoScaleAcquireFault(5);
-            builder.Factory((_) => Task.FromResult(0));
-            var service = builder.Build();
-            var triggerFaultField = service.GetType().GetProperty("TriggerFault")!;
+            var autoScaleFaultField = service.GetType().GetProperty("AutoScaleFault")!;
             var numberFaultField = service.GetType().GetProperty("NumberFault")!;
 
-            Assert.True((bool)triggerFaultField.GetValue(service)!);
-            Assert.Equal(5, (byte)numberFaultField.GetValue(service)!);
+            Assert.True((bool)autoScaleFaultField.GetValue(service)!);
+            Assert.Equal((byte)5, (byte)numberFaultField.GetValue(service)!);
         }
 
         [Fact]
         public void AcquireTimeout_ShouldSetAcquireTimeout()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
             var timeout = TimeSpan.FromSeconds(10);
 
-            builder.AcquireTimeout(timeout);
-            builder.Factory((_) => Task.FromResult(0));
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .AcquireTimeout(timeout)
+                .FixedCapacity(2)
+                .Build();
 
-            var service = builder.Build();
             var acquireTimeoutField = service.GetType().GetProperty("AcquireTimeout")!;
             Assert.Equal(timeout, (TimeSpan)acquireTimeoutField.GetValue(service)!);
         }
@@ -96,77 +135,66 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void HeartBeat_ShouldSetHeartBeat()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
             Action<RingBufferValue<int>> heartBeat = value => { };
 
-            builder.HeartBeat(heartBeat);
-            builder.Factory((_) => Task.FromResult(0));
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .HeartBeat(heartBeat)
+                .FixedCapacity(2)
+                .Build();
 
-            var service = builder.Build();
             var bufferHeartBeatField = service.GetType().GetProperty("BufferHeartBeat")!;
-            Assert.NotNull(bufferHeartBeatField);
-        }
-
-        [Fact]
-        public void Capacity_ShouldSetCapacity()
-        {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-
-            builder.Capacity(50);
-            builder.Factory((_) => Task.FromResult(0));
-
-            var service = builder.Build();
-            Assert.Equal(50, service.Capacity);
+            Assert.NotNull(bufferHeartBeatField.GetValue(service));
         }
 
         [Fact]
         public void Factory_ShouldSetFactory()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
             Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
 
-            builder.Factory(factory);
+            var service = CreateBuilder()
+                .Factory(factory)
+                .FixedCapacity(2)
+                .Build();
 
-            var service = builder.Build();
             var factoryField = service.GetType().GetProperty("Factory")!;
-            Assert.NotNull(factoryField);
+            Assert.NotNull(factoryField.GetValue(service));
         }
 
         [Fact]
         public void Logger_ShouldSetLogger()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .Logger(_loggerMock.Object)
+                .FixedCapacity(2)
+                .Build();
 
-            builder.Logger(_loggerMock.Object);
-            builder.Factory((_) => Task.FromResult(0));
-
-            var service = builder.Build();
             var loggerField = service.GetType().GetProperty("Logger")!;
-            Assert.NotNull(loggerField);
+            Assert.NotNull(loggerField.GetValue(service));
         }
 
         [Fact]
         public void BackgroundLogger_ShouldSetBackgroundLogger()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .BackgroundLogger(true)
+                .FixedCapacity(2)
+                .Build();
 
-            builder.BackgroundLogger(true);
-            builder.Factory((_) => Task.FromResult(0));
-
-            var service = builder.Build();
             var backgroundLoggerField = service.GetType().GetProperty("BackgroundLogger")!;
             Assert.True((bool)backgroundLoggerField.GetValue(service)!);
         }
 
         [Fact]
-        public void ScaleTimer_ShouldSetScaleTimer()
+        public void ElasticCapacity_ShouldSetSampleUnitAndBaseTime()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 2, 10, 10, TimeSpan.FromSeconds(5))
+                .Build();
 
-            builder.ScaleTimer(10, TimeSpan.FromSeconds(5));
-            builder.Factory((_) => Task.FromResult(0));
-
-            var service = builder.Build();
             var samplesBaseField = service.GetType().GetProperty("SamplesBase")!;
             var samplesCountField = service.GetType().GetProperty("SamplesCount")!;
 
@@ -177,30 +205,31 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task BuildWarmupAsync_ShouldWarmupService()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
             Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
 
-            var service = await builder.BuildWarmupAsync();
+            var service = await CreateBuilder()
+                .Factory(factory)
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
 
             Assert.NotNull(service);
+            Assert.True(service.IsInitCapacity);
+
+            await service.DisposeAsync();
         }
 
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenFactoryIsNull()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
+            var builder = CreateBuilder().FixedCapacity(2);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
 
         [Fact]
-        public void ValidateBuild_ShouldThrowException_WhenCapacityIsLessThanTwo()
+        public void ValidateBuild_ShouldThrowException_WhenFixedCapacityIsLessThanTwo()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.Capacity(1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).FixedCapacity(1);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -208,10 +237,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsLessThanTwo()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.MinCapacity(1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 1, 10);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -219,10 +245,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMaxCapacityIsLessThanTwo()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.MaxCapacity(1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 2, 1);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -230,11 +253,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsGreaterThanMaxCapacity()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.MinCapacity(10);
-            builder.MaxCapacity(5);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 10, 5);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -242,11 +261,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsGreaterThanInitialCapacity()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.Capacity(5);
-            builder.MinCapacity(10);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 10, 12);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -254,11 +269,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMaxCapacityIsLessThanInitialCapacity()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.Capacity(10);
-            builder.MaxCapacity(5);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(10, 2, 5);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -266,10 +277,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenSampleUnitIsLessThanOne()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.ScaleTimer(0, TimeSpan.FromSeconds(5));
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 0, TimeSpan.FromSeconds(5));
 
             Assert.Throws<IndexOutOfRangeException>(() => builder.Build());
         }
@@ -277,10 +285,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenSampleBaseTimeIsLessThan100ms()
         {
-            var builder = new RingBufferBuilder<int>("TestBuffer", _loggerFactoryMock.Object);
-            Func<CancellationToken, Task<int>> factory = token => Task.FromResult(1);
-            builder.Factory(factory);
-            builder.ScaleTimer(10, TimeSpan.FromMilliseconds(500));
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 10, TimeSpan.FromMilliseconds(500));
 
             Assert.Throws<IndexOutOfRangeException>(() => builder.Build());
         }

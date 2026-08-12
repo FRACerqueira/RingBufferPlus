@@ -141,6 +141,9 @@ _TeamCity*
 *.coverage
 *.coveragexml
 
+# coverlet / dotnet test --collect:"XPlat Code Coverage" output (see .github/workflows/build.yml)
+/coverage/
+
 # NCrunch
 _NCrunch_*
 .*crunch*.local.xml

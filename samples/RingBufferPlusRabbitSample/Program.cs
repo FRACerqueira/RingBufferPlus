@@ -1,8 +1,8 @@
-﻿// ***************************************************************************************
-// Current source code : The maintenance and evolution is maintained by the RingBufferPlus project 
+// ***************************************************************************************
+// MIT LICENCE
+// The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 
-using System.Diagnostics;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -14,15 +14,13 @@ namespace RingBufferPlusRabbitSample
 {
     public class Program
     {
-        private const int threadCount = 20;
+        private const int WorkerCount = 20;
 
         private static IHost? hostApp = null;
         private static ConnectionFactory? connectionFactory;
         private static IConnection? connectionRabbit;
         private static readonly Random random = new();
         private static readonly byte[] messageBodyBytes = Encoding.UTF8.GetBytes(RandomString(5000));
-        private static readonly List<Thread> threads = [];
-
 
         public static async Task Main(string[] args)
         {
@@ -43,7 +41,7 @@ namespace RingBufferPlusRabbitSample
                 return await connectionRabbit!.CreateChannelAsync(cancellationToken: cancellation);
             }
 
-            //connetion factory to RabbitMQ
+            //connection factory to RabbitMQ
             connectionFactory = new ConnectionFactory()
             {
                 Port = 8087,
@@ -58,178 +56,94 @@ namespace RingBufferPlusRabbitSample
             {
                 { "x-message-ttl", 1000 }
             };
-#pragma warning disable IDE0063 // Use simple 'using' statement
-            using (var cnn = await connectionFactory.CreateConnectionAsync(cts.Token))
+            await using (var cnn = await connectionFactory.CreateConnectionAsync(cts.Token))
+            await using (var chn = await cnn.CreateChannelAsync(cancellationToken: cts.Token))
             {
-                using (var chn = await cnn.CreateChannelAsync(cancellationToken: cts.Token))
-                {
-                    await chn.QueueDeclareAsync("log", false, false, false, argsqueue!, cancellationToken: cts.Token);
-                }
+                await chn.QueueDeclareAsync("log", false, false, false, argsqueue!, cancellationToken: cts.Token);
             }
-#pragma warning restore IDE0063 // Use simple 'using' statement
 
             //create connection
             connectionRabbit = await connectionFactory!.CreateConnectionAsync(cts.Token);
 
-            //create ring buffer    
+            //create ring buffer, no lock while scaling
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Capacity(10)
                 .Logger(hostApp.Services.GetService<ILogger<Program>>())
                 .BackgroundLogger()
-                .Factory((cts) => ChannelFactory(cts)!)
-                .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                    .MaxCapacity(20)
-                    .MinCapacity(5)
-                    .AutoScaleAcquireFault()
+                .Factory((token) => ChannelFactory(token)!)
+                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault()
                 .BuildWarmupAsync(cts.Token);
 
-            Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
-            Console.WriteLine($"Ring Buffer Current capacity = {rb.CurrentCapacity}");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
-            Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread using Non lock Acquire");
-            Thread.Sleep(TimeSpan.FromSeconds(20));
-
-            Console.WriteLine($"Running 60 seconds..");
-            Thread.Sleep(TimeSpan.FromSeconds(1));
-
-            var dtref = DateTime.Now.AddSeconds(60);
-            var qtdstart = 0;
-            for (int i = 0; i < threadCount; i++)
-            {
-                Thread thread = new(async () =>
-                {
-                    var id = Interlocked.Increment(ref qtdstart);
-                    Console.WriteLine($"Thread {qtdstart} started ");
-                    while (true)
-                    {
-                        if (DateTime.Now >= dtref)
-                        {
-                            Console.WriteLine($"wait({id}) 60 seconds (idle)");
-                            Thread.Sleep(TimeSpan.FromSeconds(60));
-                            break;
-                        }
-                        using var bufferedItem = await rb!.AcquireAsync();
-                        if (bufferedItem.Successful)
-                        {
-                            var body = new ReadOnlyMemory<byte>(messageBodyBytes);
-                            await bufferedItem.Current!.BasicPublishAsync("", "log", body);
-                        }
-                        else
-                        {
-                            if (!cts.IsCancellationRequested)
-                            {
-                                Console.WriteLine($"RingBuffer-{id}({bufferedItem.Successful}:{bufferedItem.ElapsedTime}) Channel Capacity({rb!.CurrentCapacity})");
-                            }
-                        }
-                    }
-                    Console.WriteLine($"Thread {id} ended");
-                    Interlocked.Decrement(ref qtdstart);
-                });
-                thread.Start();
-                threads.Add(thread);
-            }
-
-            Console.WriteLine($"Waiting for {threadCount} threads to finish...");
-            while (qtdstart > 0)
-            {
-                Thread.Sleep(10);
-            }
+            ReportCapacity(rb);
+            await RunLoadTestAsync(rb, cts.Token);
 
             Console.WriteLine("Dispose ring buffer");
+            await rb.DisposeAsync();
             cts.Cancel();
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 10000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer {rb!.Name} current capacity : {rb!.CurrentCapacity}");
-            }
-            sw.Reset();
+            cts.Dispose();
 
-            threads.Clear();
-
-            cts.Dispose();          
             cts = CancellationTokenSource.CreateLinkedTokenSource(tokenapplifetime);
 
-            Console.WriteLine($"Wait... 20 sec. to start {threadCount} thread using lock Acquire");
-
+            //create ring buffer again, this time locking acquire/switch while scaling
             rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                    .Capacity(10)
-                    .Logger(hostApp.Services.GetService<ILogger<Program>>())
-                    .BackgroundLogger()
-                    .Factory((cts) => ChannelFactory(cts)!)
-                    .ScaleTimer(50, TimeSpan.FromSeconds(5))
-                        .MaxCapacity(20)
-                        .MinCapacity(5)
-                        .LockWhenScaling()
-                        .AutoScaleAcquireFault()
-                    .BuildWarmupAsync(cts.Token);
+                .Logger(hostApp.Services.GetService<ILogger<Program>>())
+                .BackgroundLogger()
+                .Factory((token) => ChannelFactory(token)!)
+                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .AutoScaleAcquireFault()
+                .BuildWarmupAsync(cts.Token);
 
+            ReportCapacity(rb);
+            await RunLoadTestAsync(rb, cts.Token);
+
+            Console.WriteLine("Dispose ring buffer");
+            await rb.DisposeAsync();
+            cts.Cancel();
+            cts.Dispose();
+        }
+
+        // Publishes from WorkerCount concurrent tasks for 60 seconds, sharing one ring buffer of
+        // RabbitMQ channels - this is the pattern channel pooling exists for: many concurrent
+        // publishers, one shared IConnection, no per-publish channel-open cost.
+        private static async Task RunLoadTestAsync(IRingBufferService<IChannel> rb, CancellationToken shutdownToken)
+        {
+            Console.WriteLine($"Wait... 20 sec. before starting {WorkerCount} concurrent workers");
+            await Task.Delay(TimeSpan.FromSeconds(20), shutdownToken);
+
+            Console.WriteLine("Running for 60 seconds..");
+            var deadline = DateTime.Now.AddSeconds(60);
+
+            var workers = Enumerable.Range(1, WorkerCount).Select(id => Task.Run(async () =>
+            {
+                Console.WriteLine($"Worker {id} started");
+                while (DateTime.Now < deadline)
+                {
+                    await using var bufferedItem = await rb.AcquireAsync(shutdownToken);
+                    if (bufferedItem.Successful)
+                    {
+                        var body = new ReadOnlyMemory<byte>(messageBodyBytes);
+                        await bufferedItem.Current!.BasicPublishAsync("", "log", body);
+                    }
+                    else if (!shutdownToken.IsCancellationRequested)
+                    {
+                        Console.WriteLine($"Worker-{id}({bufferedItem.Successful}:{bufferedItem.ElapsedTime}) Channel Capacity({rb.CurrentCapacity})");
+                    }
+                }
+                Console.WriteLine($"Worker {id} ended");
+            }, shutdownToken)).ToArray();
+
+            Console.WriteLine($"Waiting for {WorkerCount} workers to finish...");
+            await Task.WhenAll(workers);
+        }
+
+        private static void ReportCapacity(IRingBufferService<IChannel> rb)
+        {
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
             Console.WriteLine($"Ring Buffer Current capacity = {rb.CurrentCapacity}");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsInitCapacity = {rb.IsInitCapacity}.");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
-
-            Thread.Sleep(TimeSpan.FromSeconds(20));
-
-            Console.WriteLine($"Running 60 seconds..");
-            Thread.Sleep(TimeSpan.FromSeconds(1));
-
-            dtref = DateTime.Now.AddSeconds(60);
-            qtdstart = 0;
-            for (int i = 0; i < threadCount; i++)
-            {
-                Thread thread = new(async () =>
-                {
-                    var id = Interlocked.Increment(ref qtdstart);
-                    Console.WriteLine($"Thread {qtdstart} started ");
-                    while (true)
-                    {
-                        if (DateTime.Now >= dtref)
-                        {
-                            Console.WriteLine($"wait({id}) 60 seconds (idle)");
-                            Thread.Sleep(TimeSpan.FromSeconds(60));
-                            break;
-                        }
-                        using var bufferedItem = await rb!.AcquireAsync();
-                        if (bufferedItem.Successful)
-                        {
-                            var body = new ReadOnlyMemory<byte>(messageBodyBytes);
-                            await bufferedItem.Current!.BasicPublishAsync("", "log", body);
-                        }
-                        else
-                        {
-                            if (!cts.IsCancellationRequested)
-                            {
-                                Console.WriteLine($"RingBuffer-{id}({bufferedItem.Successful}:{bufferedItem.ElapsedTime}) Channel Capacity({rb!.CurrentCapacity})");
-                            }
-                        }
-                    }
-                    Console.WriteLine($"Thread {id} ended");
-                    Interlocked.Decrement(ref qtdstart);
-                });
-                thread.Start();
-                threads.Add(thread);
-            }
-
-            Console.WriteLine($"Waiting for {threadCount} threads to finish...");
-            while (qtdstart > 0)
-            {
-                Thread.Sleep(10);
-            }
-
-            Console.WriteLine("Dispose ring buffer");
-            cts.Cancel();
-            sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 10000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer {rb!.Name} current capacity : {rb!.CurrentCapacity}");
-            }
-            sw.Reset();
         }
 
         public static string RandomString(int length)

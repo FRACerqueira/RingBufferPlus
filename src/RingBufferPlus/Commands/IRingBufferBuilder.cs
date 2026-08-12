@@ -1,0 +1,86 @@
+// ***************************************************************************************
+// MIT LICENCE
+// The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
+// ***************************************************************************************
+
+using Microsoft.Extensions.Logging;
+
+namespace RingBufferPlus
+{
+    /// <summary>
+    /// Represents the entry point to configure and build a RingBufferPlus instance.
+    /// </summary>
+    /// <typeparam name="T">Type of buffer.</typeparam>
+    public interface IRingBufferBuilder<T>
+    {
+        /// <summary>
+        /// Sets the factory (required) to create an instance in the ring buffer asynchronously.
+        /// </summary>
+        /// <param name="value">The handler to factory.</param>
+        /// <param name="timeout">The timeout for build. Default value is 15 seconds.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null);
+
+        /// <summary>
+        /// Sets the HeartBeat in the ring buffer.
+        /// </summary>
+        /// <remarks>
+        /// At each pulse, an item is acquired from the buffer for evaluation asynchronously.
+        /// </remarks>
+        /// <param name="value">The <see cref="RingBufferValue{T}"/>.</param>
+        /// <param name="pulse">The Heart Beat Interval. Default value is 10 seconds.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse = null);
+
+        /// <summary>
+        /// Sets the logger.
+        /// </summary>
+        /// <param name="value"><see cref="ILogger"/>.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> Logger(ILogger? value);
+
+        /// <summary>
+        /// Sets to write in background (evaluation asynchronously).
+        /// </summary>
+        /// <param name="value">True to write in background.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> BackgroundLogger(bool value = true);
+
+        /// <summary>
+        /// Sets the timeout to acquire buffer.
+        /// </summary>
+        /// <param name="value">The timeout for acquiring a value from the buffer. Default value is 5 seconds.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> AcquireTimeout(TimeSpan value);
+
+        /// <summary>
+        /// Sets the error handler to log errors.
+        /// </summary>
+        /// <param name="errorHandler">The handler to log error.</param>
+        /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        IRingBufferBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
+
+        /// <summary>
+        /// Sets a fixed capacity for the ring buffer: no autoscale, no manual switch, no min/max range.
+        /// </summary>
+        /// <param name="value">The fixed capacity. Value must be greater than or equal to 2.</param>
+        /// <returns>An instance of <see cref="IRingBufferFixedBuilder{T}"/>.</returns>
+        IRingBufferFixedBuilder<T> FixedCapacity(int value);
+
+        /// <summary>
+        /// Sets an elastic capacity for the ring buffer, enabling manual switching between
+        /// <paramref name="minCapacity"/>, <paramref name="initialCapacity"/> and <paramref name="maxCapacity"/>
+        /// via <see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch)"/>.
+        /// </summary>
+        /// <para>
+        /// The <paramref name="baseTimer"/> is used as the scale-up/scale-down timeout time base. When the timeout is reached the scale operation is undone.
+        /// </para>
+        /// <param name="initialCapacity">Initial/startup capacity. Value must be greater than or equal to <paramref name="minCapacity"/> and less than or equal to <paramref name="maxCapacity"/>.</param>
+        /// <param name="minCapacity">The minimal buffer capacity. Value must be greater than or equal to 2.</param>
+        /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
+        /// <param name="numberSamples">Number of samples collected. Default is 100 (one sample per 300ms).</param>
+        /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples. Default value is 30 seconds (one sample per 100ms).</param>
+        /// <returns>An instance of <see cref="IRingBufferElasticBuilder{T}"/>.</returns>
+        IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples = null, TimeSpan? baseTimer = null);
+    }
+}

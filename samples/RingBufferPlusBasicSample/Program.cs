@@ -3,7 +3,6 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 
-using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -29,10 +28,10 @@ namespace RingBufferPlusBasicSample
             Random rnd = new();
 
             var rb = await RingBuffer<int>.New("MyBuffer")
-                .Capacity(3)
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
                 .HeartBeat(MyHeartBeat)
+                .FixedCapacity(3)
                 .BuildWarmupAsync(tokenapplifetime);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -41,36 +40,28 @@ namespace RingBufferPlusBasicSample
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMaxCapacity = {rb.IsMaxCapacity}.");
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
-            Console.WriteLine("Press anykey to start 2 Acquire buffer");
+            Console.WriteLine("Press any key to start 2 Acquire buffer");
             Console.ReadKey();
-            using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
+            await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
-#pragma warning disable IDE0063 // Use simple 'using' statement
-                using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
+                await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
                 {
                     Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
                     Console.WriteLine($"Buffer is ok({buffer2.Successful}:{buffer2.ElapsedTime}) value: {buffer2.Current}");
                 }
-#pragma warning restore IDE0063 // Use simple 'using' statement
             }
 
-            Console.WriteLine("Press anykey to Acquire buffer and invalidate item buffer");
+            Console.WriteLine("Press any key to Acquire buffer and invalidate item buffer");
             Console.ReadKey();
-            using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
+            await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
             {
                 Console.WriteLine($"Buffer is ok({buffer3.Successful}:{buffer3.ElapsedTime}) value: {buffer3.Current}");
                 buffer3.Invalidate();
             }
 
             Console.WriteLine($"Dispose Ring Buffer...");
-            rb.Dispose();
-            var sw = Stopwatch.StartNew();
-            while (sw.ElapsedMilliseconds < 5000)
-            {
-                Thread.Sleep(1000);
-                Console.WriteLine($"Ring Buffer Current is {rb.CurrentCapacity}");
-            }
-            sw.Reset();
+            await rb.DisposeAsync();
+            Console.WriteLine("Ring Buffer disposed.");
         }
 
         private static void MyHeartBeat(RingBufferValue<int> value)
