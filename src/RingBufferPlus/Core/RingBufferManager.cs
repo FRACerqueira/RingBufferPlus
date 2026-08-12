@@ -129,6 +129,7 @@ namespace RingBufferPlus.Core
 
         #endregion
 
+        [System.Diagnostics.CodeAnalysis.SuppressMessage("Reliability", "CA2016:Forward the 'CancellationToken' parameter to methods", Justification = "ByDesign")]
         public RingBufferManager(CancellationToken lifetimecancellation)
         {
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetimecancellation);
@@ -747,9 +748,9 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private static readonly Action<ILogger, string, string, Exception?> logMessageForDbg = LoggerMessage.Define<string, string>(LogLevel.Debug, 0, "RingBufferManager({source}) : {message}");
-        private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferManager({source}) : {message}");
-        private static readonly Action<ILogger, string, string, Exception?> logMessageFoWrn = LoggerMessage.Define<string, string>(LogLevel.Warning, 0, "RingBufferManager({source}) : {message}");
+        private static readonly Action<ILogger, string, string, Exception?> logMessageForDbg = LoggerMessage.Define<string, string>(LogLevel.Debug, 0, "RingBufferManager({Source}) : {Message}");
+        private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferManager({Source}) : {Message}");
+        private static readonly Action<ILogger, string, string, Exception?> logMessageFoWrn = LoggerMessage.Define<string, string>(LogLevel.Warning, 0, "RingBufferManager({Source}) : {Message}");
 
         #endregion
 

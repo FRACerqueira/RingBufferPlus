@@ -267,13 +267,13 @@ namespace RingBufferPlus.Core
                 }
                 if (_sampleUnit < 1)
                 {
-                    var err = new IndexOutOfRangeException("numberSamples in command ElasticCapacity must be greater or equal 1");
+                    var err = new InvalidOperationException("numberSamples in command ElasticCapacity must be greater or equal 1");
                     LogError(err);
                     throw err;
                 }
                 if (_samplebasetime.TotalMilliseconds / _sampleUnit < 100)
                 {
-                    var err = new IndexOutOfRangeException("baseTimer / numberSamples in command ElasticCapacity must be greater or equal 100ms");
+                    var err = new InvalidOperationException("baseTimer / numberSamples in command ElasticCapacity must be greater or equal 100ms");
                     LogError(err);
                     throw err;
                 }
@@ -321,7 +321,7 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private static readonly Action<ILogger, string, string, Exception?> logMessageForDbg = LoggerMessage.Define<string, string>(LogLevel.Debug, 0, "RingBufferBuilder({source}) : {message}");
-        private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferBuilder({source}) : {message}");
+        private static readonly Action<ILogger, string, string, Exception?> logMessageForDbg = LoggerMessage.Define<string, string>(LogLevel.Debug, 0, "RingBufferBuilder({Source}) : {Message}");
+        private static readonly Action<ILogger, string, string, Exception?> logMessageForErr = LoggerMessage.Define<string, string>(LogLevel.Error, 0, "RingBufferBuilder({Source}) : {Message}");
     }
 }

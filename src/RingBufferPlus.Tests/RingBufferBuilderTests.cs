@@ -279,7 +279,7 @@ namespace RingBufferPlus.Tests
         {
             var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 0, TimeSpan.FromSeconds(5));
 
-            Assert.Throws<IndexOutOfRangeException>(() => builder.Build());
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
 
         [Fact]
@@ -287,7 +287,7 @@ namespace RingBufferPlus.Tests
         {
             var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 10, TimeSpan.FromMilliseconds(500));
 
-            Assert.Throws<IndexOutOfRangeException>(() => builder.Build());
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
     }
 }

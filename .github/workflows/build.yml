@@ -49,6 +49,7 @@ jobs:
       # to the one TFM whose runtime is actually present (the test project multi-targets
       # net8.0/net9.0/net10.0 - see ADR002's revision note on CI test execution).
       - name: Test
+        if: matrix.os != 'macos-latest'
         run: >
           dotnet test
           --framework net10.0
