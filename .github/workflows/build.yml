@@ -48,6 +48,7 @@ jobs:
       - name: Test
         run: >
           dotnet test
+          --framework net10.0
           --no-build
           --configuration Release
           --verbosity normal

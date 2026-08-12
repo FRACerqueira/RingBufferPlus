@@ -1,7 +1,7 @@
 <!-- Do not remove this comment, lines and table (1-12) -->
 |Adr-Plus Fields|Values Migrated |
 |--|--|
-|File title md|Multi-targeting policy for net8 net9 net10 and test matrix|
+|File title md|Multi-targeting policy for net8 net9 net10 and net10-only CI test execution|
 |Version|01|
 |Revision||
 |Scope||
@@ -11,7 +11,7 @@
 |Superseded||
 <!-- Do not remove this comment, lines and table (1-12) -->
 ---
-# Multi-targeting policy for net8/net9/net10 and test matrix
+# Multi-targeting policy for net8/net9/net10 and net10-only CI test execution
 
 ## Deciders
 
@@ -74,6 +74,12 @@ Chosen option: "Keep multi-targeting net8.0/net9.0/net10.0 on the library and ch
 With the mandate for a complete product overhaul for v5.0.0 (sweeping breaking changes authorized), this decision was re-examined and **reaffirmed without change**: net8.0/net9.0/net10.0 remain supported in v5. The `#if NET9_0_OR_GREATER` currently present in `RingBufferManager.cs` (swapping `System.Threading.Lock` for `object` as the lock primitive) would, in theory, motivate dropping net8.0 if the Channel-based rewrite ([ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)) made that `#if` unnecessary and depended on other net9+-only APIs. That possibility was evaluated, and the maintainer explicitly chose to keep all three TFMs regardless of the rewrite's technical outcome — a market-reach decision, not a technical-feasibility one.
 
 **Outcome (Phase 2, 2026-08-11):** the Channel-based rewrite ([ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)) removed the `#if NET9_0_OR_GREATER` / `System.Threading.Lock` conditional entirely — the new single-consumer engine design needs no lock primitive at all, on any TFM. This confirms, rather than changes, the decision above: net8.0/net9.0/net10.0 all build and pass the full test suite identically, so keeping all three TFMs remains a pure market-reach choice with no remaining technical asymmetry between them.
+
+## Revision note — CI test execution narrowed to net10.0 (2026-08-12)
+
+The `CI` workflow (`.github/workflows/build.yml`, renamed from `build.yml`'s prior `Build` workflow) was refactored and, per explicit maintainer instruction, now installs only the .NET 10 SDK and runs `dotnet test --framework net10.0` — it no longer executes the suite against net8.0/net9.0 in CI, unlike the full three-TFM matrix this ADR's Decision Outcome above mandated.
+
+This is a narrower, explicit maintainer call about **CI test execution cost**, not a re-litigation of the multi-targeting decision itself: `RingBufferPlus.csproj` and `RingBufferPlus.Tests.csproj` are unchanged and still multi-target `net8.0;net9.0;net10.0`, so published consumer reach on net8.0/net9.0 is unaffected. The practical consequence is that the coverage gap this ADR originally set out to close (TFM-conditional code exercised only on net10.0, not compiled-but-unverified on net8.0/net9.0) is reopened going forward, on the same terms weighed and rejected as "Keep the coverage gap as an accepted risk" in the Pros and Cons section above. No further action is planned to restore the full matrix unless the maintainer revisits this.
 
 ## Links
 
