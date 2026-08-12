@@ -25,7 +25,6 @@ jobs:
   build-and-test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
@@ -46,16 +45,10 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
-      # The testhost occasionally crashes right at startup on ubuntu-latest/macos-latest
-      # (before any test runs - confirmed innocent of coverlet, this reproduces with
-      # --collect:"XPlat Code Coverage" removed too). --blame-hang-timeout lets VSTest
-      # detect and recover from it within the same invocation, but dotnet test still exits
-      # non-zero for the crash event even when every test then passes on recovery. Don't
-      # fail the job on that exit code alone - continue-on-error here, and the next step
-      # makes the real pass/fail call from the trx's actual Counters (failed/error), which
-      # is unaffected by the crash/recovery.
+      # Setup .NET above installs only the net10.0 SDK, so --framework pins dotnet test
+      # to the one TFM whose runtime is actually present (the test project multi-targets
+      # net8.0/net9.0/net10.0 - see ADR002's revision note on CI test execution).
       - name: Test
-        continue-on-error: true
         run: >
           dotnet test
           --framework net10.0
@@ -65,29 +58,6 @@ jobs:
           --logger "trx;LogFileName=test-results.trx"
           --collect:"XPlat Code Coverage"
           --results-directory TestResults
-          --blame-hang-timeout 90s
-          --blame-hang-dump-type full
-
-      - name: Verify test results
-        shell: pwsh
-        run: |
-          $trx = Get-ChildItem -Path . -Recurse -Filter "test-results.trx" | Select-Object -First 1
-          if (-not $trx) {
-            Write-Error "No .trx file found - dotnet test did not produce results."
-            exit 1
-          }
-          [xml]$xml = Get-Content $trx.FullName
-          $counters = $xml.TestRun.ResultSummary.Counters
-          Write-Host "Counters: total=$($counters.total) executed=$($counters.executed) passed=$($counters.passed) failed=$($counters.failed) error=$($counters.error)"
-          if ([int]$counters.failed -ne 0 -or [int]$counters.error -ne 0) {
-            Write-Error "Real test failures/errors present - failing the job."
-            exit 1
-          }
-          if ([int]$counters.executed -ne [int]$counters.total) {
-            Write-Error "Not all tests executed (executed=$($counters.executed), total=$($counters.total)) - failing the job."
-            exit 1
-          }
-          Write-Host "All $($counters.total) tests passed (failed=0, error=0) - any dotnet test host crash/recovery is treated as non-fatal infra flake, not a real failure."
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -97,17 +67,6 @@ jobs:
           path: "**/TestResults/**/*.trx"
           retention-days: 7
 
-      - name: Upload hang dump
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: hang-dump-${{ matrix.os }}
-          path: |
-            **/TestResults/**/*.dmp
-            **/TestResults/**/Sequence.xml
-          retention-days: 7
-          if-no-files-found: ignore
-
       - name: Upload coverage reports
         uses: actions/upload-artifact@v4
         if: always()
@@ -115,4 +74,3 @@ jobs:
           name: coverage-${{ matrix.os }}
           path: "**/TestResults/**/coverage.cobertura.xml"
           retention-days: 7
-          if-no-files-found: ignore
