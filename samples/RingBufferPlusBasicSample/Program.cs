@@ -44,11 +44,9 @@ namespace RingBufferPlusBasicSample
             Console.ReadKey();
             await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
-                await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
-                {
-                    Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
-                    Console.WriteLine($"Buffer is ok({buffer2.Successful}:{buffer2.ElapsedTime}) value: {buffer2.Current}");
-                }
+                await using var buffer2 = await rb.AcquireAsync(tokenapplifetime);
+                Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
+                Console.WriteLine($"Buffer is ok({buffer2.Successful}:{buffer2.ElapsedTime}) value: {buffer2.Current}");
             }
 
             Console.WriteLine("Press any key to Acquire buffer and invalidate item buffer");
