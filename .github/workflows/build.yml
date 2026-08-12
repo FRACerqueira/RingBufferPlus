@@ -46,6 +46,11 @@ jobs:
       - name: Build
         run: dotnet build --no-restore --configuration Release
 
+      # TEMPORARY: --collect:"XPlat Code Coverage" removed below to test whether coverlet's
+      # profiler/named-pipe handshake is racing with the blame hang-dump collector at
+      # test-host startup - the trx from a hung run showed the host crashing right after
+      # "Starting: RingBufferPlus.Tests", before any test ran, which is that race's profile.
+      # Restore once confirmed either way.
       - name: Test
         run: >
           dotnet test
@@ -54,7 +59,6 @@ jobs:
           --configuration Release
           --verbosity normal
           --logger "trx;LogFileName=test-results.trx"
-          --collect:"XPlat Code Coverage"
           --results-directory TestResults
           --blame-hang-timeout 90s
           --blame-hang-dump-type full
@@ -85,3 +89,4 @@ jobs:
           name: coverage-${{ matrix.os }}
           path: "**/TestResults/**/coverage.cobertura.xml"
           retention-days: 7
+          if-no-files-found: ignore
