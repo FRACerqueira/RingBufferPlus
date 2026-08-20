@@ -20,6 +20,7 @@ namespace RingBufferPlus
         /// </summary>
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="buffername"/> is null.</exception>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1000:Do not declare static members on generic types", Justification = "ByDesign")]
         public static IRingBufferBuilder<T> New(string buffername)
         {
@@ -35,6 +36,7 @@ namespace RingBufferPlus
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="loggerFactory">The logger factory to create a logger.</param>
         /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
+        /// <exception cref="ArgumentNullException"><paramref name="buffername"/> is null.</exception>
         [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1000:Do not declare static members on generic types", Justification = "ByDesign")]
         public static IRingBufferBuilder<T> New(string buffername, ILoggerFactory loggerFactory)
         {

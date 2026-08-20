@@ -38,6 +38,7 @@ namespace RingBufferPlus.Core
         private TimeSpan _factoryTimeout;
         private TimeSpan _pulseHeartBeat;
         private TimeSpan _acquireTimeout;
+        private byte _maxConsecutiveFactoryFailures;
 
         private Action<ILogger?, Exception>? _errorHandler;
         private Action<RingBufferValue<T>>? _bufferHeartBeat;
@@ -64,10 +65,11 @@ namespace RingBufferPlus.Core
 
         #region shared mutators
 
-        private void SetFactory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout)
+        private void SetFactory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures)
         {
             _factory = value;
             _factoryTimeout = timeout ?? RingBufferDefault.FactoryTimeout;
+            _maxConsecutiveFactoryFailures = maxConsecutiveFactoryFailures;
         }
 
         private void SetHeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse)
@@ -90,7 +92,7 @@ namespace RingBufferPlus.Core
 
         #region IRingBufferBuilder<T>
 
-        IRingBufferBuilder<T> IRingBufferBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
@@ -119,7 +121,7 @@ namespace RingBufferPlus.Core
 
         #region IRingBufferFixedBuilder<T>
 
-        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
@@ -139,7 +141,7 @@ namespace RingBufferPlus.Core
 
         #region IRingBufferElasticBuilder<T>
 
-        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
@@ -167,7 +169,7 @@ namespace RingBufferPlus.Core
 
         #region IRingBufferAutoScaleBuilder<T>
 
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout) { SetFactory(value, timeout); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
@@ -198,6 +200,7 @@ namespace RingBufferPlus.Core
                 MinCapacity = _elastic ? _minCapacity : _initcapacity,
                 MaxCapacity = _elastic ? _maxCapacity : _initcapacity,
                 FactoryTimeout = _factoryTimeout,
+                MaxConsecutiveFactoryFailures = _maxConsecutiveFactoryFailures,
                 PulseHeartBeat = _pulseHeartBeat,
                 SamplesBase = _samplebasetime,
                 SamplesCount = _sampleUnit,

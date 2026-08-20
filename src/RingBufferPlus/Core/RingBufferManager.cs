@@ -84,6 +84,8 @@ namespace RingBufferPlus.Core
 
         public TimeSpan FactoryTimeout { get; init; }
 
+        public byte MaxConsecutiveFactoryFailures { get; init; }
+
         public TimeSpan PulseHeartBeat { get; init; }
 
         public TimeSpan SamplesBase { get; init; }
@@ -632,6 +634,8 @@ namespace RingBufferPlus.Core
         private async Task<int> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
         {
             var created = new List<T>(quantity);
+            Exception? lastFailure = null;
+            var consecutiveFailures = 0;
             using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
             // The deadline scales with the work actually requested (each item already has its own
             // FactoryTimeout-bounded attempt), not with the sampling cadence (SamplesBase) - a
@@ -641,7 +645,14 @@ namespace RingBufferPlus.Core
             if (hasTimeout) overall.CancelAfter(TimeSpan.FromTicks(FactoryTimeout.Ticks * quantity));
             try
             {
-                while (created.Count < quantity)
+                // One attempt per requested item (R14) - a single item's timeout/exception no
+                // longer abandons the whole batch by default. Bounding by attempt count (not just
+                // created.Count < quantity) is what keeps a systematically broken factory failing
+                // fast instead of retrying the same slot for the entire overall deadline:
+                // MaxConsecutiveFactoryFailures (default 0) still gives up on the remaining items
+                // once a real streak of failures happens, resetting on any success so isolated
+                // hiccups in an otherwise healthy batch don't count towards it.
+                for (var attempt = 0; attempt < quantity; attempt++)
                 {
                     using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
                     factoryTimeout.CancelAfter(FactoryTimeout);
@@ -649,51 +660,52 @@ namespace RingBufferPlus.Core
                     {
                         var item = await Factory(overall.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                         created.Add(item);
+                        consecutiveFailures = 0;
                     }
                     catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested && !overall.IsCancellationRequested)
                     {
-                        LogError(new TimeoutException("Timeout factory"));
-                        throw;
+                        var timeout = new TimeoutException("Timeout factory");
+                        LogError(timeout);
+                        lastFailure = timeout;
+                        if (++consecutiveFailures > MaxConsecutiveFactoryFailures) break;
+                    }
+                    catch (Exception ex) when (!overall.IsCancellationRequested)
+                    {
+                        LogError(ex);
+                        lastFailure = ex;
+                        if (++consecutiveFailures > MaxConsecutiveFactoryFailures) break;
                     }
                 }
-                foreach (var item in created)
-                {
-                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
-                }
-                return created.Count;
             }
             catch (OperationCanceledException)
             {
-                // A partial scale-up beats none: keep whatever was actually created instead of
-                // discarding it, and report the real count so the caller can advance capacity by
-                // that much rather than treating this as zero progress.
-                LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity} - keeping the {created.Count} item(s) already created."));
-                foreach (var item in created)
+                // The overall deadline fired before every item could even be attempted once - but
+                // that is not the only way to get here: a normal DisposeAsync racing this call also
+                // cancels the very same linked token (R15). Only log a timeout when the deadline
+                // itself actually elapsed; a caller-token/lifetime cancellation is an ordinary
+                // shutdown, not evidence the factory is unhealthy.
+                if (token.IsCancellationRequested)
                 {
-                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                    LogMessage($"ScaleUp cancelled by shutdown, {created.Count}/{quantity} item(s) already created.");
                 }
-                return created.Count;
+                else
+                {
+                    LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity} - keeping the {created.Count} item(s) already created."));
+                }
             }
-            catch (Exception ex)
+
+            foreach (var item in created)
             {
-                // A non-cancellation failure (typically the factory itself throwing) must not escape
-                // and kill the engine loop - the caller (ProcessCommandAsync) turns this into a failed
-                // command outcome instead. As above, whatever was already created is kept. Only
-                // rethrow when nothing was created at all: once there is real partial progress to
-                // report via the return value, surfacing the exception too would leave the caller
-                // unable to distinguish "some capacity gained" from "none", and the engine loop must
-                // still see this command as handled either way.
-                LogError(ex);
-                foreach (var item in created)
-                {
-                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
-                }
-                if (created.Count == 0)
-                {
-                    throw;
-                }
-                return created.Count;
+                await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
             }
+            if (created.Count == 0 && lastFailure is not null)
+            {
+                // Nothing at all was gained and every attempt failed for a real reason (not
+                // just running out of the overall deadline) - surface that real failure
+                // instead of silently reporting zero progress (same contract as before).
+                throw lastFailure;
+            }
+            return created.Count;
         }
 
         private async Task DisposeItemsDefensivelyAsync(IEnumerable<T> items)
@@ -744,7 +756,17 @@ namespace RingBufferPlus.Core
             }
             catch (OperationCanceledException)
             {
-                LogError(new TimeoutException("Timeout factory (replacement)"));
+                // Same distinction as CreateItemsAsync (R15): a normal DisposeAsync racing this
+                // replacement cancels the same _lifetime token the per-item timeout is linked
+                // from - that is an ordinary shutdown, not evidence the factory is unhealthy.
+                if (_lifetime.IsCancellationRequested)
+                {
+                    LogMessage("Replacement cancelled by shutdown.");
+                }
+                else
+                {
+                    LogError(new TimeoutException("Timeout factory (replacement)"));
+                }
             }
             catch (Exception ex)
             {
@@ -787,39 +809,52 @@ namespace RingBufferPlus.Core
 
                     LogMessage("Started Heart Beat item");
                     var acquired = await AcquireForHeartbeatAsync(_lifetime.Token).ConfigureAwait(false);
-                    await using (acquired)
+                    if (!acquired.Successful)
                     {
-                        if (!acquired.Successful)
+                        LogMessage("Heart Beat item not available");
+                        continue;
+                    }
+                    using var pulseTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                    pulseTimeout.CancelAfter(PulseHeartBeat);
+                    var heartbeatWork = Task.Run(() => BufferHeartBeat?.Invoke(acquired));
+                    try
+                    {
+                        await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
+                        await acquired.DisposeAsync().ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
+                    {
+                        // The callback blocked past its pulse budget. It keeps running on its own
+                        // thread-pool thread - a blocking synchronous callback cannot be forcibly
+                        // cancelled, so it may still be reading/writing the resource right now (F12).
+                        // Two separate concerns, handled on two different timelines: replace the slot
+                        // right away (via ReplaceOne directly, bypassing TurnbackAsync's combined
+                        // dispose-then-replace) so capacity is not lost while the callback runs - same
+                        // guarantee as before - but defer actually disposing the stuck resource until
+                        // the orphaned callback truly finishes; disposing it now, while the callback
+                        // might still be touching it, would be a use-after-dispose race on the
+                        // caller's own object (a DB connection, a RabbitMQ channel). Its eventual
+                        // outcome is still observed so a late fault cannot surface as an unobserved
+                        // task exception.
+                        LogError(new TimeoutException("Timeout Heart Beat"));
+                        _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
+                        _ = heartbeatWork.ContinueWith(async t =>
                         {
-                            LogMessage("Heart Beat item not available");
-                            continue;
-                        }
-                        using var pulseTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
-                        pulseTimeout.CancelAfter(PulseHeartBeat);
-                        var heartbeatWork = Task.Run(() => BufferHeartBeat?.Invoke(acquired));
-                        try
-                        {
-                            await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
-                        }
-                        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
-                        {
-                            // The callback blocked past its pulse budget. It keeps running on its own
-                            // thread-pool thread - a blocking synchronous callback cannot be forcibly
-                            // cancelled - so the item is invalidated (a replacement is built) rather
-                            // than returned to the pool while the stray callback might still be
-                            // touching it. Its eventual outcome is still observed so a late fault
-                            // cannot surface as an unobserved task exception.
-                            LogError(new TimeoutException("Timeout Heart Beat"));
-                            acquired.Invalidate();
-                            _ = heartbeatWork.ContinueWith(t =>
+                            if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
+                            try
                             {
-                                if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
-                            }, TaskScheduler.Default);
-                        }
-                        catch (Exception ex)
-                        {
-                            LogError(ex);
-                        }
+                                await DisposeItemAsync(acquired.Current).ConfigureAwait(false);
+                            }
+                            catch (Exception ex)
+                            {
+                                LogError(ex);
+                            }
+                        }, TaskScheduler.Default);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError(ex);
+                        await acquired.DisposeAsync().ConfigureAwait(false);
                     }
                     LogMessage("Stopped Heart Beat item");
                 }

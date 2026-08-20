@@ -18,41 +18,48 @@ Antes disso, o processo está "em convergência, ainda não estável" (achados a
 
 | | |
 |---|---|
-| Rodada corrente | 1 (em andamento) |
-| Status da rodada | P0 ✅ · P1 ✅ · P2 (Decisões A/B/C) ✅ · **P3 ✅ concluído** (F6, F7/R7, F9, F11/R9, R6, R11, lote de documentação U-09/U-11 a U-20/U-23/U-24 — tudo fechado) |
-| Total de achados (rodada 1) | 48 — **1 novo (R13)** descoberto ao investigar o R6 (não é regressão: já existia, só não estava catalogado separadamente) |
-| Fechados até agora | 47 / 48 (98%) |
-| Abertos até agora | 1 / 48 — **R13, parcialmente endereçado (lado documentável fechado; mudança arquitetural confirmadamente fora de escopo)** — zero Crítico, zero Alto |
-| Critério de convergência atingido? | Não ainda — só 1 rodada completada; critério exige 2. Mas a Rodada 1 está, na prática, pronta para ser encerrada — falta só o commit final e os 3 TFMs. |
+| Rodada corrente | 2 — ✅ **encerrada** (todos os achados acionáveis corrigidos; restam só F13/F14/R16, registrados por completude, sem ação planejada) |
+| Status da Rodada 1 | ✅ **Encerrada.** P0/P1/P2/P3 100% concluídos, commit `526c8ba` enviado (`git push`, `develop`). 47/48 achados fechados; só o R13 (parcial — lado documentável fechado, arquitetura fora de escopo) ficou aberto. |
+| Status da Rodada 2 | ✅ **Encerrada.** Levantamento (3 passes independentes, 2026-08-20) — **0 regressões** nos 47 achados fechados da Rodada 1. 11 achados novos; **F12 (Alta), R14 (Média-Alta), R15 (Baixa-Média) e o lote de documentação (U-25 a U-29) — todos corrigidos** (vermelho→verde onde havia comportamento, 102/102 em net10.0). Restam apenas F13/F14/R16, registrados por completude, sem reprodução, sem ação planejada. |
+| Total de achados (acumulado) | 59 (48 da Rodada 1 + 11 novos da Rodada 2) |
+| Fechados até agora | 55 / 59 (93%) |
+| Abertos até agora | 4 / 59 — **zero Crítico, zero Alto** — R13 (parcial, decisão), F13/F14/R16 (registrados por completude, sem ação planejada) |
+| Critério de convergência atingido? | Não ainda — precisa de 2 rodadas consecutivas "limpas" (zero Crítico/Alto). A Rodada 2, no levantamento inicial, teve o F12 (Alta) aberto — então não conta como limpa mesmo já corrigida agora. A Rodada 3 é a primeira candidata real a contar. |
 
 ## Tabela de rodadas
 
 | Rodada | Data | Alvo | Gatilho | Críticos abertos | Altos abertos | Médios abertos | Baixos abertos | Total aberto | Fechados na rodada | Novos achados (regressão) | Veredito por pilar |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| 1 | 2026-08-20 | v5.1.0 | Auditoria inicial (3 passes independentes: Estabilidade, Resiliência, Usabilidade) sobre a v5.0.0 publicada | 0 (de 4) | 0 (de 13) | 8 (de 14)¹ | 11 (de 16)¹ | 21 (de 47) | 26 | 0 | Estabilidade: NÃO PRONTO → em correção. Resiliência: NÃO PRONTO → em correção. Usabilidade: PRONTO COM RESSALVAS → ressalvas caindo. |
+| 1 | 2026-08-20 | v5.1.0 | Auditoria inicial (3 passes independentes: Estabilidade, Resiliência, Usabilidade) sobre a v5.0.0 publicada | 0 (de 4) | 0 (de 13) | 2 (de 14)¹ | 1 (de 17)² | 1 (de 48) | 47 | 1 (R13 — descoberta, não regressão) | Estabilidade: ✅ pronto. Resiliência: ✅ pronto (exceto R13, decisão fora de escopo). Usabilidade: ✅ pronto. |
+| 2 | 2026-08-20 | v5.1.0 | Re-auditoria completa (3 passes independentes, mesma metodologia) contra o estado pós-P3 | 0 | 1 (F12) | 3 (R13, R14, U-25)³ | 8 (F13, F14, R15, R16, U-26 a U-29)⁴ | 12 (de 59) | 0 | 11 (F12-F14, R14-R16, U-25 a U-29 — descobertas, não regressões) | Estabilidade: 1 achado Alta confirmado, ainda não corrigido. Resiliência: 1 achado Média-Alta confirmado, ainda não corrigido. Usabilidade: ressalvas menores remanescentes. |
 
-¹ "Médios" agrupa também os 2 achados rotulados "Baixa-Média" (F7, F9) nesta linha; "Baixos" inclui a faixa "Baixa" pura. Ver detalhamento por severidade abaixo.
+¹ Rodada 1, final: dos 14 originalmente "Média", só R13 (Média) ficou aberto no fechamento do P3 — mas a Rodada 2 reclassifica o total acumulado; ver detalhamento abaixo. ² Rodada 1 final: nenhum "Baixa" restou aberto (todos fechados no P3) — a coluna soma 1 só pela contagem combinada com a Rodada 2. ³ Rodada 2: Média-Alta (R14) + Média (R13, U-25). ⁴ Rodada 2: Baixa-Média (R15, U-26) + Baixa (F13, F14, R16, U-27, U-28, U-29). Ver detalhamento por severidade abaixo para os números exatos por rodada.
 
-### Detalhamento por severidade — Rodada 1 (estado ao iniciar o P3)
+### Detalhamento por severidade
 
-| Severidade | Total | Fechados | Abertos | Abertos (IDs) |
-|---|---|---|---|---|
-| Crítica | 4 | 4 | 0 | — |
-| Alta | 13 | 13 | 0 | — |
-| Média-Alta | 1 | 1 | 0 | — |
-| Média | 13 | 5 | 8 | F6, R6, R7, U-09, U-11, U-12, U-13, U-14 |
-| Baixa-Média | 2 | 0 | 2 | F7, F9 |
-| Baixa | 14 | 3 | 11 | F11, R9, R11, U-15, U-16, U-17, U-18, U-19, U-20, U-23, U-24 |
-| **Total** | **47** | **26** | **21** | |
+| Severidade | Rodada 1 (total/fechados/abertos) | Rodada 2 (total/fechados/abertos) | Aberto acumulado |
+|---|---|---|---|
+| Crítica | 4 / 4 / 0 | — | 0 |
+| Alta | 13 / 13 / 0 | F12 (1/1/0 ✅) | 0 |
+| Média-Alta | 1 / 1 / 0 | R14 (1/1/0 ✅) | 0 |
+| Média | 13 / 12 / 1 (R13) | U-25 ✅ (1/1/0) | 1 |
+| Baixa-Média | 2 / 2 / 0 | R15 ✅, U-26 ✅ (2/2/0) | 0 |
+| Baixa | 15 / 15 / 0 | F13, F14, R16 (abertos), U-27 ✅, U-28 ✅, U-29 ✅ (6/3/3) | 3 |
+| **Total** | **48 / 47 / 1** | **11 / 8 / 3** | **4 (de 59)** |
 
-## Leitura da Rodada 1
+## Leitura
 
-- **Nenhum achado Crítico ou Alto permanece aberto** — os dois passes técnicos originais (F1-F11, R1-R12) e a maior parte dos achados de usabilidade de alto impacto (U-01 a U-08, U-21) foram todos fechados via P0/P1/P2, com protocolo vermelho→verde onde havia comportamento de runtime a verificar.
-- **Nenhuma regressão observada** — nenhuma correção desta rodada introduziu um achado novo até agora (a suíte de 93 testes cresceu monotonicamente, sem remoções além de 1 teste caro sem sinal — F10 — explicitamente registrado como tal).
-- **P3 concluído — 47 de 48 achados fechados.** Todos os itens de comportamento/código (F6, F7/R7, F9, F11/R9, R6, R11) e todo o lote de documentação (U-09, U-11 a U-20, U-23, U-24) estão corrigidos e verificados. Só o U-23 exigiu uma mudança de código real (anotação de nullability); o resto foi documentação pura, sem trade-off.
-- **Um achado novo surgiu durante a própria correção do R6 (R13)** — não é uma regressão introduzida por uma correção; é um mecanismo pré-existente (o scale-up também bloqueia o engine, do mesmo jeito que o scale-down do R6) que só ficou nítido ao investigar R6 de perto. O lado documentável foi endereçado (doc do `FactoryTimeout` + pesquisa que confirmou o default de 15s como seguro); a mudança arquitetural em si permanece deliberadamente fora de escopo (revisita o ADR001) — é o único item ainda "aberto" desta rodada. Isso é esperado e saudável numa auditoria — o critério de convergência trata "achado novo introduzido por uma correção" (regressão) como sinal de alerta, não "achado novo descoberto ao investigar" (aprofundamento normal).
-- **Ainda não é possível declarar convergência** — o critério exige 2 rodadas consecutivas nesse estado (zero Crítico/Alto, sem achado novo, total não crescente). Esta é a primeira, e ainda está tecnicamente em andamento (falta o commit final). Uma Rodada 2 (nova auditoria completa) é o próximo gatilho natural para verificar se o estado se mantém.
+**Rodada 1 (encerrada):** nenhum achado Crítico ou Alto permaneceu aberto; P0/P1/P2/P3 100% concluídos, commitados e enviados. Único item aberto (R13) foi uma decisão deliberada de manter uma mudança arquitetural fora de escopo, com o lado documentável endereçado e apoiado por dados (pesquisa de latência real de conexão a banco/RabbitMQ).
+
+**Rodada 2 (encerrada — todos os achados acionáveis corrigidos):**
+- **Nenhuma regressão** — os 47 achados fechados na Rodada 1 foram todos reconfirmados como ainda corrigidos, por leitura de código direta (não apenas re-executar a suíte).
+- **F12 (Alta, confirmado em execução) foi o achado mais importante desta rodada, corrigido:** o timeout do heartbeat causava uma corrida real de use-after-dispose no recurso pooled do usuário — só ficou visível porque a correção do R3/P0#4 (Rodada 1) tornou esse caminho de timeout finalmente alcançável (antes era código morto). Correção separou "substituir a capacidade" (imediato, preserva a garantia do R3/P0#4) de "descartar o objeto físico" (deferido até o callback órfão terminar). Isso é o padrão exato que esta auditoria recorrente existe para capturar: uma correção resolve o problema que ela visava, mas expõe uma consequência nova que só existe porque a primeira camada de defesa passou a funcionar.
+- **R14 (Média-Alta, confirmado), corrigido, com um trade-off discutido em tempo real:** a correção inicial ("tentar todos os itens sempre") interagia com o R13 (engine bloqueado) sem eu ter sinalizado isso antes de implementar — o próprio Fernando notou e perguntou, o que levou a um novo parâmetro opt-in (`maxConsecutiveFactoryFailures`, default `0` = comportamento inalterado) em vez de mudar o default de todo mundo silenciosamente.
+- **R15 (Baixa-Média, confirmado), corrigido** — puramente observabilidade (log), sem trade-off.
+- **U-25 a U-29 (lote de documentação), todos corrigidos, direto** — 3 são divergência de link para ADR superada (mesma classe do F8), 2 são doc de exceção incompleta; nenhum carregava trade-off.
+- Nenhum Alto/Crítico permanece aberto agora, mas isso não conta retroativamente para o critério de convergência: o levantamento inicial da Rodada 2 *teve* um Alto aberto (F12), então essa rodada específica não é "limpa" para fins do critério de 2 rodadas consecutivas — a Rodada 3 é a primeira candidata real.
+- Restam apenas F13/F14/R16 (Baixa, registrados por completude, sem reprodução) — nenhuma ação planejada para eles.
 
 ## Próxima rodada
 
-Disparar a Rodada 2 depois do commit final desta rodada: repetir os 3 passes de auditoria (Estabilidade/Resiliência/Usabilidade) contra o estado então atual do código, focando em (a) confirmar que nada regrediu nas áreas já corrigidas, (b) reavaliar o R13 (a mudança arquitetural continua fora de escopo, ou já vale a pena?), e (c) procurar achados novos que só ficam visíveis depois que o perímetro defensivo do P0 já existe (ex.: comportamento sob combinações de falha que antes nunca chegavam a rodar por travarem mais cedo).
+Rodada 2 encerrada. Disparar a Rodada 3 (nova auditoria completa) quando o mantenedor decidir — é o primeiro candidato real a contar como "rodada limpa" para o critério de convergência, já que a Rodada 2 teve o F12 (Alta) no levantamento inicial. Focar em (a) confirmar que as correções de F12/R14/R15/U-25 a U-29 não introduziram nada novo, e (b) reavaliar se F13/F14/R16 ainda merecem ficar só registrados ou se algo mudou.

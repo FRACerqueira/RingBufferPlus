@@ -12,6 +12,10 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 
 - **Breaking (semver-exempted — see [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md)):** `LockWhenScaling(bool)` removed entirely from `IRingBufferAutoScaleBuilder<T>` — it was a documented no-op there ("has no observable effect") that had already misled a real caller. Any call chaining `.LockWhenScaling()` after `.AutoScaleAcquireFault()` now fails to compile instead of silently compiling and doing nothing; the fix is to delete that call, which was never doing anything for you. This removal skips both the usual `[Obsolete]` deprecation cycle and the major-version bump a public removal would otherwise require, as two explicit, narrow policy exceptions — see [ADR007 V02](doc/adr/ADR007V02-redesign-of-the-public-fluent-api-surface.md) and [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md) for the justification of each.
 
+### Added
+
+- `Factory(value, timeout, maxConsecutiveFactoryFailures)` gained a third, optional parameter: how many *consecutive* per-item failures a single creation batch (warmup fill, or a scale-up) tolerates before giving up on the remaining not-yet-attempted items, resetting on every success. Default is 0 — the exact same fail-fast behavior as before this parameter existed. Opt in with a higher value if your factory has occasional, recoverable hiccups you'd rather not let sink the whole batch.
+
 ### Fixed
 
 - The engine's command loop now survives a non-cancellation exception from the user's `Factory` or item `Dispose`, instead of dying permanently and hanging every subsequent call.
@@ -31,6 +35,9 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - The heartbeat pump's own internal acquire no longer counts toward the autoscale fault budget — only genuine caller demand does.
 - `RingBuffer<T>.New(string, ILoggerFactory)`'s `buffername` parameter is now correctly annotated as non-nullable, matching its existing `ArgumentNullException` behavior (was `string?`, misleadingly suggesting `null` was accepted).
 - `ScaleDownMin` (calculated but never read by the autoscale decision) removed, along with its documented-but-unreachable "scale down from minimum capacity" formula — minimum capacity is the floor; there is nothing to scale down to below it.
+- A heartbeat callback that blocks past its pulse budget no longer risks a use-after-dispose race on the resource it's still holding — the slot is still replaced promptly (as before), but the stuck resource itself is now only disposed once the orphaned callback actually finishes.
+- A scale-up (or heartbeat-triggered replacement) that only partially completes now keeps trying the remaining items instead of abandoning them on the first item's failure/timeout, when `maxConsecutiveFactoryFailures` is opted into (see Added, above).
+- A normal `DisposeAsync` racing an in-progress scale-up or replacement is no longer logged as a factory `TimeoutException` - only a genuine per-item/overall timeout is.
 
 ## [5.0.0] - 2026-08-12
 

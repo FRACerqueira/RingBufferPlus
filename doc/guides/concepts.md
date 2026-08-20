@@ -15,7 +15,7 @@ This guide gives you the mental model to read before touching the API reference 
 
 ## What RingBufferPlus is
 
-A ring buffer is a bounded pool of pre-built instances of `T` (database connections, RabbitMQ channels, any expensive-to-construct object). Callers `AcquireAsync` an instance, use it, and return it to the pool by disposing the wrapper (`await using`). The "plus" is elastic capacity: the pool can grow and shrink at runtime, either on a manual command or automatically in reaction to acquisition pressure — see [ADR001](../adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md) and [ADR003](../adr/ADR003V01-median-sample-autoscaling-algorithm.md).
+A ring buffer is a bounded pool of pre-built instances of `T` (database connections, RabbitMQ channels, any expensive-to-construct object). Callers `AcquireAsync` an instance, use it, and return it to the pool by disposing the wrapper (`await using`). The "plus" is elastic capacity: the pool can grow and shrink at runtime, either on a manual command or automatically in reaction to acquisition pressure — see [ADR001](../adr/ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md) and [ADR003](../adr/ADR003V01-median-sample-autoscaling-algorithm.md).
 
 Every instance is built once via the `Factory` you supply, and each build is exactly one call to that factory — the buffer never mutates or resets an item on your behalf.
 
@@ -57,7 +57,7 @@ Concretely:
 
 ## Internal design: a single-consumer engine
 
-Every `RingBufferManager<T>` owns exactly one background loop that is the sole writer of the buffer's scale state (current capacity, in-flight scale operations, fault counters). Warmup, manual switches, autoscale reactions, and periodic sampling all funnel through this one loop as commands — there is no lock or semaphore protecting shared mutable state, because there is no state shared between threads to protect: only the engine loop ever touches it ([ADR001](../adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md)).
+Every `RingBufferManager<T>` owns exactly one background loop that is the sole writer of the buffer's scale state (current capacity, in-flight scale operations, fault counters). Warmup, manual switches, autoscale reactions, and periodic sampling all funnel through this one loop as commands — there is no lock or semaphore protecting shared mutable state, because there is no state shared between threads to protect: only the engine loop ever touches it ([ADR001](../adr/ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md)).
 
 `AcquireAsync` does **not** go through that command loop — it reads directly from the pool of already-built items, so an in-progress scale operation never blocks an acquire that has an item available, regardless of `LockWhenScaling`. That setting affects something else entirely — see the [lock guide](usage-lock-when-scaling.md).
 

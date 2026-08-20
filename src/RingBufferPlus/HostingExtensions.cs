@@ -25,7 +25,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="userfunc">The Handler to return the <see cref="IRingBufferService{T}"/>.</param>
         /// <returns><see cref="IServiceCollection"/>.</returns>
-        /// <exception cref="ArgumentNullException">Buffer name null or empty</exception>
+        /// <exception cref="ArgumentNullException">Buffer name is null. An empty string is accepted.</exception>
         public static IServiceCollection AddRingBuffer<T>(this IServiceCollection serviceCollection, string buffername, Func<IRingBufferBuilder<T>, IServiceProvider, IRingBufferService<T>> userfunc)
         {
             ArgumentNullException.ThrowIfNull(buffername);
@@ -49,7 +49,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="appbluild">The <see cref="IHost"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="token">The <see cref="CancellationToken"/>. Default value is <see cref="IHostApplicationLifetime.ApplicationStopping"/>.</param>
-        /// <exception cref="ArgumentNullException">Buffer name null or empty, or buffer not found.</exception>
+        /// <exception cref="ArgumentNullException">Buffer name is null, or no buffer with that name and <typeparamref name="T"/> was registered. An empty string is accepted as a name.</exception>
         public static async Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, CancellationToken? token = null)
         {
             ArgumentNullException.ThrowIfNull(buffername);

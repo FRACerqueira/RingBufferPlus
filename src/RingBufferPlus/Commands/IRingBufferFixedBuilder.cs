@@ -23,8 +23,16 @@ namespace RingBufferPlus
         /// 15 seconds - inherited unchanged from a previous release, not calibrated against any particular
         /// factory. Set it deliberately based on how long your own factory call actually takes (e.g.
         /// opening a database connection or a broker channel), not the default.</param>
+        /// <param name="maxConsecutiveFactoryFailures">How many consecutive factory failures (per-item
+        /// timeout or exception) to tolerate within a single creation batch (the initial warmup fill, or
+        /// a scale-up) before giving up on the remaining not-yet-attempted items. Resets to zero on every
+        /// success, so only a true streak of failures counts, not isolated ones scattered across an
+        /// otherwise healthy batch. Default is 0: the first failure gives up on the rest of the batch
+        /// immediately (whatever succeeded before it is still kept) - the same behavior as before this
+        /// parameter existed. Raise it if your factory has occasional, recoverable hiccups and you want
+        /// the batch to keep trying the remaining items instead of abandoning them.</param>
         /// <returns><see cref="IRingBufferFixedBuilder{T}"/>.</returns>
-        IRingBufferFixedBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null);
+        IRingBufferFixedBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 
         /// <summary>
         /// Sets the HeartBeat in the ring buffer.

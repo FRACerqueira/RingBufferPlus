@@ -722,7 +722,15 @@ namespace RingBufferPlus.Tests
         {
             private int _disposeCount;
             public int DisposeCount => Volatile.Read(ref _disposeCount);
+            public bool TouchedAfterDispose { get; private set; }
             public void Dispose() => Interlocked.Increment(ref _disposeCount);
+            public void Touch()
+            {
+                if (DisposeCount > 0)
+                {
+                    TouchedAfterDispose = true;
+                }
+            }
         }
 
         [Fact]
@@ -1235,6 +1243,215 @@ namespace RingBufferPlus.Tests
                 await value.DisposeAsync();
             }
             await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.22 - A heartbeat callback that blocks past its pulse budget must not have the pooled
+        // resource disposed out from under it (F12, Rodada 2): the orphaned callback keeps running
+        // on its own thread-pool thread and may still be touching the resource when the timeout
+        // fires. Before this fix, Invalidate() + the enclosing "await using" disposed the resource
+        // synchronously on timeout, while the callback could still be using it - a genuine
+        // use-after-dispose race on the caller's own object (a DB connection, a RabbitMQ channel),
+        // not just internal bookkeeping. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, F12.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeat_CallbackBlocksPastPulseBudget_DoesNotDisposeTheResourceWhileStillInUse()
+        {
+            // FixedCapacity(2) means a 2nd heartbeat cycle can acquire the other slot while the
+            // 1st is still blocked - each Factory call must return a genuinely distinct instance
+            // (a shared instance would make an Invalidate()-triggered "replacement" secretly be
+            // the very same already-disposed object, contaminating this test with an unrelated
+            // false positive). Only the 1st cycle's probe is the one under test; later cycles
+            // just no-op past the guard below.
+            DisposableProbe? firstProbe = null;
+            using var callbackStarted = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+
+            IRingBufferBuilder<DisposableProbe> builder = new RingBufferBuilder<DisposableProbe>("ContractHeartbeatDisposeRace", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new DisposableProbe()))
+                .HeartBeat(value =>
+                {
+                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
+                        && !ReferenceEquals(firstProbe, value.Current))
+                    {
+                        return;
+                    }
+                    callbackStarted.Set();
+                    // Block well past the pulse budget - simulates a callback that cannot be
+                    // cancelled and keeps running (and touching the resource) after the manager
+                    // has already given up waiting on it.
+                    releaseCallback.Wait(TimeSpan.FromSeconds(5));
+                    value.Current.Touch();
+                }, pulse: TimeSpan.FromMilliseconds(100))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
+            // Let the pulse timeout (100ms) fire while the callback is still blocked.
+            await Task.Delay(400);
+
+            releaseCallback.Set();
+            // Give the callback time to wake up and call Touch().
+            await Task.Delay(300);
+
+            Assert.NotNull(firstProbe);
+            Assert.False(firstProbe!.TouchedAfterDispose, "Expected the resource to still be usable by the orphaned callback at the moment it touches it - it must not have been disposed while the callback might still be using it.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.23 - maxConsecutiveFactoryFailures (R14, Rodada 2): default (0) must keep today's
+        // fail-fast behavior (a single item's failure still gives up on the rest of the batch);
+        // opting in to a higher value must let the batch keep trying the remaining not-yet-
+        // attempted items instead. Before this parameter existed, CreateItemsAsync always rethrew
+        // on the very first per-item timeout/exception, with no way to opt into anything else, even
+        // though the overall deadline (quantity * FactoryTimeout) had plenty of room left to try the
+        // rest. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, R14.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WithDefaultFailureTolerance_StillAbandonsTheBatchOnTheFirstFailure()
+        {
+            var callCount = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDefaultToleranceIsFailFast", null);
+            var service = builder
+                .Factory(async _ =>
+                {
+                    var call = Interlocked.Increment(ref callCount);
+                    if (call == 4)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                    }
+                    return call;
+                }, TimeSpan.FromMilliseconds(500)) // maxConsecutiveFactoryFailures defaults to 0.
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            // Default tolerance (0) preserves the original behavior: only the 1 item attempted
+            // before the failure (call 3) is kept - calls 5 and 6 are never even attempted.
+            Assert.False(moved);
+            Assert.Equal(3, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WithFailureToleranceOptedIn_StillAttemptsTheRemainingItems()
+        {
+            var callCount = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractOneBadItemDoesNotAbortBatch", null);
+            var service = builder
+                .Factory(async _ =>
+                {
+                    // Calls 1-2 are the warmup (Capacity=2). The scale-up to 6 needs 4 more calls
+                    // (3, 4, 5, 6); call 4 (the 2nd scale-up item) times out, the other 3 succeed
+                    // fast - with tolerance opted in, the batch must still end up with 3 of the 4
+                    // requested items, not just the 1 that happened to be attempted before the
+                    // failure.
+                    var call = Interlocked.Increment(ref callCount);
+                    if (call == 4)
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                    }
+                    return call;
+                }, TimeSpan.FromMilliseconds(500), maxConsecutiveFactoryFailures: 1)
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            // The batch did not fully complete (call 4 never made it in), but 3 of the 4 requested
+            // items (calls 3, 5, 6) must still have been created - not just the 1 attempted before
+            // the mid-batch failure.
+            Assert.False(moved);
+            Assert.Equal(5, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.24 - A normal DisposeAsync racing an in-progress scale-up or heartbeat-triggered
+        // replacement must not be logged as a factory TimeoutException (R15, Rodada 2): before
+        // this fix, the outer OperationCanceledException catches in CreateItemsAsync and
+        // CreateSingleReplacementAsync did not distinguish "the factory/overall deadline actually
+        // elapsed" from "DisposeAsync cancelled the lifetime token while this was in flight" -
+        // both were logged identically as a timeout, misleading an on-call engineer into thinking
+        // the factory/broker was unhealthy during an ordinary clean shutdown. See TODO/relatorio-
+        // viabilidade-ringbufferplus-v5.md, R15.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAnInProgressScaleUp_DoesNotLogAFalseFactoryTimeout()
+        {
+            var errors = new List<Exception>();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringScaleUpNoFalseTimeout", null);
+            var service = builder
+                .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(2), ct); return 1; }, TimeSpan.FromSeconds(5))
+                .OnError((_, ex) => errors.Add(ex))
+                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromSeconds(30))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            // Give the engine time to dequeue the Switch command and actually start CreateItemsAsync
+            // (the factory is mid-delay) before racing it with a normal dispose.
+            await Task.Delay(200);
+            await service.DisposeAsync();
+            await Record.ExceptionAsync(() => switchTask);
+
+            Assert.DoesNotContain(errors, ex => ex is TimeoutException te && te.Message.Contains("Timeout ScaleUp"));
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAnInProgressHeartbeatReplacement_DoesNotLogAFalseFactoryTimeout()
+        {
+            var errors = new List<Exception>();
+            var invalidated = new ManualResetEventSlim();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringReplacementNoFalseTimeout", null);
+            var service = await builder
+                .Factory(async ct =>
+                {
+                    // The very first 2 calls are the warmup fill - answer those immediately so the
+                    // heartbeat has an item to work with; only the replacement (triggered below)
+                    // needs to be slow enough to still be in flight when DisposeAsync races it.
+                    if (!invalidated.IsSet)
+                    {
+                        return 1;
+                    }
+                    await Task.Delay(TimeSpan.FromSeconds(2), ct);
+                    return 1;
+                }, TimeSpan.FromSeconds(5))
+                .OnError((_, ex) => errors.Add(ex))
+                .HeartBeat(value =>
+                {
+                    value.Invalidate();
+                    invalidated.Set();
+                }, pulse: TimeSpan.FromMilliseconds(100))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.True(invalidated.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat to invalidate an item, triggering a replacement.");
+            // Give the engine time to dequeue ReplaceOne and actually start CreateSingleReplacementAsync
+            // (the factory is mid-delay) before racing it with a normal dispose.
+            await Task.Delay(200);
+            await service.DisposeAsync();
+
+            Assert.DoesNotContain(errors, ex => ex is TimeoutException te && te.Message.Contains("Timeout factory (replacement)"));
         }
     }
 }

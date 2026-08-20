@@ -27,7 +27,7 @@ IServiceCollection.
 
 | exception | condition |
 | --- | --- |
-| ArgumentNullException | Buffer name null or empty |
+| ArgumentNullException | Buffer name is null. An empty string is accepted. |
 
 ### See Also
 

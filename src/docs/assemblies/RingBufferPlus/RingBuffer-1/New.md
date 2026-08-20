@@ -18,6 +18,12 @@ public static IRingBufferBuilder<T> New(string buffername)
 
 [`IRingBufferBuilder`](../IRingBufferBuilder-1.md).
 
+### Exceptions
+
+| exception | condition |
+| --- | --- |
+| ArgumentNullException | *buffername* is null. |
+
 ### See Also
 
 * interface [IRingBufferBuilder&lt;T&gt;](../IRingBufferBuilder-1.md)
@@ -42,6 +48,12 @@ public static IRingBufferBuilder<T> New(string buffername, ILoggerFactory logger
 ### Return Value
 
 [`IRingBufferBuilder`](../IRingBufferBuilder-1.md).
+
+### Exceptions
+
+| exception | condition |
+| --- | --- |
+| ArgumentNullException | *buffername* is null. |
 
 ### See Also
 

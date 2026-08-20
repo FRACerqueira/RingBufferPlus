@@ -22,7 +22,7 @@ public static Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffern
 
 | exception | condition |
 | --- | --- |
-| ArgumentNullException | Buffer name null or empty, or buffer not found. |
+| ArgumentNullException | Buffer name is null, or no buffer with that name and *T* was registered. An empty string is accepted as a name. |
 
 ### Remarks
 
