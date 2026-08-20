@@ -63,16 +63,6 @@ namespace RingBufferPlus
         IRingBufferAutoScaleBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
 
         /// <summary>
-        /// No-op on this builder: with autoscale-on-fault enabled, <c>SwitchToAsync</c> is not part of the built
-        /// service's surface (see <see cref="IRingBufferManualScaleService{T}"/>), so there is no manual switch
-        /// completion for this setting to affect. Retained here only so the fluent chain compiles unchanged
-        /// after calling <see cref="IRingBufferElasticBuilder{T}.AutoScaleAcquireFault(byte)"/>.
-        /// </summary>
-        /// <param name="value">Accepted but has no observable effect.</param>
-        /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
-        IRingBufferAutoScaleBuilder<T> LockWhenScaling(bool value = true);
-
-        /// <summary>
         /// Validates and generates RingBufferPlus in service mode.
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/> to observe while waiting for the task to complete.</param>

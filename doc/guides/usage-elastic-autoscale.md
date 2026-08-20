@@ -26,7 +26,7 @@ var rb = await RingBuffer<int>.New("MyBuffer")
 
 ## What happens internally
 
-- **Scale up:** every timed-out `AcquireAsync` increments a fault counter in the engine loop. Once the counter exceeds `numberOfFaults`, the buffer moves to `MaxCapacity` (or back to `Capacity` if it was already scaled past the minimum) and the counter resets. Because faults are counted per timed-out *acquire call*, not per internal retry as in v4, reaction time is roughly `AcquireTimeout × numberOfFaults` — lower `AcquireTimeout` if you need faster reaction (see the `CHANGELOG.md` "Breaking changes v5.0.0" entry on this behavior change).
+- **Scale up:** every timed-out `AcquireAsync` increments a fault counter in the engine loop. Once the counter exceeds `numberOfFaults`, the buffer moves to `Capacity` if it is currently below `Capacity` (a partial recovery step - this also covers a fresh buffer where `initialCapacity == minCapacity`), or straight to `MaxCapacity` otherwise, and the counter resets. Because faults are counted per timed-out *acquire call*, not per internal retry as in v4, reaction time is roughly `AcquireTimeout × numberOfFaults` — lower `AcquireTimeout` if you need faster reaction (see the `CHANGELOG.md` "Breaking changes v5.0.0" entry on this behavior change).
 - **Scale down:** on every sampling tick (`baseTimer` / `numberSamples` — e.g. above, one sample roughly every 100ms, evaluated as a median every 5 seconds), the engine computes the median of collected samples via `AutoScaleDecision.Median` and decides whether to step back down toward `MinCapacity`/`Capacity` via `AutoScaleDecision.EvaluateScaleDown` — see [ADR003](../adr/ADR003V01-median-sample-autoscaling-algorithm.md) for the exact thresholds and why the algorithm is a pure, independently-tested function.
 - Both directions carry a timeout based on the same sampling window; if a scale operation doesn't complete in time, it is undone.
 
@@ -39,4 +39,4 @@ var rb = await RingBuffer<int>.New("MyBuffer")
 ## Common errors
 
 - Setting `AcquireTimeout` very high while expecting fast scale-up — the two are coupled; see "What happens internally" above.
-- Passing `numberSamples < 1` or a `baseTimer`/`numberSamples` combination implying less than 100ms per sample — both throw `IndexOutOfRangeException` at `Build`/`BuildWarmupAsync` time.
+- Passing `numberSamples < 1` or a `baseTimer`/`numberSamples` combination implying less than 100ms per sample — both throw `InvalidOperationException` at `Build`/`BuildWarmupAsync` time.

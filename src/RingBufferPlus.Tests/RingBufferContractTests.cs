@@ -753,5 +753,165 @@ namespace RingBufferPlus.Tests
 
             Assert.Equal(2, probe.DisposeCount);
         }
+
+        // ---------------------------------------------------------------------
+        // 1.14 - The scale-up deadline must scale with the work requested (quantity * FactoryTimeout),
+        // not with the sampling cadence (SamplesBase) - and a scale-up that still can't finish in
+        // time must keep whatever capacity it already gained instead of discarding it. See TODO/
+        // relatorio-viabilidade-ringbufferplus-v5.md, finding R5.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_ScaleUpNeedingMoreTimeThanSamplesBase_StillSucceeds()
+        {
+            // 3 items at ~150ms each (~450ms total) would not fit in a 300ms SamplesBase-derived
+            // deadline, but comfortably fits quantity(3) * FactoryTimeout(1s) = 3s.
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpNeedsMoreTimeThanSamplesBase", null);
+            var service = builder
+                .Factory(async _ => { await Task.Delay(150); return 1; }, TimeSpan.FromSeconds(1))
+                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromMilliseconds(300))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            Assert.True(moved);
+            Assert.True(service.IsMaxCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhenFactoryFailsPartwayThroughScaleUp_KeepsPartialCapacity()
+        {
+            var callCount = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPartialScaleUp", null);
+            var service = builder
+                .Factory(_ =>
+                {
+                    // Calls 1-2 are the warmup (Capacity=2). The scale-up to 5 needs 3 more calls
+                    // (3, 4, 5); let 3 and 4 succeed and 5 fail, so 2 of the 3 requested items are
+                    // actually created before the failure.
+                    var call = Interlocked.Increment(ref callCount);
+                    if (call >= 5)
+                    {
+                        throw new InvalidOperationException("factory down");
+                    }
+                    return Task.FromResult(call);
+                })
+                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            // Partial progress is not surfaced as an exception - only "nothing at all was gained" is.
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            Assert.False(moved);
+
+            // 2 of the 3 requested items were created before the 3rd call failed - capacity must
+            // reflect that partial gain (4), not fall back to the pre-scale value (2).
+            Assert.Equal(4, service.CurrentCapacity);
+
+            // The 2 gained items must be real and usable, not just counted.
+            var acquired = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 4; i++)
+            {
+                var value = await service.AcquireAsync();
+                Assert.True(value.Successful);
+                acquired.Add(value);
+            }
+            foreach (var value in acquired)
+            {
+                await value.DisposeAsync();
+            }
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.15 - Autoscale-on-fault must never be permanently disabled by a legal configuration.
+        // Before this fix, initialCapacity == minCapacity made the scale-up target formula pick a
+        // no-op (target == current) on every single fault, regardless of how many times it fired or
+        // how healthy the factory was. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding R4.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_WhenInitialCapacityEqualsMinCapacity_StillScalesUp()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractAutoScaleInitEqualsMin", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(0)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(200))
+                .Build();
+            await service.WarmupAsync();
+
+            var held1 = await service.AcquireAsync();
+            var held2 = await service.AcquireAsync();
+
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.IsInitCapacity && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.False(service.IsInitCapacity, "Expected the acquire fault to trigger a scale-up away from the initial (== minimum) capacity.");
+
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.16 - The documented autoscale fault threshold ("Default is 1 (after first fault)") must
+        // match the implementation. Before this fix, the comparison used `>` instead of `>=`, so the
+        // default numberOfFaults=1 actually required a second fault before scaling up - see TODO/
+        // relatorio-viabilidade-ringbufferplus-v5.md, finding U-07 / P2 Decision C.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_WithDefaultThreshold_ScalesUpAfterExactlyOneFault()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractAutoScaleThresholdOffByOne", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(4, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault() // default numberOfFaults = 1
+                .AcquireTimeout(TimeSpan.FromMilliseconds(200))
+                .Build();
+            await service.WarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 4; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Exactly one fault - the documented "Default is 1 (after first fault)" must trigger
+            // scale-up right here, not require a second one.
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.IsInitCapacity && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.False(service.IsInitCapacity, "Expected a single acquire fault (the default numberOfFaults=1) to trigger scale-up immediately, not require a second fault.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await service.DisposeAsync();
+        }
     }
 }

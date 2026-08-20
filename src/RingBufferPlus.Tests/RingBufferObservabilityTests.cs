@@ -251,10 +251,47 @@ namespace RingBufferPlus.Tests
             activityListener.Dispose();
 
             var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
-            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "manual"));
+            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "manual") && Equals(r.Tags["success"], true));
 
             var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal("manual", scaleActivity.GetTagItem("trigger"));
+            Assert.Equal(ActivityStatusCode.Ok, scaleActivity.Status);
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhenFactoryThrowsDuringScaleUp_RecordsFailureTag_AndErrorActivityStatus()
+        {
+            // A failed/undone scale operation must not be recorded identically to a successful one
+            // (finding R8). Reuses the same "factory throws during scale-up" scenario as the P0#1
+            // regression test in RingBufferContractTests.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var throwing = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            throwing = true;
+            var switchEx = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity));
+            Assert.IsType<InvalidOperationException>(switchEx);
+
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "manual") && Equals(r.Tags["success"], false));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName));
+            Assert.Equal(ActivityStatusCode.Error, scaleActivity.Status);
         }
 
         [Fact]

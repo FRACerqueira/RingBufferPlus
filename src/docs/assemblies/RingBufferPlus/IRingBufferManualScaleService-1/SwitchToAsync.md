@@ -16,7 +16,7 @@ public Task<bool> SwitchToAsync(ScaleSwitch value)
 
 ### Return Value
 
-A Task representing the asynchronous operation. The result is `false` when the buffer is already at the requested capacity or a scale operation is already running; otherwise `true`.
+A Task representing the asynchronous operation. The result is `false` when the buffer is already at the requested capacity. Otherwise it is `true` — except when [`LockWhenScaling`](../IRingBufferElasticBuilder-1/LockWhenScaling.md) is enabled, in which case the result instead reflects whether the scale operation actually reached the target capacity (`true`) or was undone on its own timeout (`false`). A call made while another scale operation is already in flight is queued behind it, not rejected.
 
 ### See Also
 

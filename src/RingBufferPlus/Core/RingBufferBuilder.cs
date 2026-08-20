@@ -174,7 +174,6 @@ namespace RingBufferPlus.Core
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.LockWhenScaling(bool value) { SetLockWhenScaling(value); return this; }
 
         IRingBufferService<T> IRingBufferAutoScaleBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
 

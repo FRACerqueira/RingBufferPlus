@@ -2,7 +2,27 @@
 
 All notable changes to this project are documented in this file.
 
-The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/) — with one documented exception: **v5.0.0 is a deliberate, single "clean slate" reset** with no deprecation bridge from v4.x, authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md). Strict SemVer with a deprecation cycle resumes from v5.0.0 onward (see [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)).
+The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/) — with two documented exceptions: **v5.0.0 is a deliberate, single "clean slate" reset** with no deprecation bridge from v4.x, authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md); and **v5.1.0 carries one narrow breaking removal without a version-major bump**, authorized by [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md). Strict SemVer with a deprecation cycle otherwise applies from v5.0.0 onward (see [ADR004](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md)).
+
+## [Unreleased] — targeting 5.1.0
+
+v5.0.0 already shipped (2026-08-12) and is not being revisited — this section is the hardening pass that follows it, produced by a v5.0.0 product-viability audit (see `TODO/relatorio-viabilidade-ringbufferplus-v5.md` and `TODO/plano-de-acao.md`). It is a **minor** release: mostly non-breaking bug fixes and behavior refinements, plus one narrow breaking removal explicitly excepted from a major bump — see [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md).
+
+### Breaking changes
+
+- **Breaking (semver-exempted — see [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md)):** `LockWhenScaling(bool)` removed entirely from `IRingBufferAutoScaleBuilder<T>` — it was a documented no-op there ("has no observable effect") that had already misled a real caller. Any call chaining `.LockWhenScaling()` after `.AutoScaleAcquireFault()` now fails to compile instead of silently compiling and doing nothing; the fix is to delete that call, which was never doing anything for you. This removal skips both the usual `[Obsolete]` deprecation cycle and the major-version bump a public removal would otherwise require, as two explicit, narrow policy exceptions — see [ADR007 V02](doc/adr/ADR007V02-redesign-of-the-public-fluent-api-surface.md) and [ADR004 V02](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md) for the justification of each.
+
+### Fixed
+
+- The engine's command loop now survives a non-cancellation exception from the user's `Factory` or item `Dispose`, instead of dying permanently and hanging every subsequent call.
+- `WarmupAsync`/`SwitchToAsync` no longer hang when their command is abandoned unread in the internal command channel during a disposal race.
+- Concurrent `DisposeAsync` calls on `RingBufferValue<T>`/`RingBufferManager<T>` no longer race — the dispose guard is now atomic.
+- A `HeartBeat` callback that blocks past its pulse budget no longer stalls the heartbeat pump forever.
+- `DisposeAsync` now always drains pooled items and disposes its own instrumentation regardless of how a background pump ended; a lease returned after disposal is now disposed instead of silently dropped.
+- Scale-up's deadline now scales with the work requested (`quantity × FactoryTimeout`) instead of the unrelated sampling cadence, and a scale-up that cannot fully complete keeps the partial capacity it already gained instead of discarding it — see [ADR010](doc/adr/ADR010V01-allow-partial-capacity-gains-when-a-scale-up-cannot-fully-complete.md).
+- Autoscale-on-fault no longer gets permanently stuck when `initialCapacity == minCapacity`.
+- `scale.operations`/`scale.duration` now carry a `success` tag, and the `RingBufferPlus.Scale` activity now sets an error status on a failed/timed-out attempt.
+- README Quickstart and the dependency-injection guide corrected to match the real v5 API and behavior.
 
 ## [5.0.0] - 2026-08-12
 
@@ -14,6 +34,11 @@ v5.0.0 is a complete, coordinated product overhaul with sweeping breaking change
 - `IDisposable` removed; `IAsyncDisposable` becomes the sole disposal contract on `IRingBufferService<T>` and `RingBufferValue<T>` ([ADR005](doc/adr/ADR005V01-async-disposal-strategy-and-graceful-shutdown.md)). `using`/`Dispose()` call sites must become `await using`/`DisposeAsync()`.
 - **Breaking:** disposal is no longer triggered automatically when the constructor's lifetime `CancellationToken` is cancelled (the v4 `Register(() => Dispose())` reentrancy hazard is removed entirely). Code that relied on `cts.Cancel()` alone to tear a buffer down (outside of DI, where the `ServiceProvider` already calls `DisposeAsync` on `IAsyncDisposable` singletons) must call `DisposeAsync()` explicitly.
 - Public fluent builder surface redesigned around explicit, mutually exclusive `FixedCapacity`/`ElasticCapacity` modes, replacing `Capacity`/`ScaleTimer`/`MinCapacity`/`MaxCapacity` ([ADR007](doc/adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)). `AutoScaleAcquireFault(...)` now returns a builder whose `Build()`/`BuildWarmupAsync()` produce a plain `IRingBufferService<T>` with no `SwitchToAsync` — manual switching and autoscale-on-fault are mutually exclusive at the type level, not a silent runtime `false`.
+- **Breaking:** the three v4 builder interfaces were renamed and split into four. Update any explicitly-typed variable, field, or helper signature that names one of these:
+  - `IRingBuffer<T>` → `IRingBufferBuilder<T>` (the entry point returned by `RingBuffer<T>.New(...)`)
+  - `IRingBufferBuild<T>` → `IRingBufferFixedBuilder<T>` (fixed capacity)
+  - `IRingBufferScaleCapacity<T>` → `IRingBufferElasticBuilder<T>` (elastic capacity, manual switching) or `IRingBufferAutoScaleBuilder<T>` (elastic capacity, autoscale-on-fault — a new split, not a v4 type)
+- **Breaking:** `SwitchToAsync` no longer exists on `IRingBufferService<T>` at all — not only when autoscale-on-fault is enabled. It moved to the new `IRingBufferManualScaleService<T>` (returned by `.ElasticCapacity(...).Build()`/`.BuildWarmupAsync()` when autoscale-on-fault is *not* used). Code that held an `IRingBufferService<T>` field and called `SwitchToAsync` on it directly must either hold the more specific `IRingBufferManualScaleService<T>` type where possible, or pattern-match: `if (service is IRingBufferManualScaleService<T> manual) { ... }` (see the [DI guide](doc/guides/usage-dependency-injection.md#trade-offs--limitations)).
 - **Breaking:** `AcquireTimeout`'s `delayAttempts` parameter and `RingBufferDefault.AcquireDelayAttempts` are removed — a `Channel`-based acquire has no polling loop to pace.
 - **Behavior change:** acquire no longer blocks while a scale operation is in progress, regardless of `LockWhenScaling` — items already in the pool are always immediately acquirable. `LockWhenScaling` now controls exactly one thing: whether `SwitchToAsync`'s caller awaits the scale operation's completion before returning.
 - **Behavior change:** autoscale-on-fault counts *timed-out acquires*, not per-poll-attempts-within-one-acquire-call as in v4. Where `AcquireTimeout` is large relative to `AutoScaleAcquireFault`'s threshold, scale-up now reacts on the order of `AcquireTimeout × numberOfFaults`, not near-instantly — tune `AcquireTimeout` down if fast autoscale reaction is required.

@@ -22,7 +22,11 @@ namespace RingBufferPlus
         /// <param name="value">New scale capacity.</param>
         /// <returns>
         /// A <see cref="Task{TResult}"/> representing the asynchronous operation. The result is <see langword="false"/>
-        /// when the buffer is already at the requested capacity or a scale operation is already running; otherwise <see langword="true"/>.
+        /// when the buffer is already at the requested capacity. Otherwise it is <see langword="true"/> — except when
+        /// <see cref="IRingBufferElasticBuilder{T}.LockWhenScaling(bool)"/> is enabled, in which case the result instead
+        /// reflects whether the scale operation actually reached the target capacity (<see langword="true"/>) or was
+        /// undone on its own timeout (<see langword="false"/>). A call made while another scale operation is already
+        /// in flight is queued behind it, not rejected.
         /// </returns>
         Task<bool> SwitchToAsync(ScaleSwitch value);
     }

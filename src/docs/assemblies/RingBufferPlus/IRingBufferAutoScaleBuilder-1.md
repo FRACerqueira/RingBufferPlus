@@ -24,7 +24,6 @@ public interface IRingBufferAutoScaleBuilder<T>
 | [BuildWarmupAsync](IRingBufferAutoScaleBuilder-1/BuildWarmupAsync.md)(…) | Validates and generates RingBufferPlus and warms up with full capacity ready. |
 | [Factory](IRingBufferAutoScaleBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [HeartBeat](IRingBufferAutoScaleBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
-| [LockWhenScaling](IRingBufferAutoScaleBuilder-1/LockWhenScaling.md)(…) | No-op on this builder: with autoscale-on-fault enabled, `SwitchToAsync` is not part of the built service's surface (see [`IRingBufferManualScaleService`](./IRingBufferManualScaleService-1.md)), so there is no manual switch completion for this setting to affect. Retained here only so the fluent chain compiles unchanged after calling [`AutoScaleAcquireFault`](./IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md). |
 | [Logger](IRingBufferAutoScaleBuilder-1/Logger.md)(…) | Sets the logger. |
 | [OnError](IRingBufferAutoScaleBuilder-1/OnError.md)(…) | Sets the error handler to log errors. |
 

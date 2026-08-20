@@ -65,32 +65,12 @@ namespace RingBufferPlusRabbitSample
             //create connection
             connectionRabbit = await connectionFactory!.CreateConnectionAsync(cts.Token);
 
-            //create ring buffer, no lock while scaling
+            //create ring buffer with autoscale-on-fault
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
                 .Logger(hostApp.Services.GetService<ILogger<Program>>())
                 .BackgroundLogger()
                 .Factory((token) => ChannelFactory(token)!)
                 .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault()
-                .BuildWarmupAsync(cts.Token);
-
-            ReportCapacity(rb);
-            await RunLoadTestAsync(rb, cts.Token);
-
-            Console.WriteLine("Dispose ring buffer");
-            await rb.DisposeAsync();
-            cts.Cancel();
-            cts.Dispose();
-
-            cts = CancellationTokenSource.CreateLinkedTokenSource(tokenapplifetime);
-
-            //create ring buffer again, this time locking acquire/switch while scaling
-            rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Logger(hostApp.Services.GetService<ILogger<Program>>())
-                .BackgroundLogger()
-                .Factory((token) => ChannelFactory(token)!)
-                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
-                .LockWhenScaling()
                 .AutoScaleAcquireFault()
                 .BuildWarmupAsync(cts.Token);
 

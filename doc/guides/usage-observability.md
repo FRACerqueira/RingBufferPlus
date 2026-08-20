@@ -29,10 +29,10 @@ Every `RingBufferManager<T>` owns its own `Meter` and `ActivitySource` instance 
 | `ringbufferplus.acquire.duration` | Histogram\<double\> (seconds) | `buffer.name`, `acquire.success` | Duration of every `AcquireAsync` call — the same value already available per-call as `RingBufferValue<T>.ElapsedTime`. |
 | `ringbufferplus.acquire.faults` | Counter\<long\> | `buffer.name` | Count of `AcquireAsync` calls that timed out with nothing available. |
 | `ringbufferplus.capacity.current` | ObservableGauge\<int\> | `buffer.name` | Current capacity, read live whenever your exporter's collection interval polls it. |
-| `ringbufferplus.scale.operations` | Counter\<long\> | `buffer.name`, `direction` (`up`/`down`), `trigger` (`manual`/`auto`) | Count of scale-up/scale-down operations. The initial warmup fill is **not** counted here — see below. |
-| `ringbufferplus.scale.duration` | Histogram\<double\> (seconds) | `buffer.name`, `direction` | Duration of scale-up/scale-down operations. |
+| `ringbufferplus.scale.operations` | Counter\<long\> | `buffer.name`, `direction` (`up`/`down`), `trigger` (`manual`/`auto`), `success` | Count of scale-up/scale-down attempts, including ones that failed or timed out — check `success` before reading this as "capacity actually changed N times". The initial warmup fill is **not** counted here — see below. |
+| `ringbufferplus.scale.duration` | Histogram\<double\> (seconds) | `buffer.name`, `direction`, `success` | Duration of scale-up/scale-down attempts, whether or not they succeeded. |
 
-**Tracing:** one `Activity` named `"RingBufferPlus.Acquire"` per `AcquireAsync` call (tagged `buffer.name`, `success`, `timed_out`, and `cancelled` when the caller's own token — not a timeout — ended the call), and one named `"RingBufferPlus.Scale"` per scale operation (tagged `buffer.name`, `direction`, `trigger`) — both correlate naturally with the rest of your request trace if `AcquireAsync` happens inside a traced request.
+**Tracing:** one `Activity` named `"RingBufferPlus.Acquire"` per `AcquireAsync` call (tagged `buffer.name`, `success`, `timed_out`, and `cancelled` when the caller's own token — not a timeout — ended the call), and one named `"RingBufferPlus.Scale"` per scale operation (tagged `buffer.name`, `direction`, `trigger`, and its `ActivityStatusCode` set to `Error` on a failed/timed-out attempt) — both correlate naturally with the rest of your request trace if `AcquireAsync` happens inside a traced request.
 
 Two things that are easy to miss because they follow directly from what counts as an "acquire" or a "scale operation" here, not from any special-casing:
 

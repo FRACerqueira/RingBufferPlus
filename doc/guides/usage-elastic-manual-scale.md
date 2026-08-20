@@ -32,7 +32,7 @@ await rb.DisposeAsync();
 
 ## What happens internally
 
-`SwitchToAsync` posts a command to the engine's single-consumer loop. By default it returns `true` as soon as the move is *scheduled*, without waiting for it to finish — enable `LockWhenScaling()` if you need the returned `bool` to reflect whether the target capacity was actually reached (see the [lock guide](usage-lock-when-scaling.md) for that distinction). Either way, asking to switch to the capacity the buffer is already at returns `false` immediately, with nothing scheduled — and `AcquireAsync` is never blocked by an in-progress scale, regardless of `LockWhenScaling`.
+`SwitchToAsync` posts a command to the engine's single-consumer loop. By default it returns `true` as soon as the move is *scheduled*, without waiting for it to finish — but "scheduled" itself is only immediate when the engine is idle; behind an already in-flight scale operation, this call queues and can take as long as that operation's own timeout (`baseTimer`, 30 seconds by default) before it returns at all (see the [lock guide](usage-lock-when-scaling.md) for the full detail). Enable `LockWhenScaling()` if you need the returned `bool` to reflect whether the target capacity was actually reached. Either way, asking to switch to the capacity the buffer is already at returns `false` immediately, with nothing scheduled — and `AcquireAsync` is never blocked by an in-progress scale, regardless of `LockWhenScaling`.
 
 ## Trade-offs / limitations
 

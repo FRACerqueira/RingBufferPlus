@@ -138,8 +138,8 @@ namespace RingBufferPlus.Core
 
             _acquireDuration = _meter.CreateHistogram<double>("ringbufferplus.acquire.duration", unit: "s", description: "Duration of AcquireAsync calls, in seconds.");
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
-            _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction and trigger.");
-            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds.");
+            _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction, trigger, and success.");
+            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by direction and success.");
             _meter.CreateObservableGauge("ringbufferplus.capacity.current",
                 () => new Measurement<int>(CurrentCapacity, new KeyValuePair<string, object?>("buffer.name", Name)),
                 description: "Current capacity of the buffer.");
@@ -438,10 +438,16 @@ namespace RingBufferPlus.Core
 
                 case EngineCommandKind.Fault:
                     _faultCount++;
-                    if (_faultCount > NumberFault && CurrentCapacity != MaxCapacity)
+                    // >= (not >): NumberFault's own doc says "after first fault" for its default of 1 -
+                    // the sample RingBufferPlusBasicTriggerScale passes 0 specifically to get "fires on
+                    // the first fault", which only holds if the comparison includes equality.
+                    if (_faultCount >= NumberFault && CurrentCapacity != MaxCapacity)
                     {
                         _faultCount = 0;
-                        var next = CurrentCapacity == MinCapacity ? Capacity : MaxCapacity;
+                        // Must always be strictly greater than CurrentCapacity - a plain equality
+                        // check against MinCapacity picks Capacity even when Capacity == MinCapacity
+                        // (a legal configuration), making this a no-op (target == current) forever.
+                        var next = CurrentCapacity < Capacity ? Capacity : MaxCapacity;
                         try
                         {
                             await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
@@ -515,9 +521,9 @@ namespace RingBufferPlus.Core
             var sw = scaleTrigger is null ? null : Stopwatch.StartNew();
 
             _scaling = true;
+            var ok = false;
             try
             {
-                bool ok;
                 if (target > current)
                 {
                     var quantity = target - current;
@@ -525,6 +531,12 @@ namespace RingBufferPlus.Core
                     var created = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
                     LogMessage("End ScaleUp.");
                     ok = created == quantity;
+                    // A partial scale-up still gained real, usable capacity - advance by however
+                    // many items were actually created, not just on hitting the full target.
+                    if (created > 0)
+                    {
+                        Volatile.Write(ref _currentCapacity, current + created);
+                    }
                 }
                 else
                 {
@@ -533,10 +545,10 @@ namespace RingBufferPlus.Core
                     var removed = await RemoveItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
                     LogMessage("End ScaleDown.");
                     ok = removed == quantity;
-                }
-                if (ok)
-                {
-                    Volatile.Write(ref _currentCapacity, target);
+                    if (ok)
+                    {
+                        Volatile.Write(ref _currentCapacity, target);
+                    }
                 }
                 return ok;
             }
@@ -545,13 +557,19 @@ namespace RingBufferPlus.Core
                 _scaling = false;
                 if (scaleTrigger is not null)
                 {
+                    // `ok` also reflects a scale attempt that threw (it stays false, set only on the
+                    // success path above) - so a failed or timed-out operation is never recorded
+                    // identically to a successful one.
+                    activity?.SetStatus(ok ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
                     _scaleOperations.Add(1,
                         new KeyValuePair<string, object?>("buffer.name", Name),
                         new KeyValuePair<string, object?>("direction", direction),
-                        new KeyValuePair<string, object?>("trigger", scaleTrigger));
+                        new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                        new KeyValuePair<string, object?>("success", ok));
                     _scaleDuration.Record(sw!.Elapsed.TotalSeconds,
                         new KeyValuePair<string, object?>("buffer.name", Name),
-                        new KeyValuePair<string, object?>("direction", direction));
+                        new KeyValuePair<string, object?>("direction", direction),
+                        new KeyValuePair<string, object?>("success", ok));
                 }
             }
         }
@@ -560,7 +578,12 @@ namespace RingBufferPlus.Core
         {
             var created = new List<T>(quantity);
             using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
-            if (hasTimeout) overall.CancelAfter(SamplesBase);
+            // The deadline scales with the work actually requested (each item already has its own
+            // FactoryTimeout-bounded attempt), not with the sampling cadence (SamplesBase) - a
+            // fixed, sampling-derived deadline could be smaller than quantity * FactoryTimeout for
+            // any delta/FactoryTimeout combination, making a routine scale-up structurally
+            // impossible regardless of the factory's actual health.
+            if (hasTimeout) overall.CancelAfter(TimeSpan.FromTicks(FactoryTimeout.Ticks * quantity));
             try
             {
                 while (created.Count < quantity)
@@ -586,18 +609,35 @@ namespace RingBufferPlus.Core
             }
             catch (OperationCanceledException)
             {
-                LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity}."));
-                await DisposeItemsDefensivelyAsync(created).ConfigureAwait(false);
-                return 0;
+                // A partial scale-up beats none: keep whatever was actually created instead of
+                // discarding it, and report the real count so the caller can advance capacity by
+                // that much rather than treating this as zero progress.
+                LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity} - keeping the {created.Count} item(s) already created."));
+                foreach (var item in created)
+                {
+                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                }
+                return created.Count;
             }
             catch (Exception ex)
             {
                 // A non-cancellation failure (typically the factory itself throwing) must not escape
                 // and kill the engine loop - the caller (ProcessCommandAsync) turns this into a failed
-                // command outcome instead. Partially-created items are still disposed defensively.
+                // command outcome instead. As above, whatever was already created is kept. Only
+                // rethrow when nothing was created at all: once there is real partial progress to
+                // report via the return value, surfacing the exception too would leave the caller
+                // unable to distinguish "some capacity gained" from "none", and the engine loop must
+                // still see this command as handled either way.
                 LogError(ex);
-                await DisposeItemsDefensivelyAsync(created).ConfigureAwait(false);
-                throw;
+                foreach (var item in created)
+                {
+                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                }
+                if (created.Count == 0)
+                {
+                    throw;
+                }
+                return created.Count;
             }
         }
 

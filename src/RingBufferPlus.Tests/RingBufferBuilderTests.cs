@@ -289,5 +289,23 @@ namespace RingBufferPlus.Tests
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
+
+        // ---------------------------------------------------------------------
+        // ADR007 V02 (2026-08-20): LockWhenScaling was removed from the autoscale
+        // builder - it was a documented no-op that had already misled a real caller
+        // (see TODO/relatorio-viabilidade-ringbufferplus-v5.md, findings U-06/U-10).
+        // A call site chaining .LockWhenScaling() after .AutoScaleAcquireFault() is
+        // now a compile error, which cannot be expressed as a runtime assertion - this
+        // guards the same intent by asserting the member itself is gone, so it cannot
+        // be silently reintroduced.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public void IRingBufferAutoScaleBuilder_DoesNotDeclare_LockWhenScaling()
+        {
+            var method = typeof(IRingBufferAutoScaleBuilder<int>).GetMethod("LockWhenScaling");
+
+            Assert.Null(method);
+        }
     }
 }
