@@ -913,5 +913,71 @@ namespace RingBufferPlus.Tests
             }
             await service.DisposeAsync();
         }
+
+        // ---------------------------------------------------------------------
+        // 1.17 - A failed WarmupAsync() must not permanently brick the instance (ADR011, P2
+        // Decision B). Before this fix, a failed warmup was cached forever by the underlying
+        // Lazy<Task>, and the only way to recover was constructing a brand new instance - a real
+        // problem given every DI guide recommends registering the buffer as a singleton. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, U-22.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task WarmupAsync_AfterAFailedAttempt_RetriesInsteadOfCachingTheFailureForever()
+        {
+            var shouldFail = true;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractWarmupRetry", null);
+            var service = builder
+                .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .FixedCapacity(2)
+                .Build();
+
+            var firstEx = await Record.ExceptionAsync(() => service.WarmupAsync());
+            Assert.NotNull(firstEx);
+
+            // Retry: an explicit second WarmupAsync() call must attempt from scratch, not rethrow
+            // the same cached failure. The factory recovers before the retry.
+            shouldFail = false;
+            var secondEx = await Record.ExceptionAsync(() => service.WarmupAsync());
+            Assert.Null(secondEx);
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            await acquired.DisposeAsync();
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AcquireAsync_AfterAFailedWarmup_DoesNotAutoRetry_UntilWarmupAsyncIsCalledAgain()
+        {
+            var shouldFail = true;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractWarmupNoAutoRetry", null);
+            var service = builder
+                .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .FixedCapacity(2)
+                .Build();
+
+            var firstEx = await Record.ExceptionAsync(() => service.WarmupAsync());
+            Assert.NotNull(firstEx);
+
+            // The factory recovers, but nobody called WarmupAsync() again - AcquireAsync must keep
+            // observing the failed attempt, not silently retry warmup on its own.
+            shouldFail = false;
+            var acquireEx = await Record.ExceptionAsync(() => service.AcquireAsync().AsTask());
+            Assert.NotNull(acquireEx);
+
+            // An explicit retry must now succeed.
+            var retryEx = await Record.ExceptionAsync(() => service.WarmupAsync());
+            Assert.Null(retryEx);
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            await acquired.DisposeAsync();
+
+            await service.DisposeAsync();
+        }
     }
 }

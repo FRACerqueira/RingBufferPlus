@@ -15,10 +15,15 @@
 //    regardless of LockWhenScaling. LockWhenScaling now controls exactly one thing: whether
 //    SwitchToAsync's caller awaits the scale operation's completion before returning.
 //  - AcquireDelayAttempts is removed: a Channel-based read has no polling loop to pace.
-//  - Warmup runs at most once per instance (Lazy<Task>, ExecutionAndPublication) and caches a
-//    failure: an instance whose warmup throws is permanently broken by design; construct a new
-//    instance to retry (v4's retry path was itself broken: a failed Startup() left
-//    _WarmupRunning stuck true forever).
+//  - Warmup is a Lazy<Task> (ExecutionAndPublication) so concurrent callers de-duplicate into one
+//    attempt (v4's retry path was itself broken: a failed Startup() left _WarmupRunning stuck true
+//    forever). A failed attempt is no longer cached forever (see ADR011): an explicit WarmupAsync()
+//    call after a failure installs a fresh attempt (CAS on _warmup) and retries, so a transient
+//    factory failure at startup no longer bricks the instance permanently. AcquireAsync/
+//    SwitchToAsync's implicit warmup trigger (EnsureWarmupAsync) does NOT auto-retry - it only
+//    observes whatever the latest attempt's outcome is, so ordinary acquire traffic against a
+//    still-broken factory cannot turn into a retry storm; retrying is always a deliberate,
+//    caller-initiated WarmupAsync() call.
 //
 // Observability (ADR008): _meter and _activitySource are per-instance, not static, and both
 // share the constant Name "RingBufferPlus" - a listener subscribing to that name still sees
@@ -44,7 +49,7 @@ namespace RingBufferPlus.Core
         private readonly Channel<T> _availableItems = Channel.CreateUnbounded<T>();
         private readonly Channel<EngineCommand> _commands = Channel.CreateUnbounded<EngineCommand>();
         private readonly Channel<LogMessageBackground> _logQueue = Channel.CreateUnbounded<LogMessageBackground>();
-        private readonly Lazy<Task> _warmup;
+        private Lazy<Task> _warmup;
         private readonly Task _engineTask;
         private readonly List<int> _samples = [];
 
@@ -236,7 +241,23 @@ namespace RingBufferPlus.Core
         public Task WarmupAsync(CancellationToken cancellation = default)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            return _warmup.Value.WaitAsync(cancellation);
+
+            // If the current attempt already failed, install a fresh one so this call retries
+            // instead of rethrowing the same cached failure forever (ADR011). Only an explicit
+            // WarmupAsync() call retries - EnsureWarmupAsync (AcquireAsync/SwitchToAsync's implicit
+            // trigger) never replaces a faulted attempt on its own.
+            var current = Volatile.Read(ref _warmup);
+            if (current.IsValueCreated && current.Value.IsFaulted)
+            {
+                var fresh = new Lazy<Task>(WarmupCoreAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+                var previous = Interlocked.CompareExchange(ref _warmup, fresh, current);
+                // CompareExchange always returns the value that was there before the exchange: if
+                // it still matches `current`, our `fresh` won and is now installed; otherwise another
+                // caller already installed its own fresh attempt first - use that one instead.
+                current = ReferenceEquals(previous, current) ? fresh : previous;
+            }
+
+            return current.Value.WaitAsync(cancellation);
         }
 
         public async ValueTask DisposeAsync()
@@ -254,11 +275,14 @@ namespace RingBufferPlus.Core
                 // and returns or throws) before snapshotting which background pumps to await -
                 // otherwise a pump task WarmupCoreAsync assigns after our snapshot would never be
                 // awaited below.
-                if (_warmup.IsValueCreated)
+                // _warmup can have been replaced (ADR011's retry path) by a racing WarmupAsync()
+                // call, so read the current reference rather than assuming it never changes.
+                var warmupSnapshot = Volatile.Read(ref _warmup);
+                if (warmupSnapshot.IsValueCreated)
                 {
                     try
                     {
-                        await _warmup.Value.ConfigureAwait(false);
+                        await warmupSnapshot.Value.ConfigureAwait(false);
                     }
                     catch
                     {
@@ -304,11 +328,15 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private Task EnsureWarmupAsync() => _warmup.Value;
+        private Task EnsureWarmupAsync() => Volatile.Read(ref _warmup).Value;
 
         private async Task WarmupCoreAsync()
         {
-            if (!_disposed && BackgroundLogger && (Logger is not null || ErrorHandler is not null))
+            // _loggerTask is guarded by "is null", not just "!_disposed", because a retried warmup
+            // attempt (ADR011) re-enters this method - without the guard, a retry after a failed
+            // first attempt would start a second logger pump and orphan the first one (never
+            // awaited again, since _loggerTask would be overwritten).
+            if (_loggerTask is null && !_disposed && BackgroundLogger && (Logger is not null || ErrorHandler is not null))
             {
                 _loggerTask = Task.Run(RunLoggerAsync);
             }

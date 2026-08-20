@@ -63,6 +63,13 @@ namespace RingBufferPlus
         /// Warms up with full capacity ready.
         /// <remarks>
         /// It is recommended to use this method in the initialization of the application.
+        /// If a previous call to this method failed, calling it again retries the attempt from
+        /// scratch instead of rethrowing the same cached failure - a transient factory failure
+        /// (e.g. a database or broker not yet accepting connections at startup) does not
+        /// permanently disable the instance. This retry only happens when <c>WarmupAsync</c> is
+        /// called explicitly again; <see cref="AcquireAsync(CancellationToken)"/> and
+        /// <c>SwitchToAsync</c> only observe the outcome of the most recent attempt and never
+        /// trigger a retry on their own.
         /// </remarks>
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>
