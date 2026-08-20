@@ -33,7 +33,6 @@ namespace RingBufferPlus.Tests
                 SamplesBase = TimeSpan.FromSeconds(1),
                 SamplesCount = 5,
                 ScaleDownInit = 3,
-                ScaleDownMin = 2,
                 ScaleDownMax = 15,
                 AutoScaleFault = true,
                 NumberFault = 3,

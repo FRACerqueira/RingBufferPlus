@@ -19,11 +19,11 @@ Antes disso, o processo está "em convergência, ainda não estável" (achados a
 | | |
 |---|---|
 | Rodada corrente | 1 (em andamento) |
-| Status da rodada | P0 ✅ · P1 ✅ · P2 (Decisões A/B/C) ✅ · **P3 em andamento** |
-| Total de achados (rodada 1) | 47 |
-| Fechados até agora | 26 / 47 (55%) |
-| Abertos até agora | 21 / 47 — **zero Crítico, zero Alto** |
-| Critério de convergência atingido? | Não ainda — só 1 rodada completada; critério exige 2 |
+| Status da rodada | P0 ✅ · P1 ✅ · P2 (Decisões A/B/C) ✅ · **P3 ✅ concluído** (F6, F7/R7, F9, F11/R9, R6, R11, lote de documentação U-09/U-11 a U-20/U-23/U-24 — tudo fechado) |
+| Total de achados (rodada 1) | 48 — **1 novo (R13)** descoberto ao investigar o R6 (não é regressão: já existia, só não estava catalogado separadamente) |
+| Fechados até agora | 47 / 48 (98%) |
+| Abertos até agora | 1 / 48 — **R13, parcialmente endereçado (lado documentável fechado; mudança arquitetural confirmadamente fora de escopo)** — zero Crítico, zero Alto |
+| Critério de convergência atingido? | Não ainda — só 1 rodada completada; critério exige 2. Mas a Rodada 1 está, na prática, pronta para ser encerrada — falta só o commit final e os 3 TFMs. |
 
 ## Tabela de rodadas
 
@@ -49,9 +49,10 @@ Antes disso, o processo está "em convergência, ainda não estável" (achados a
 
 - **Nenhum achado Crítico ou Alto permanece aberto** — os dois passes técnicos originais (F1-F11, R1-R12) e a maior parte dos achados de usabilidade de alto impacto (U-01 a U-08, U-21) foram todos fechados via P0/P1/P2, com protocolo vermelho→verde onde havia comportamento de runtime a verificar.
 - **Nenhuma regressão observada** — nenhuma correção desta rodada introduziu um achado novo até agora (a suíte de 93 testes cresceu monotonicamente, sem remoções além de 1 teste caro sem sinal — F10 — explicitamente registrado como tal).
-- **O que resta é decisão de escopo, não urgência** — os 19-21 achados abertos são todos Média ou Baixa, concentrados em: dívida de design que exige decisão do mantenedor com trade-off real (F6, F7/R7, F9, F11/R9, R6, R11 — arquitetura/comportamento do autoscale e do engine) e lacunas de documentação sem risco de runtime (U-09, U-11 a U-20, U-23, U-24). Isso é exatamente o escopo do P3, em andamento.
-- **Ainda não é possível declarar convergência** — o critério exige 2 rodadas consecutivas nesse estado (zero Crítico/Alto, sem achado novo, total não crescente). Esta é a primeira. Uma Rodada 2 (nova auditoria completa, depois que o P3 fechar) é o próximo gatilho natural para verificar se o estado se mantém.
+- **P3 concluído — 47 de 48 achados fechados.** Todos os itens de comportamento/código (F6, F7/R7, F9, F11/R9, R6, R11) e todo o lote de documentação (U-09, U-11 a U-20, U-23, U-24) estão corrigidos e verificados. Só o U-23 exigiu uma mudança de código real (anotação de nullability); o resto foi documentação pura, sem trade-off.
+- **Um achado novo surgiu durante a própria correção do R6 (R13)** — não é uma regressão introduzida por uma correção; é um mecanismo pré-existente (o scale-up também bloqueia o engine, do mesmo jeito que o scale-down do R6) que só ficou nítido ao investigar R6 de perto. O lado documentável foi endereçado (doc do `FactoryTimeout` + pesquisa que confirmou o default de 15s como seguro); a mudança arquitetural em si permanece deliberadamente fora de escopo (revisita o ADR001) — é o único item ainda "aberto" desta rodada. Isso é esperado e saudável numa auditoria — o critério de convergência trata "achado novo introduzido por uma correção" (regressão) como sinal de alerta, não "achado novo descoberto ao investigar" (aprofundamento normal).
+- **Ainda não é possível declarar convergência** — o critério exige 2 rodadas consecutivas nesse estado (zero Crítico/Alto, sem achado novo, total não crescente). Esta é a primeira, e ainda está tecnicamente em andamento (falta o commit final). Uma Rodada 2 (nova auditoria completa) é o próximo gatilho natural para verificar se o estado se mantém.
 
 ## Próxima rodada
 
-Disparar a Rodada 2 quando o P3 estiver concluído: repetir os 3 passes de auditoria (Estabilidade/Resiliência/Usabilidade) contra o estado então atual do código, focando em (a) confirmar que nada regrediu nas áreas já corrigidas, (b) revalidar os achados Média/Baixa que ficaram para decisão futura (F6, F7/R7, F9, F11/R9, R6, R11), e (c) procurar achados novos que só ficam visíveis depois que o perímetro defensivo do P0 já existe (ex.: comportamento sob combinações de falha que antes nunca chegavam a rodar por travarem mais cedo).
+Disparar a Rodada 2 depois do commit final desta rodada: repetir os 3 passes de auditoria (Estabilidade/Resiliência/Usabilidade) contra o estado então atual do código, focando em (a) confirmar que nada regrediu nas áreas já corrigidas, (b) reavaliar o R13 (a mudança arquitetural continua fora de escopo, ou já vale a pena?), e (c) procurar achados novos que só ficam visíveis depois que o perímetro defensivo do P0 já existe (ex.: comportamento sob combinações de falha que antes nunca chegavam a rodar por travarem mais cedo).

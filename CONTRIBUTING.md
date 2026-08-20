@@ -48,8 +48,26 @@ The `RingBufferPlus` assembly keeps its dependency footprint minimal: today it r
 
 ### Unit tests
 
-Make sure to run all unit tests before creating a pull request.
+Build and run the full test suite (all three target frameworks - net8.0, net9.0, net10.0) before creating a pull request:
+
+```
+dotnet build
+dotnet test src/RingBufferPlus.Tests
+```
+
 Any new code should also have reasonable unit test coverage.
+
+### Regenerating the generated API reference
+
+If your change adds or edits an XML doc comment (`///`) on any public member, regenerate `src/docs/**` so the published reference stays in sync - it is not regenerated automatically:
+
+```
+dotnet build src/XmlDocMarkdownGenerator
+```
+
+then run the resulting `XmlDocMarkdownGenerator.exe` **from its own output directory** (`src/XmlDocMarkdownGenerator/bin/Debug/<tfm>/`), not via `dotnet run` from the project folder - the tool's relative output path assumes it is executed from its own `bin/` directory. Running it via `dotnet run` writes the generated files to the wrong location. After running it, `git status -- src/docs` should show only the files whose source doc comments you actually changed - review the diff before committing.
+
+One known, accepted limitation of the generated reference: a type declared in a namespace other than the assembly's primary one (e.g. `HostingExtensions`, deliberately placed in `Microsoft.Extensions.DependencyInjection` for discoverability) gets a "See Also" link back to the primary namespace's index page instead of a dedicated one for its own namespace. The link still resolves correctly; only its label/target namespace pairing looks off. This is a limitation of the generator tool itself, not something to fix by moving the type to a different namespace.
 
 ## API stability policy
 

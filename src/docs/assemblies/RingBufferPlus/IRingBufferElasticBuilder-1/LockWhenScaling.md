@@ -12,7 +12,7 @@ public IRingBufferElasticBuilder LockWhenScaling(bool value = true)
 
 | parameter | description |
 | --- | --- |
-| value | True to wait for the scale operation to finish before `SwitchToAsync` returns. Default true. |
+| value | True to wait for the scale operation to finish before `SwitchToAsync` returns. Default true for this parameter - but the setting itself is off (as if this method had never been called) unless you call `LockWhenScaling()` at all. |
 
 ### Return Value
 

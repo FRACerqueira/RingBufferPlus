@@ -15,7 +15,7 @@ public static class RingBufferDefault
 | name | description |
 | --- | --- |
 | static readonly [AcquireTimeout](RingBufferDefault/AcquireTimeout.md) | The default timeout for acquiring the buffer. |
-| static readonly [Capacity](RingBufferDefault/Capacity.md) | The default capacity for buffer. |
+| static readonly [Capacity](RingBufferDefault/Capacity.md) | Internal placeholder capacity used before `FixedCapacity`/`ElasticCapacity` is called on a builder. Not a reachable default: every path to `Build`/`BuildWarmupAsync` requires calling one of those methods first, which always overwrites this value - a built service never actually runs with this capacity. |
 | static readonly [FactoryTimeout](RingBufferDefault/FactoryTimeout.md) | The default timeout for the factory handler. |
 | static readonly [PulseHeartBeat](RingBufferDefault/PulseHeartBeat.md) | The default timeout for the buffer health checks. |
 | static readonly [SamplesBaseTime](RingBufferDefault/SamplesBaseTime.md) | The default delay for scaling the capacity. |

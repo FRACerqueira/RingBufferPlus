@@ -4,7 +4,7 @@
 </br>
 
 
-#### Try to acquire a value from the buffer. Will wait for a buffer item to become available or timeout (default 5 seconds).
+#### Try to acquire a value from the buffer. Will wait for a buffer item to become available or timeout (default 5 seconds).  A timeout (or disposal while waiting) does not throw - it returns a [`RingBufferValue`](../RingBufferValue-1.md) with [`Successful`](../RingBufferValue-1/Successful.md) set to `false`. Only the caller's own *cancellation* firing rethrows OperationCanceledException. Calling this after DisposeAsync throws ObjectDisposedException. If the implicit warmup this method triggers previously failed and has not been retried via an explicit call to [`WarmupAsync`](./WarmupAsync.md), this rethrows that same failure.
 
 ```csharp
 public ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default)
@@ -17,6 +17,13 @@ public ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation
 ### Return Value
 
 A ValueTask representing the asynchronous operation, with a [`RingBufferValue`](../RingBufferValue-1.md) result.
+
+### Exceptions
+
+| exception | condition |
+| --- | --- |
+| OperationCanceledException | *cancellation* was triggered by the caller. |
+| ObjectDisposedException | The instance was already disposed. |
 
 ### See Also
 

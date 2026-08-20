@@ -31,7 +31,7 @@ public static IRingBufferBuilder<T> New(string buffername)
 #### Create a new instance to commands of RingBufferPlus.
 
 ```csharp
-public static IRingBufferBuilder<T> New(string? buffername, ILoggerFactory loggerFactory)
+public static IRingBufferBuilder<T> New(string buffername, ILoggerFactory loggerFactory)
 ```
 
 | parameter | description |

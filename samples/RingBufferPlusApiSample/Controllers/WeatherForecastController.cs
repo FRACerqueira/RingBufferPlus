@@ -29,6 +29,9 @@ namespace RingBufferPlusApiSample.Controllers
                 _toInvalidate = !_toInvalidate;
                 if (_toInvalidate)
                 {
+                    // Demonstrates discarding an item instead of returning it to the pool on
+                    // dispose - e.g. after detecting it's unhealthy. A replacement is created in
+                    // its place; alternating here is purely to exercise the path in this sample.
                     buffer.Invalidate();
                 }
                 await Task.Delay(100, token);

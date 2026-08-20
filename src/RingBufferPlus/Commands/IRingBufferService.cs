@@ -54,9 +54,19 @@ namespace RingBufferPlus
         /// <summary>
         /// Try to acquire a value from the buffer.
         /// Will wait for a buffer item to become available or timeout (default 5 seconds).
+        /// <remarks>
+        /// A timeout (or disposal while waiting) does not throw - it returns a <see cref="RingBufferValue{T}"/>
+        /// with <see cref="RingBufferValue{T}.Successful"/> set to <see langword="false"/>. Only the caller's
+        /// own <paramref name="cancellation"/> firing rethrows <see cref="OperationCanceledException"/>.
+        /// Calling this after <see cref="IAsyncDisposable.DisposeAsync"/> throws <see cref="ObjectDisposedException"/>.
+        /// If the implicit warmup this method triggers previously failed and has not been retried via an
+        /// explicit call to <see cref="WarmupAsync(CancellationToken)"/>, this rethrows that same failure.
+        /// </remarks>
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>
         /// <returns>A <see cref="ValueTask{TResult}"/> representing the asynchronous operation, with a <see cref="RingBufferValue{T}"/> result.</returns>
+        /// <exception cref="OperationCanceledException"><paramref name="cancellation"/> was triggered by the caller.</exception>
+        /// <exception cref="ObjectDisposedException">The instance was already disposed.</exception>
         ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default);
 
         /// <summary>

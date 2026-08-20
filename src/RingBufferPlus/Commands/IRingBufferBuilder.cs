@@ -17,7 +17,12 @@ namespace RingBufferPlus
         /// Sets the factory (required) to create an instance in the ring buffer asynchronously.
         /// </summary>
         /// <param name="value">The handler to factory.</param>
-        /// <param name="timeout">The timeout for build. Default value is 15 seconds.</param>
+        /// <param name="timeout">Per-item timeout for the factory call; also the deadline for the overall
+        /// operation as <c>quantity * timeout</c> when creating several items at once (the initial warmup
+        /// fill, or a scale-up) - so it bounds how long other engine operations wait behind it. Default is
+        /// 15 seconds - inherited unchanged from a previous release, not calibrated against any particular
+        /// factory. Set it deliberately based on how long your own factory call actually takes (e.g.
+        /// opening a database connection or a broker channel), not the default.</param>
         /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
         IRingBufferBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null);
 
@@ -79,7 +84,7 @@ namespace RingBufferPlus
         /// <param name="minCapacity">The minimal buffer capacity. Value must be greater than or equal to 2.</param>
         /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
         /// <param name="numberSamples">Number of samples collected. Default is 100 (one sample per 300ms).</param>
-        /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples. Default value is 30 seconds (one sample per 100ms).</param>
+        /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples. Default value is 30 seconds (one sample per 300ms).</param>
         /// <returns>An instance of <see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples = null, TimeSpan? baseTimer = null);
     }

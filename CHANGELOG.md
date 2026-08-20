@@ -23,6 +23,14 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - Autoscale-on-fault no longer gets permanently stuck when `initialCapacity == minCapacity`.
 - `scale.operations`/`scale.duration` now carry a `success` tag, and the `RingBufferPlus.Scale` activity now sets an error status on a failed/timed-out attempt.
 - README Quickstart and the dependency-injection guide corrected to match the real v5 API and behavior.
+- A failed `WarmupAsync()` no longer permanently bricks the instance: calling it again now retries from scratch instead of rethrowing the same cached failure forever — see [ADR011](doc/adr/ADR011V01-retry-path-for-a-failed-warmup-async-instead-of-a-permanently-broken-instance.md). `AcquireAsync`/`SwitchToAsync`'s implicit warmup trigger does not auto-retry on its own.
+- Autoscale-on-fault now scales up on exactly `numberOfFaults` faults as documented (was off-by-one, requiring one extra fault).
+- The autoscale fault counter no longer piles up unboundedly while pinned at `MaxCapacity`, and a scale-up attempt that fails or only partially completes no longer burns the whole fault budget.
+- A slow scale-up no longer lets a burst of stale sample ticks pile up and evaluate as soon as it finishes — the sample window resets across a scale operation, and ticks are skipped while one is in flight.
+- Scale-down is now opportunistic: it takes only whatever is already idle, instead of blocking the entire engine (and every other pending command) for up to `baseTimer` waiting for busy items to free up. A partial reduction now also advances the reported capacity correctly, matching the scale-up side.
+- The heartbeat pump's own internal acquire no longer counts toward the autoscale fault budget — only genuine caller demand does.
+- `RingBuffer<T>.New(string, ILoggerFactory)`'s `buffername` parameter is now correctly annotated as non-nullable, matching its existing `ArgumentNullException` behavior (was `string?`, misleadingly suggesting `null` was accepted).
+- `ScaleDownMin` (calculated but never read by the autoscale decision) removed, along with its documented-but-unreachable "scale down from minimum capacity" formula — minimum capacity is the floor; there is nothing to scale down to below it.
 
 ## [5.0.0] - 2026-08-12
 

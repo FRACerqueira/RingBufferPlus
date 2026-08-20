@@ -36,7 +36,10 @@ namespace RingBufferPlus
         public readonly static TimeSpan SamplesBaseTime = TimeSpan.FromSeconds(30);
 
         /// <summary>
-        /// The default capacity for buffer.
+        /// Internal placeholder capacity used before <c>FixedCapacity</c>/<c>ElasticCapacity</c> is called on a
+        /// builder. Not a reachable default: every path to <c>Build</c>/<c>BuildWarmupAsync</c> requires calling
+        /// one of those methods first, which always overwrites this value - a built service never actually
+        /// runs with this capacity.
         /// </summary>
         public readonly static int Capacity = 2;
 

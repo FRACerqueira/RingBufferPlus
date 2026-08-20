@@ -20,9 +20,7 @@ An instance of [`IRingBufferAutoScaleBuilder`](../IRingBufferAutoScaleBuilder-1.
 
 ### Remarks
 
-The scale-up process is executed when the failure threshold defined by *numberOfFaults* is reached. The scale-down process is performed based on the initial, minimum or maximum capacity when the number of available buffers is greater than a value.
-
-The scale-down when it is at minimum capacity is calculated using the formula: Minimum capacity - 2. If the value is less than 1 the value will be 1.
+The scale-up process is executed when the failure threshold defined by *numberOfFaults* is reached. The scale-down process is performed based on the initial or maximum capacity when the number of available buffers is greater than a value. There is no scale-down from minimum capacity: minimum capacity is the floor.
 
 The scale-down when it is at initial capacity is calculated using the formula: Initial capacity - Minimum capacity + 2.
 
@@ -30,7 +28,9 @@ The scale-down when it is at maximum capacity is calculated using the formula: M
 
 The scale-down process is executed when the calculated median of the samples collected via [`ElasticCapacity`](../IRingBufferBuilder-1/ElasticCapacity.md) reaches those values.
 
-Autoscale (up or down) has a timeout based on the same sampling window. When the timeout is reached, the operation is undone.
+Scale-up has a deadline based on the factory's own per-item timeout (see [`Factory`](../IRingBufferBuilder-1/Factory.md)); scale-down never waits at all. Neither direction "undoes" a partial result - a scale-up that only creates some of the needed items keeps them, and a scale-down that only finds some items idle removes just those.
+
+The fault counter is forgotten (reset to zero) as soon as *numberOfFaults* is reached, even while already at maximum capacity - so a later scale-down always requires a fresh full batch of faults to trigger a scale-up again, never a stale leftover from before. A scale-up attempt that does not fully complete (a factory failure, or only a partial result) does not consume this budget: the very next fault retries immediately, instead of requiring an entirely new batch while already struggling.
 
 ### See Also
 

@@ -54,6 +54,8 @@ namespace RingBufferPlusBasicSample
             await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
             {
                 Console.WriteLine($"Buffer is ok({buffer3.Successful}:{buffer3.ElapsedTime}) value: {buffer3.Current}");
+                // Discards this item instead of returning it to the pool on dispose - a
+                // replacement is created in its place.
                 buffer3.Invalidate();
             }
 

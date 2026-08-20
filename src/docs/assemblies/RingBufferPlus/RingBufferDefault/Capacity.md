@@ -4,7 +4,7 @@
 </br>
 
 
-#### The default capacity for buffer.
+#### Internal placeholder capacity used before `FixedCapacity`/`ElasticCapacity` is called on a builder. Not a reachable default: every path to `Build`/`BuildWarmupAsync` requires calling one of those methods first, which always overwrites this value - a built service never actually runs with this capacity.
 
 ```csharp
 public static readonly int Capacity;

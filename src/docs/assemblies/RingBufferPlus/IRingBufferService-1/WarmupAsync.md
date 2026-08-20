@@ -4,7 +4,7 @@
 </br>
 
 
-#### Warms up with full capacity ready.  It is recommended to use this method in the initialization of the application.
+#### Warms up with full capacity ready.  It is recommended to use this method in the initialization of the application. If a previous call to this method failed, calling it again retries the attempt from scratch instead of rethrowing the same cached failure - a transient factory failure (e.g. a database or broker not yet accepting connections at startup) does not permanently disable the instance. This retry only happens when `WarmupAsync` is called explicitly again; [`AcquireAsync`](./AcquireAsync.md) and `SwitchToAsync` only observe the outcome of the most recent attempt and never trigger a retry on their own.
 
 ```csharp
 public Task WarmupAsync(CancellationToken cancellation = default)

@@ -17,6 +17,7 @@
 // a probabilistic reproduction of a race. That upgrade from probabilistic to deterministic is
 // itself evidence the rewrite fixed the race by construction, per ADR001.
 
+using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -977,6 +978,262 @@ namespace RingBufferPlus.Tests
             Assert.True(acquired.Successful);
             await acquired.DisposeAsync();
 
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.18 - A scale-up in progress must not let sample ticks pile up and drain in a burst
+        // right after it finishes (F6, P3). Before this fix, the dead `_scaling` guard in
+        // ProcessTickAsync never actually ran (the engine is a single serial consumer, so by the
+        // time a queued Tick is processed the scale is always already done), while
+        // RunSampleTickAsync kept enqueueing Ticks every cadence regardless - during a slow
+        // scale-up those Ticks pile up in the channel and get drained back-to-back the instant the
+        // engine frees up, producing several near-duplicate samples of the post-scale-up idle
+        // count and triggering an immediate scale-down evaluation instead of a properly
+        // time-spread one. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, F6.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleUp_FollowedByEligibleScaleDown_DoesNotEvaluateScaleDownImmediatelyAfter()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpThenScaleDownTiming", null);
+            var service = builder
+                .Factory(_ => Task.Delay(150).ContinueWith(_ => 1))
+                .ElasticCapacity(3, 2, 10, 5, TimeSpan.FromSeconds(1))
+                .AutoScaleAcquireFault(0)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(200))
+                .Build();
+            await service.WarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 3; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Pool is empty - this acquire times out and enqueues the autoscale Fault, which will
+            // scale 3 -> 10 (ScaleDownMax ends up 10-3+2=9, so a fully idle pool afterwards, with
+            // all 10 items idle, is eligible for an immediate scale-down back down to 3).
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            // Release the originally held items now, so once the scale-up finishes every item
+            // (originals + newly created) is idle - the scale-down-eligible condition.
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.IsMaxCapacity, "Expected the fault-triggered scale-up to reach max capacity.");
+            var scaleUpCompletedAt = DateTime.UtcNow;
+
+            // Must not have already evaluated (and acted on) a scale-down within a short window of
+            // the scale-up completing - that would mean stale/bursty samples, not a fresh window.
+            await Task.Delay(300);
+            Assert.True(service.IsMaxCapacity, "Expected no scale-down evaluation to complete within 300ms of the scale-up finishing - that would mean the sample window was corrupted by a burst of queued ticks.");
+
+            // It must still eventually happen once a genuinely fresh, time-spread window elapses.
+            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.IsMaxCapacity && DateTime.UtcNow < scaleDownDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.False(service.IsMaxCapacity, "Expected the scale-down to still happen once a fresh sample window actually elapsed.");
+            Assert.True(DateTime.UtcNow - scaleUpCompletedAt >= TimeSpan.FromMilliseconds(600), "Expected the scale-down to take roughly a full fresh sample window, not fire near-instantly off a burst of stale ticks.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.19 - The autoscale fault counter must reset once its threshold is reached even while
+        // pinned at MaxCapacity (F7, P3), so it does not pile up unboundedly and cause a single
+        // fault after a later scale-down to immediately re-trigger a scale back to MaxCapacity
+        // instead of requiring a fresh batch of NumberFault faults. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, F7/R7.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_FaultsWhilePinnedAtMaxCapacity_DoNotCauseFlappingAfterScaleDown()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultCounterFlapping", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(3, 2, 8, 5, TimeSpan.FromMilliseconds(500))
+                .AutoScaleAcquireFault(3)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .Build();
+            await service.WarmupAsync();
+
+            // Phase 1: 3 faults (NumberFault=3) with an empty pool scale 3 -> 8 (max).
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 3; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+            for (var i = 0; i < 3; i++)
+            {
+                var faulted = await service.AcquireAsync();
+                Assert.False(faulted.Successful);
+            }
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.IsMaxCapacity, "Expected the initial batch of 3 faults to scale up to max capacity.");
+
+            // Phase 2: while pinned at max, acquire everything (3 originals + 5 new = 8) and
+            // generate 2 full extra batches of faults (6 faults) - nothing to scale up to, but a
+            // correct implementation must still forget these batches instead of letting the
+            // counter pile up unboundedly.
+            for (var i = 0; i < 5; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+            Assert.Equal(8, held.Count);
+            for (var i = 0; i < 6; i++)
+            {
+                var faulted = await service.AcquireAsync();
+                Assert.False(faulted.Successful);
+            }
+
+            // Phase 3: release everything and let the natural idle-triggered scale-down bring
+            // capacity back down from max.
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            held.Clear();
+            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.IsMaxCapacity && DateTime.UtcNow < scaleDownDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.False(service.IsMaxCapacity, "Expected the idle pool to scale back down from max capacity.");
+
+            // Phase 4: exactly 2 fresh faults - one short of the fresh NumberFault=3 threshold.
+            // With the counter correctly forgotten in phase 2, this must NOT be enough to
+            // re-trigger a scale back to max. Under the bug (never reset while pinned at max),
+            // the stale leftover count from phase 2 plus these 2 fresh faults crosses the
+            // threshold again, causing flapping.
+            // Not asserting success/failure on these individual acquires: under the bug, a
+            // premature scale-up may race with this very loop and hand back a freshly created
+            // item - the final capacity check below is the authoritative signal either way.
+            var currentCapacity = service.CurrentCapacity;
+            for (var i = 0; i < currentCapacity + 2; i++)
+            {
+                var attempt = await service.AcquireAsync();
+                if (attempt.Successful)
+                {
+                    held.Add(attempt);
+                }
+            }
+            await Task.Delay(500);
+            Assert.False(service.IsMaxCapacity, "Expected 2 fresh faults (one short of the NumberFault=3 threshold) to NOT re-trigger a scale back to max capacity - the fault counter must have been forgotten after the earlier batches at max capacity, not accumulated unboundedly.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.20 - A scale-down must not block the engine's single-consumer loop waiting for busy
+        // items to be returned (R6, P3): it must only take whatever is already idle right now
+        // (opportunistic, partial-if-needed), the same "keep partial progress" spirit already
+        // applied to scale-up (R5/P1#8), instead of blocking every other command (Fault, another
+        // Switch, ReplaceOne) behind a wait bounded by SamplesBase. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, R6.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleDown_WithNotEnoughIdleItems_DoesNotBlockTheEngineForOtherCommands()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleDownDoesNotBlockEngine", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(5, 2, 5, 5, TimeSpan.FromSeconds(2))
+                .Build();
+            await service.WarmupAsync();
+
+            // Hold 3 of the 5 items - only 2 remain idle, one short of what a scale-down to
+            // MinCapacity (2) needs to remove (3).
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 3; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // This posts the scale-down but (without LockWhenScaling) returns as soon as it's
+            // accepted, not once the move itself finishes - so it does not, by itself, measure
+            // whether the engine is stuck processing it.
+            var firstSwitchAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            Assert.True(firstSwitchAccepted);
+
+            // A second, independent command posted right after must not be stuck behind the
+            // first one's engine-side processing. Under the bug, the engine blocks inside the
+            // first scale-down waiting for a 3rd item to free up, so this second command's own
+            // Accepted signal (resolved only once the engine reaches it) is delayed by roughly
+            // the first operation's full SamplesBase-bound wait/timeout (2s here).
+            var sw = Stopwatch.StartNew();
+            await service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            sw.Stop();
+            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(500), $"Expected the engine to process the second command promptly instead of being stuck behind the first scale-down's wait for busy items - took {sw.Elapsed}.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.21 - The heartbeat pump's own internal AcquireAsync call must not count toward the
+        // autoscale fault budget (R11, P3): it is an internal health check, not consumer demand,
+        // and letting its timeout trigger a scale-up is a self-inflicted false signal. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, R11.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeat_AcquireTimeoutWhilePoolIsExhausted_DoesNotCountTowardAutoScaleFaultBudget()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractHeartbeatDoesNotFault", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .HeartBeat(_ => { }, TimeSpan.FromMilliseconds(100))
+                .ElasticCapacity(2, 2, 4, 5, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(0)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(100))
+                .Build();
+            await service.WarmupAsync();
+
+            // Hold both items - the pool is empty, so every heartbeat pulse's own internal
+            // AcquireAsync call times out. With NumberFault=0 (fires on the very first fault), a
+            // single one of these would be enough to trigger a scale-up if it counted.
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 2; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Let several heartbeat pulses (every 100ms) elapse while the pool stays exhausted.
+            await Task.Delay(500);
+            Assert.False(service.IsMaxCapacity, "Expected the heartbeat's own internal acquire timeouts to NOT trigger an autoscale scale-up - only external consumer demand should count toward the fault budget.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
             await service.DisposeAsync();
         }
     }

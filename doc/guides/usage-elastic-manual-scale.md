@@ -37,6 +37,7 @@ await rb.DisposeAsync();
 ## Trade-offs / limitations
 
 - Nothing scales unless you tell it to — there is no reaction to acquire faults or sampled usage in this mode. If you want that, see [elastic autoscale](usage-elastic-autoscale.md).
+- `ElasticCapacity`'s `numberSamples`/`baseTimer` parameters are validated at `Build`/`BuildWarmupAsync` time (they still throw on an invalid combination) but have zero runtime effect here - the sampling pump they configure only starts when `AutoScaleAcquireFault` is also enabled. In manual-only mode they are pure dead weight; there is no reason to tune them.
 - `SwitchToAsync` on a plain `IRingBufferService<T>` reference (e.g. after an upcast/downcast around the type system) throws `InvalidOperationException` if the builder that produced it went through `AutoScaleAcquireFault` — the compile-time exclusivity is enforced at runtime too for anyone who works around the static type.
 
 ## Common errors

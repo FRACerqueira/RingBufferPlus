@@ -26,8 +26,8 @@ public interface IRingBufferService<T> : IAsyncDisposable
 | [MaxCapacity](IRingBufferService-1/MaxCapacity.md) { get; } | The Value Maximum capacity of the RingBuffer. |
 | [MinCapacity](IRingBufferService-1/MinCapacity.md) { get; } | The Value Minimum capacity of the RingBuffer. |
 | [Name](IRingBufferService-1/Name.md) { get; } | Unique name of the RingBuffer. |
-| [AcquireAsync](IRingBufferService-1/AcquireAsync.md)(…) | Try to acquire a value from the buffer. Will wait for a buffer item to become available or timeout (default 5 seconds). |
-| [WarmupAsync](IRingBufferService-1/WarmupAsync.md)(…) | Warms up with full capacity ready.  It is recommended to use this method in the initialization of the application. |
+| [AcquireAsync](IRingBufferService-1/AcquireAsync.md)(…) | Try to acquire a value from the buffer. Will wait for a buffer item to become available or timeout (default 5 seconds).  A timeout (or disposal while waiting) does not throw - it returns a [`RingBufferValue`](./RingBufferValue-1.md) with [`Successful`](./RingBufferValue-1/Successful.md) set to `false`. Only the caller's own *cancellation* firing rethrows OperationCanceledException. Calling this after DisposeAsync throws ObjectDisposedException. If the implicit warmup this method triggers previously failed and has not been retried via an explicit call to [`WarmupAsync`](./IRingBufferService-1/WarmupAsync.md), this rethrows that same failure. |
+| [WarmupAsync](IRingBufferService-1/WarmupAsync.md)(…) | Warms up with full capacity ready.  It is recommended to use this method in the initialization of the application. If a previous call to this method failed, calling it again retries the attempt from scratch instead of rethrowing the same cached failure - a transient factory failure (e.g. a database or broker not yet accepting connections at startup) does not permanently disable the instance. This retry only happens when `WarmupAsync` is called explicitly again; [`AcquireAsync`](./IRingBufferService-1/AcquireAsync.md) and `SwitchToAsync` only observe the outcome of the most recent attempt and never trigger a retry on their own. |
 
 ### See Also
 

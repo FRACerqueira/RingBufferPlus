@@ -92,8 +92,6 @@ namespace RingBufferPlus.Core
 
         public int? ScaleDownInit { get; init; }
 
-        public int? ScaleDownMin { get; init; }
-
         public int? ScaleDownMax { get; init; }
 
         public bool AutoScaleFault { get; init; }
@@ -152,7 +150,17 @@ namespace RingBufferPlus.Core
             _engineTask = Task.Run(RunEngineAsync);
         }
 
-        public async ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default)
+        public ValueTask<RingBufferValue<T>> AcquireAsync(CancellationToken cancellation = default) =>
+            AcquireCoreAsync(countsTowardFaultBudget: true, cancellation);
+
+        // R11: the heartbeat pump's own internal acquire (see RunHeartbeatAsync) is a health
+        // check, not consumer demand - counting its timeout toward the autoscale fault budget is
+        // a self-inflicted false signal. Genuine external demand still faults normally through
+        // the public AcquireAsync above; this only exempts the heartbeat's own pulse.
+        private ValueTask<RingBufferValue<T>> AcquireForHeartbeatAsync(CancellationToken cancellation) =>
+            AcquireCoreAsync(countsTowardFaultBudget: false, cancellation);
+
+        private async ValueTask<RingBufferValue<T>> AcquireCoreAsync(bool countsTowardFaultBudget, CancellationToken cancellation)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             await EnsureWarmupAsync().ConfigureAwait(false);
@@ -179,7 +187,7 @@ namespace RingBufferPlus.Core
                 if (timedOut)
                 {
                     LogWarning("RingBuffer without resource");
-                    if (AutoScaleFault)
+                    if (AutoScaleFault && countsTowardFaultBudget)
                     {
                         _commands.Writer.TryWrite(EngineCommand.Fault());
                     }
@@ -469,23 +477,40 @@ namespace RingBufferPlus.Core
                     // >= (not >): NumberFault's own doc says "after first fault" for its default of 1 -
                     // the sample RingBufferPlusBasicTriggerScale passes 0 specifically to get "fires on
                     // the first fault", which only holds if the comparison includes equality.
-                    if (_faultCount >= NumberFault && CurrentCapacity != MaxCapacity)
+                    if (_faultCount < NumberFault)
                     {
+                        break;
+                    }
+                    if (CurrentCapacity == MaxCapacity)
+                    {
+                        // F7: nothing to scale to right now, but forget this batch of faults anyway -
+                        // otherwise the counter piles up unboundedly while pinned at MaxCapacity, and
+                        // the very next fault after a later scale-down would immediately re-trigger a
+                        // scale back to MaxCapacity instead of requiring a fresh batch.
                         _faultCount = 0;
-                        // Must always be strictly greater than CurrentCapacity - a plain equality
-                        // check against MinCapacity picks Capacity even when Capacity == MinCapacity
-                        // (a legal configuration), making this a no-op (target == current) forever.
-                        var next = CurrentCapacity < Capacity ? Capacity : MaxCapacity;
-                        try
+                        break;
+                    }
+                    // Must always be strictly greater than CurrentCapacity - a plain equality
+                    // check against MinCapacity picks Capacity even when Capacity == MinCapacity
+                    // (a legal configuration), making this a no-op (target == current) forever.
+                    var next = CurrentCapacity < Capacity ? Capacity : MaxCapacity;
+                    try
+                    {
+                        var moved = await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                        // R7: only forget this batch of faults once the scale-up actually completed -
+                        // a failed/partial attempt must not burn the whole budget, so the very next
+                        // fault retries instead of requiring an entire fresh batch while already
+                        // struggling.
+                        if (moved)
                         {
-                            await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                            _faultCount = 0;
                         }
-                        catch (Exception ex)
-                        {
-                            // No caller is waiting on a Fault-triggered scale-up; logging is the only
-                            // outcome needed, and the engine loop must keep running regardless.
-                            LogError(ex);
-                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        // No caller is waiting on a Fault-triggered scale-up; logging is the only
+                        // outcome needed, and the engine loop must keep running regardless.
+                        LogError(ex);
                     }
                     break;
 
@@ -501,11 +526,6 @@ namespace RingBufferPlus.Core
 
         private async Task ProcessTickAsync()
         {
-            if (_scaling)
-            {
-                _samples.Clear();
-                return;
-            }
             _samples.Add(_availableItems.Reader.Count);
             if (_samples.Count < SamplesCount)
             {
@@ -570,12 +590,15 @@ namespace RingBufferPlus.Core
                 {
                     var quantity = current - target;
                     LogMessage($"Starting ScaleDown {quantity}.");
-                    var removed = await RemoveItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    var removed = await RemoveItemsAsync(quantity).ConfigureAwait(false);
                     LogMessage("End ScaleDown.");
                     ok = removed == quantity;
-                    if (ok)
+                    // A partial scale-down still reduced real capacity (R6) - advance by however
+                    // many items were actually removed, not just on hitting the full target. Same
+                    // "keep whatever progress was made" spirit already applied to scale-up (R5/P1#8).
+                    if (removed > 0)
                     {
-                        Volatile.Write(ref _currentCapacity, target);
+                        Volatile.Write(ref _currentCapacity, current - removed);
                     }
                 }
                 return ok;
@@ -583,6 +606,10 @@ namespace RingBufferPlus.Core
             finally
             {
                 _scaling = false;
+                // Discard whatever samples (if any) accumulated before/during this scale (F6) -
+                // they describe the pre-scale capacity, not the one the buffer has now. The next
+                // scale-down decision must be based on a fresh window sampled after this point.
+                _samples.Clear();
                 if (scaleTrigger is not null)
                 {
                     // `ok` also reflects a scale attempt that threw (it stays false, set only on the
@@ -686,30 +713,24 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private async Task<int> RemoveItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
+        private async Task<int> RemoveItemsAsync(int quantity)
         {
             var removed = new List<T>(quantity);
-            using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
-            if (hasTimeout) overall.CancelAfter(SamplesBase);
-            try
+            // Opportunistic (R6): take only whatever is already idle right now via a
+            // non-blocking TryRead loop - never wait for busy items to be returned. The engine is
+            // a single serial consumer (ADR001), so blocking here to wait for capacity to free up
+            // would stall every other command (Fault, another Switch, ReplaceOne, Tick) for as
+            // long as that wait takes. A partial reduction is fine - MoveToCapacityAsync advances
+            // _currentCapacity by whatever was actually removed either way.
+            while (removed.Count < quantity && _availableItems.Reader.TryRead(out var item))
             {
-                while (removed.Count < quantity)
-                {
-                    var item = await _availableItems.Reader.ReadAsync(overall.Token).ConfigureAwait(false);
-                    removed.Add(item);
-                }
+                removed.Add(item);
+            }
+            if (removed.Count > 0)
+            {
                 await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
-                return removed.Count;
             }
-            catch (OperationCanceledException)
-            {
-                LogError(new TimeoutException($"Timeout ScaleDown {removed.Count}/{quantity}."));
-                foreach (var item in removed)
-                {
-                    await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
-                }
-                return 0;
-            }
+            return removed.Count;
         }
 
         private async Task CreateSingleReplacementAsync()
@@ -765,7 +786,7 @@ namespace RingBufferPlus.Core
                     }
 
                     LogMessage("Started Heart Beat item");
-                    var acquired = await AcquireAsync(_lifetime.Token).ConfigureAwait(false);
+                    var acquired = await AcquireForHeartbeatAsync(_lifetime.Token).ConfigureAwait(false);
                     await using (acquired)
                     {
                         if (!acquired.Successful)
@@ -817,7 +838,16 @@ namespace RingBufferPlus.Core
                 var delay = TimeSpan.FromMilliseconds(SamplesBase.TotalMilliseconds / SamplesCount);
                 while (!_lifetime.IsCancellationRequested)
                 {
-                    _commands.Writer.TryWrite(EngineCommand.Tick());
+                    // Skip enqueueing while a scale operation is in progress (F6): the engine is a
+                    // single serial consumer, so a Tick written now would just queue up behind the
+                    // in-flight scale and get processed the instant it frees up - a burst of
+                    // near-duplicate post-scale samples, not a time-spread window. _scaling is
+                    // read here (its only reader) instead of in ProcessTickAsync, where it was
+                    // always already false by the time a queued Tick got processed.
+                    if (!_scaling)
+                    {
+                        _commands.Writer.TryWrite(EngineCommand.Tick());
+                    }
                     await Task.Delay(delay, _lifetime.Token).ConfigureAwait(false);
                 }
             }

@@ -17,7 +17,7 @@ public IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int min
 | minCapacity | The minimal buffer capacity. Value must be greater than or equal to 2. |
 | maxCapacity | The maximum buffer capacity. Value must be greater than or equal to *minCapacity*. |
 | numberSamples | Number of samples collected. Default is 100 (one sample per 300ms). |
-| baseTimer | The TimeSpan interval to collect samples. Default value is 30 seconds (one sample per 100ms). |
+| baseTimer | The TimeSpan interval to collect samples. Default value is 30 seconds (one sample per 300ms). |
 
 ### Return Value
 

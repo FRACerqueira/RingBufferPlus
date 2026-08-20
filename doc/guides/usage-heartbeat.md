@@ -15,14 +15,26 @@ var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
     .HeartBeat(MyHeartBeat, pulse: TimeSpan.FromSeconds(10))
+    .OnError((logger, ex) => logger?.LogError(ex, "RingBuffer background error"))
     .FixedCapacity(3)
     .BuildWarmupAsync(cancellation);
 
 static void MyHeartBeat(RingBufferValue<int> value)
 {
     // inspect value.Current — e.g. a health check
+    if (!IsHealthy(value.Current))
+    {
+        // Discard this item instead of returning it to the pool on dispose - a
+        // replacement is created in its place. Do not dispose the value yourself here
+        // (see "Do not dispose" below); Invalidate() just marks it for discard.
+        value.Invalidate();
+    }
 }
+
+static bool IsHealthy(int current) => true; // your real health check goes here
 ```
+
+`OnError` is where an exception thrown by `MyHeartBeat` itself, or a heartbeat that blocks past its `pulse` budget, is routed — see "What happens internally" below. Without it (and without `Logger`), those failures are swallowed silently.
 
 `HeartBeat` is available from every builder mode (`FixedCapacity`, `ElasticCapacity`, `AutoScaleAcquireFault`) — it is orthogonal to capacity mode.
 
