@@ -431,5 +431,327 @@ namespace RingBufferPlus.Tests
             await Assert.ThrowsAsync<ArgumentNullException>(() =>
                 hostMock.Object.WarmupRingBufferAsync<int>("missingBuffer"));
         }
+
+        // ---------------------------------------------------------------------
+        // 1.8 - A factory (or a user item's Dispose) that throws a non-cancellation exception
+        // must not kill the engine loop. Before this fix, every catch from Factory up to the
+        // engine's command loop filtered exclusively on OperationCanceledException, so a plain
+        // exception faulted _engineTask permanently and every public async method (Warmup/
+        // Acquire/Switch/Dispose) could then hang forever - see TODO/relatorio-viabilidade-
+        // ringbufferplus-v5.md, finding F1/R1.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task WarmupAsync_WhenFactoryThrows_PropagatesTheRealException_AndDoesNotHang()
+        {
+            // Arrange: every factory call throws a plain (non-cancellation) exception.
+            var manager = CreateFixedManager(3, _ => throw new InvalidOperationException("boom"));
+
+            // Act: bound the wait - before the fix, the dead engine never resolved this TCS and
+            // WarmupAsync hung forever.
+            var warmupTask = manager.WarmupAsync();
+            var completed = await Task.WhenAny(warmupTask, Task.Delay(TimeSpan.FromSeconds(3)));
+
+            // Assert: must complete (not hang) and surface the real exception, not a generic wrapper.
+            Assert.Same(warmupTask, completed);
+            var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => warmupTask);
+            Assert.Equal("boom", ex.Message);
+
+            await manager.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhenFactoryThrowsDuringScaleUp_PropagatesRealException_AndEngineSurvives()
+        {
+            // Arrange: factory is healthy for warmup (capacity 2), then always throws for the scale-up.
+            var throwing = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFactoryThrowsDuringScale", null);
+            var service = builder
+                .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            throwing = true;
+
+            // Act: the scale-up's factory calls throw. Before the fix, this faulted the engine
+            // permanently and every call below would then hang instead of completing.
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(switchTask, completed);
+            var switchEx = await Assert.ThrowsAsync<InvalidOperationException>(() => switchTask);
+            Assert.Equal("factory down", switchEx.Message);
+
+            // Assert: capacity did not move, and the engine is still alive for further work.
+            Assert.True(service.IsInitCapacity);
+            throwing = false;
+            var acquireTask = service.AcquireAsync().AsTask();
+            var acquireCompleted = await Task.WhenAny(acquireTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(acquireTask, acquireCompleted);
+            Assert.True((await acquireTask).Successful);
+
+            var disposeTask = service.DisposeAsync().AsTask();
+            var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(disposeTask, disposeCompleted);
+            await disposeTask;
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
+        {
+            // Arrange: init capacity 4, min 2 (init != min, to avoid the separate, already-known R4
+            // defect where the scale-up target formula picks a no-op when init == min), autoscale on
+            // the first fault, factory throws only while "throwing" is true.
+            var throwing = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultTriggeredScaleThrows", null);
+            var service = builder
+                .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .ElasticCapacity(4, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(0)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(200))
+                .Build();
+            await service.WarmupAsync();
+
+            // Exhaust the pool so the next acquire times out and posts a Fault command.
+            var held1 = await service.AcquireAsync();
+            var held2 = await service.AcquireAsync();
+            var held3 = await service.AcquireAsync();
+            var held4 = await service.AcquireAsync();
+
+            throwing = true;
+            var faultedTask = service.AcquireAsync().AsTask();
+            var faultedCompleted = await Task.WhenAny(faultedTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(faultedTask, faultedCompleted);
+            Assert.False((await faultedTask).Successful);
+
+            // Give the engine a moment to process the Fault-triggered scale-up (posted fire-and-forget).
+            await Task.Delay(300);
+
+            // Assert: capacity did not move (the scale-up's factory call failed), but the engine is
+            // still alive - before the fix, this permanently killed the engine and disabled autoscale.
+            Assert.True(service.IsInitCapacity);
+
+            // Recover the factory and force another fault: autoscale must still work.
+            throwing = false;
+            var faulted2Task = service.AcquireAsync().AsTask();
+            var faulted2Completed = await Task.WhenAny(faulted2Task, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(faulted2Task, faulted2Completed);
+            Assert.False((await faulted2Task).Successful);
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (!service.IsMaxCapacity && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.IsMaxCapacity);
+
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+            await held3.DisposeAsync();
+            await held4.DisposeAsync();
+
+            var disposeTask = service.DisposeAsync().AsTask();
+            var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(disposeTask, disposeCompleted);
+            await disposeTask;
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.9 - A command whose completion signal races DisposeAsync's cancellation must not hang
+        // forever if cancellation wins. Before this fix, WarmupCoreAsync awaited its engine
+        // TaskCompletionSource with no cancellation token, so when the Warmup command lost that race
+        // (abandoned unread in the channel), nothing could ever unblock it - and DisposeAsync itself
+        // awaits that same signal, so disposal hung too. This is a genuine data race inside
+        // Channel<T> (which of "data arrived" vs "cancellation requested" the channel's pending wait
+        // observes first) - not forceable to a single deterministic outcome from outside the channel,
+        // so this is a bounded stress loop, not a one-shot repro (CLAUDE.md rule 5 step 3; empirically
+        // ~97% hang rate per iteration against the unfixed code during triage). See TODO/relatorio-
+        // viabilidade-ringbufferplus-v5.md, finding F4.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAnUnawaitedWarmup_NeverHangs()
+        {
+            for (var i = 0; i < 10; i++)
+            {
+                var manager = CreateFixedManager(2, _ => Task.FromResult(1));
+
+                var warmupTask = manager.WarmupAsync(); // fired, deliberately not awaited
+                var disposeTask = manager.DisposeAsync().AsTask(); // races it immediately
+
+                var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(2)));
+                Assert.True(ReferenceEquals(disposeTask, disposeCompleted), $"DisposeAsync hung on iteration {i}.");
+                await disposeTask;
+
+                var warmupCompleted = await Task.WhenAny(warmupTask, Task.Delay(TimeSpan.FromSeconds(2)));
+                Assert.True(ReferenceEquals(warmupTask, warmupCompleted), $"WarmupAsync hung on iteration {i}.");
+                _ = await Record.ExceptionAsync(() => warmupTask);
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.10 - RingBufferManager.DisposeAsync's own _disposed guard has the same non-atomic
+        // check-then-set shape as RingBufferValue's (finding F2, fixed via the identical
+        // Interlocked.Exchange idiom just above). Two separate attempts to reproduce it as a live
+        // race - the original audit probe (300 concurrent-dispose attempts) and a follow-up with
+        // tightly-synchronized dedicated threads (1000 attempts, ~12 minutes) - both produced zero
+        // hits, so this is fixed on the strength of the proven-necessary pattern rather than a
+        // red/green regression test (CLAUDE.md rule 5 step 3: the mechanism is named, but a test
+        // that costs 12 minutes per run for no observed signal does not earn a place in the suite).
+        // See TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding F10, and TODO/plano-de-
+        // acao.md P0#3 for the full account.
+        // ---------------------------------------------------------------------
+
+        // ---------------------------------------------------------------------
+        // 1.11 - A HeartBeat callback that blocks past its pulse budget must not stop the heartbeat
+        // pump forever, and the item it was holding must not be lost. Before this fix, the
+        // CancellationToken passed to Task.Run only prevented the delegate from starting - it did
+        // not cancel it once running - so the intended timeout guard was unreachable code. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding F3/R3.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeat_CallbackBlocksPastPulseBudget_DoesNotStopThePump_AndInvalidatesTheItem()
+        {
+            var invocations = 0;
+            var blockedOnce = false;
+            using var release = new ManualResetEventSlim(false);
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractHeartBeatBlocking", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .HeartBeat(_ =>
+                {
+                    Interlocked.Increment(ref invocations);
+                    if (!blockedOnce)
+                    {
+                        blockedOnce = true;
+                        // Blocks well past the pulse budget on the first call only, and is never
+                        // released until this test's cleanup - simulating a callback that hangs
+                        // indefinitely (e.g. a dead socket read with no timeout).
+                        release.Wait();
+                    }
+                }, TimeSpan.FromMilliseconds(50))
+                .FixedCapacity(2)
+                .Build();
+            try
+            {
+                await service.WarmupAsync();
+
+                // With the fix, a second (and third, etc.) pulse must happen within a couple of
+                // pulse budgets even though the first invocation is still blocked. Without the fix,
+                // this never happens - the pump is dead until (if ever) the callback returns.
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (Volatile.Read(ref invocations) < 2 && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(20);
+                }
+                Assert.True(Volatile.Read(ref invocations) >= 2, "Heartbeat pump stopped after the first invocation blocked past its pulse budget.");
+
+                // Both items must still be available - the timed-out one was replaced, not
+                // permanently lost. (Capacity is 2 so one item is always free regardless; acquiring
+                // both is what actually proves a replacement exists.)
+                var first = await service.AcquireAsync();
+                Assert.True(first.Successful);
+                var secondTask = service.AcquireAsync().AsTask();
+                var secondCompleted = await Task.WhenAny(secondTask, Task.Delay(TimeSpan.FromSeconds(2)));
+                Assert.Same(secondTask, secondCompleted);
+                Assert.True((await secondTask).Successful);
+            }
+            finally
+            {
+                release.Set();
+                await service.DisposeAsync();
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.12 - Disposal must always drain and clean up regardless of how a background pump
+        // ended. Before this fix, Task.WhenAll(pending) only caught OperationCanceledException, so
+        // any other fault (e.g. the ObjectDisposedException race below) escaped DisposeAsync before
+        // draining pooled items and disposing _lifetime/_meter/_activitySource. See TODO/relatorio-
+        // viabilidade-ringbufferplus-v5.md, finding F3/R2.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAnActiveHeartbeat_NeverThrowsUnhandled()
+        {
+            const int attempts = 400;
+            var exceptions = new List<Exception>();
+
+            for (var i = 0; i < attempts; i++)
+            {
+                IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringHeartbeat", null);
+                var service = builder
+                    .Factory(_ => Task.FromResult(1))
+                    .HeartBeat(_ => { }, TimeSpan.FromMilliseconds(15))
+                    .FixedCapacity(2)
+                    .Build();
+                await service.WarmupAsync();
+
+                // Dispose at a varied point relative to the 15ms pulse, not immediately - the race
+                // is between the heartbeat pump's Task.Delay elapsing (not being cancelled) and
+                // _disposed/_lifetime flipping right as it moves on to its own AcquireAsync call.
+                await Task.Delay(Random.Shared.Next(10, 41));
+
+                var ex = await Record.ExceptionAsync(() => service.DisposeAsync().AsTask());
+                if (ex is not null)
+                {
+                    exceptions.Add(ex);
+                }
+            }
+
+            Assert.Empty(exceptions);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.13 - An item returned via TurnbackAsync after the manager is already disposed must be
+        // disposed itself, not silently dropped. Before this fix, the ChannelClosedException handler
+        // had a bare "ignore" comment and never called DisposeItemAsync. See TODO/relatorio-
+        // viabilidade-ringbufferplus-v5.md, finding F5/R12.
+        // ---------------------------------------------------------------------
+
+        private sealed class DisposableProbe : IDisposable
+        {
+            private int _disposeCount;
+            public int DisposeCount => Volatile.Read(ref _disposeCount);
+            public void Dispose() => Interlocked.Increment(ref _disposeCount);
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task TurnbackAsync_AfterManagerDisposed_DisposesTheItem_InsteadOfLeakingIt()
+        {
+            var probe = new DisposableProbe();
+            var manager = new RingBufferManager<DisposableProbe>(default)
+            {
+                Name = "ContractTurnbackAfterDispose",
+                Capacity = 2,
+                MinCapacity = 2,
+                MaxCapacity = 2,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromSeconds(5),
+                SamplesBase = TimeSpan.FromSeconds(5),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromMilliseconds(300),
+                Factory = _ => Task.FromResult(probe)
+            };
+            await manager.WarmupAsync();
+
+            // Held while the manager is disposed - the pool still contains one other reference to
+            // the same probe, which the drain loop disposes; `held` is returned only afterward.
+            var held = await manager.AcquireAsync();
+            await manager.DisposeAsync();
+
+            await held.DisposeAsync();
+
+            Assert.Equal(2, probe.DisposeCount);
+        }
     }
 }

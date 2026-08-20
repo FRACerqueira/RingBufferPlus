@@ -60,6 +60,7 @@ namespace RingBufferPlus.Core
         private Task? _loggerTask;
 
         private bool _disposed;
+        private int _disposeGuard;
         private int _currentCapacity;
         private volatile bool _scaling;
         private int _faultCount;
@@ -216,12 +217,15 @@ namespace RingBufferPlus.Core
                 var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 await _commands.Writer.WriteAsync(EngineCommand.Switch(value, accepted, completion), _lifetime.Token).ConfigureAwait(false);
 
-                var wasAccepted = await accepted.Task.ConfigureAwait(false);
+                // Both bounded by _lifetime.Token: if this command loses its race against disposal
+                // and is abandoned unread in the channel, this must not hang forever waiting for
+                // signals nobody will ever send.
+                var wasAccepted = await accepted.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
                 if (!wasAccepted)
                 {
                     return false;
                 }
-                return !LockWhenScaling || await completion.Task.ConfigureAwait(false);
+                return !LockWhenScaling || await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -237,52 +241,67 @@ namespace RingBufferPlus.Core
 
         public async ValueTask DisposeAsync()
         {
-            if (_disposed) return;
+            if (Interlocked.Exchange(ref _disposeGuard, 1) != 0) return;
             _disposed = true;
-
-            await _lifetime.CancelAsync().ConfigureAwait(false);
-            _commands.Writer.TryComplete();
-            _logQueue.Writer.TryComplete();
-
-            // If a warmup was already in flight, let it unwind first (it observes cancellation
-            // and returns or throws) before snapshotting which background pumps to await -
-            // otherwise a pump task WarmupCoreAsync assigns after our snapshot would never be
-            // awaited below.
-            if (_warmup.IsValueCreated)
-            {
-                try
-                {
-                    await _warmup.Value.ConfigureAwait(false);
-                }
-                catch
-                {
-                    //ignore: disposal is in progress, warmup's own outcome no longer matters
-                }
-            }
-
-            var pending = new List<Task> { _engineTask };
-            if (_heartbeatTask is not null) pending.Add(_heartbeatTask);
-            if (_sampleTickTask is not null) pending.Add(_sampleTickTask);
-            if (_loggerTask is not null) pending.Add(_loggerTask);
 
             try
             {
-                await Task.WhenAll(pending).ConfigureAwait(false);
-            }
-            catch (OperationCanceledException)
-            {
-                //ignore: expected once _lifetime is cancelled
-            }
+                await _lifetime.CancelAsync().ConfigureAwait(false);
+                _commands.Writer.TryComplete();
+                _logQueue.Writer.TryComplete();
 
-            _availableItems.Writer.TryComplete();
-            while (_availableItems.Reader.TryRead(out var item))
-            {
-                await DisposeItemAsync(item).ConfigureAwait(false);
-            }
+                // If a warmup was already in flight, let it unwind first (it observes cancellation
+                // and returns or throws) before snapshotting which background pumps to await -
+                // otherwise a pump task WarmupCoreAsync assigns after our snapshot would never be
+                // awaited below.
+                if (_warmup.IsValueCreated)
+                {
+                    try
+                    {
+                        await _warmup.Value.ConfigureAwait(false);
+                    }
+                    catch
+                    {
+                        //ignore: disposal is in progress, warmup's own outcome no longer matters
+                    }
+                }
 
-            _lifetime.Dispose();
-            _meter.Dispose();
-            _activitySource.Dispose();
+                var pending = new List<Task> { _engineTask };
+                if (_heartbeatTask is not null) pending.Add(_heartbeatTask);
+                if (_sampleTickTask is not null) pending.Add(_sampleTickTask);
+                if (_loggerTask is not null) pending.Add(_loggerTask);
+
+                try
+                {
+                    await Task.WhenAll(pending).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    //ignore: expected once _lifetime is cancelled
+                }
+                catch (Exception ex)
+                {
+                    // Disposal must be best-effort and never throw regardless of how a background
+                    // pump ended, but an unexpected fault here is still worth surfacing through the
+                    // configured logger/ErrorHandler rather than being fully silent.
+                    LogError(ex);
+                }
+            }
+            finally
+            {
+                // Cleanup below must run unconditionally - even if something above this point
+                // unexpectedly throws - so pooled items and the buffer's own instrumentation are
+                // never left undisposed.
+                _availableItems.Writer.TryComplete();
+                while (_availableItems.Reader.TryRead(out var item))
+                {
+                    await DisposeItemAsync(item).ConfigureAwait(false);
+                }
+
+                _lifetime.Dispose();
+                _meter.Dispose();
+                _activitySource.Dispose();
+            }
         }
 
         private Task EnsureWarmupAsync() => _warmup.Value;
@@ -301,7 +320,10 @@ namespace RingBufferPlus.Core
             {
                 var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 await _commands.Writer.WriteAsync(EngineCommand.Warmup(completion), _lifetime.Token).ConfigureAwait(false);
-                reached = await completion.Task.ConfigureAwait(false);
+                // Bounded by _lifetime.Token: if this command loses its race against disposal and is
+                // abandoned unread in the channel, this must not hang forever waiting for a completion
+                // signal nobody will ever send.
+                reached = await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -344,7 +366,9 @@ namespace RingBufferPlus.Core
             }
             catch (ChannelClosedException)
             {
-                //ignore: manager disposed concurrently with turnback
+                // The manager was disposed concurrently with the turnback; the item can no longer
+                // be returned to the pool, so dispose it instead of leaking it.
+                await DisposeItemAsync(value.Current).ConfigureAwait(false);
             }
         }
 
@@ -378,8 +402,18 @@ namespace RingBufferPlus.Core
             switch (cmd.Kind)
             {
                 case EngineCommandKind.Warmup:
-                    var reached = await MoveToCapacityAsync(Capacity, hasTimeout: false, _lifetime.Token).ConfigureAwait(false);
-                    cmd.Completion?.TrySetResult(reached);
+                    try
+                    {
+                        var reached = await MoveToCapacityAsync(Capacity, hasTimeout: false, _lifetime.Token).ConfigureAwait(false);
+                        cmd.Completion?.TrySetResult(reached);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Surface the real factory failure to WarmupAsync's caller instead of the
+                        // generic "did not reach initial capacity" - and, critically, resolve the
+                        // TaskCompletionSource so the caller does not hang forever.
+                        cmd.Completion?.TrySetException(ex);
+                    }
                     break;
 
                 case EngineCommandKind.Switch:
@@ -391,8 +425,15 @@ namespace RingBufferPlus.Core
                         break;
                     }
                     cmd.Accepted?.TrySetResult(true);
-                    var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "manual").ConfigureAwait(false);
-                    cmd.Completion?.TrySetResult(moved);
+                    try
+                    {
+                        var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "manual").ConfigureAwait(false);
+                        cmd.Completion?.TrySetResult(moved);
+                    }
+                    catch (Exception ex)
+                    {
+                        cmd.Completion?.TrySetException(ex);
+                    }
                     break;
 
                 case EngineCommandKind.Fault:
@@ -401,7 +442,16 @@ namespace RingBufferPlus.Core
                     {
                         _faultCount = 0;
                         var next = CurrentCapacity == MinCapacity ? Capacity : MaxCapacity;
-                        await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                        try
+                        {
+                            await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                        }
+                        catch (Exception ex)
+                        {
+                            // No caller is waiting on a Fault-triggered scale-up; logging is the only
+                            // outcome needed, and the engine loop must keep running regardless.
+                            LogError(ex);
+                        }
                     }
                     break;
 
@@ -432,7 +482,16 @@ namespace RingBufferPlus.Core
             var target = AutoScaleDecision.EvaluateScaleDown(median, IsInitCapacity, IsMaxCapacity, MinCapacity, Capacity, ScaleDownInit, ScaleDownMax);
             if (target.HasValue)
             {
-                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                try
+                {
+                    await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // No caller is waiting on a Tick-triggered scale-down; logging is the only outcome
+                    // needed, and the engine loop must keep running regardless.
+                    LogError(ex);
+                }
             }
         }
 
@@ -528,11 +587,34 @@ namespace RingBufferPlus.Core
             catch (OperationCanceledException)
             {
                 LogError(new TimeoutException($"Timeout ScaleUp {created.Count}/{quantity}."));
-                foreach (var item in created)
+                await DisposeItemsDefensivelyAsync(created).ConfigureAwait(false);
+                return 0;
+            }
+            catch (Exception ex)
+            {
+                // A non-cancellation failure (typically the factory itself throwing) must not escape
+                // and kill the engine loop - the caller (ProcessCommandAsync) turns this into a failed
+                // command outcome instead. Partially-created items are still disposed defensively.
+                LogError(ex);
+                await DisposeItemsDefensivelyAsync(created).ConfigureAwait(false);
+                throw;
+            }
+        }
+
+        private async Task DisposeItemsDefensivelyAsync(IEnumerable<T> items)
+        {
+            foreach (var item in items)
+            {
+                try
                 {
                     await DisposeItemAsync(item).ConfigureAwait(false);
                 }
-                return 0;
+                catch (Exception disposeEx)
+                {
+                    // One item's Dispose()/DisposeAsync() throwing must not stop the rest from being
+                    // disposed, nor escape and kill the engine loop.
+                    LogError(disposeEx);
+                }
             }
         }
 
@@ -548,10 +630,7 @@ namespace RingBufferPlus.Core
                     var item = await _availableItems.Reader.ReadAsync(overall.Token).ConfigureAwait(false);
                     removed.Add(item);
                 }
-                foreach (var item in removed)
-                {
-                    await DisposeItemAsync(item).ConfigureAwait(false);
-                }
+                await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
                 return removed.Count;
             }
             catch (OperationCanceledException)
@@ -577,6 +656,12 @@ namespace RingBufferPlus.Core
             catch (OperationCanceledException)
             {
                 LogError(new TimeoutException("Timeout factory (replacement)"));
+            }
+            catch (Exception ex)
+            {
+                // A non-cancellation factory failure must not escape and kill the engine loop; there is
+                // no caller waiting on a replacement, so logging is the only outcome needed here.
+                LogError(ex);
             }
         }
 
@@ -620,14 +705,27 @@ namespace RingBufferPlus.Core
                             LogMessage("Heart Beat item not available");
                             continue;
                         }
-                        using var pulseTimeout = new CancellationTokenSource(PulseHeartBeat);
+                        using var pulseTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
+                        pulseTimeout.CancelAfter(PulseHeartBeat);
+                        var heartbeatWork = Task.Run(() => BufferHeartBeat?.Invoke(acquired));
                         try
                         {
-                            await Task.Run(() => BufferHeartBeat?.Invoke(acquired), pulseTimeout.Token).ConfigureAwait(false);
+                            await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
                         }
-                        catch (OperationCanceledException)
+                        catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
                         {
+                            // The callback blocked past its pulse budget. It keeps running on its own
+                            // thread-pool thread - a blocking synchronous callback cannot be forcibly
+                            // cancelled - so the item is invalidated (a replacement is built) rather
+                            // than returned to the pool while the stray callback might still be
+                            // touching it. Its eventual outcome is still observed so a late fault
+                            // cannot surface as an unobserved task exception.
                             LogError(new TimeoutException("Timeout Heart Beat"));
+                            acquired.Invalidate();
+                            _ = heartbeatWork.ContinueWith(t =>
+                            {
+                                if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
+                            }, TaskScheduler.Default);
                         }
                         catch (Exception ex)
                         {

@@ -72,6 +72,49 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public void DisposeAsync_ConcurrentCalls_NeverInvokeTurnbackMoreThanOnce()
+        {
+            // The _disposed guard is a plain, non-atomic bool - a concurrent double-dispose can let
+            // both callers pass the check before either sets the flag, invoking turnback (and thus
+            // returning the same pooled instance) twice. Racing a single pair rarely lands the
+            // interleaving, so this repeats the race many times (matching the ~3.8% hit rate measured
+            // during triage) rather than relying on one attempt - see TODO/relatorio-viabilidade-
+            // ringbufferplus-v5.md, finding F2.
+            const int attempts = 5000;
+            var duplicateCount = 0;
+
+            Parallel.For(0, attempts, _ =>
+            {
+                var turnbackCount = 0;
+                ValueTask turnback(RingBufferValue<int> _) { Interlocked.Increment(ref turnbackCount); return ValueTask.CompletedTask; }
+                var ringBufferValue = new RingBufferValue<int>("TestBuffer", TimeSpan.Zero, true, 42, turnback);
+
+                using var ready = new ManualResetEventSlim(false);
+                var readyCount = 0;
+                void DisposeOnce()
+                {
+                    if (Interlocked.Increment(ref readyCount) == 2) ready.Set();
+                    ready.Wait();
+                    ringBufferValue.DisposeAsync().AsTask().GetAwaiter().GetResult();
+                }
+
+                var t1 = new Thread(DisposeOnce);
+                var t2 = new Thread(DisposeOnce);
+                t1.Start();
+                t2.Start();
+                t1.Join();
+                t2.Join();
+
+                if (turnbackCount > 1)
+                {
+                    Interlocked.Increment(ref duplicateCount);
+                }
+            });
+
+            Assert.Equal(0, duplicateCount);
+        }
+
+        [Fact]
         public async Task DisposeAsync_Unsuccessful_ShouldStillInvokeTurnbackDelegate()
         {
             // RingBufferValue itself does not gate on Successful - that decision belongs to

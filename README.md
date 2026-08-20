@@ -35,6 +35,7 @@ dotnet add package RingBufferPlus [--prerelease]
 
 ```csharp
 Random rnd = new();
+CancellationToken cancellation = default;
 
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))

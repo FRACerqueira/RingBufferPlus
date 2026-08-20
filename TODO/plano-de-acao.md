@@ -1,0 +1,109 @@
+# Plano de Ação — RingBufferPlus v5.0.0
+
+Baseado em: [relatorio-viabilidade-ringbufferplus-v5.md](./relatorio-viabilidade-ringbufferplus-v5.md)
+Objetivo: levar a v5.0.0 de "NÃO PRONTO" (Estabilidade/Resiliência) e "PRONTO COM RESSALVAS" (Usabilidade) a um estado verificável de release, sem quebrar a arquitetura já validada (canal de consumidor único).
+
+Este documento é vivo — atualizado ao final de cada interação com o status real do que foi feito, decidido e testado.
+
+## Legenda de status
+
+| Símbolo | Significado |
+|---|---|
+| ⏳ | Pendente — ainda não iniciado |
+| 🔎 | Em decisão — contexto/opções apresentados, aguardando escolha |
+| 🔴 | Vermelho — teste de reprodução escrito e falhando pelo motivo esperado |
+| 🟢 | Verde — correção aplicada, teste passa, suíte completa não regrediu |
+| ⛔ | Bloqueado — depende de decisão externa (ver §Decisões) |
+| ✅ | Concluído e verificado |
+
+---
+
+## P0 — Bloqueadores de release
+
+| # | Correção | Fecha | Status | Notas |
+|---|---|---|---|---|
+| 1 | Fronteira de exceção nos pontos onde a `Factory`/`Dispose` do usuário é chamada (`CreateItemsAsync`, `RemoveItemsAsync`, `CreateSingleReplacementAsync`) + roteamento em `ProcessCommandAsync`/`ProcessTickAsync` para resolver o TCS do comando (`TrySetException` para Warmup/Switch, `LogError` para Fault/Tick/ReplaceOne) | F1, R1 | ✅ | Ver "Decisões registradas" e log de execução abaixo |
+| 2 | Token de cancelamento em todo await de TCS do engine (`WarmupCoreAsync`, `SwitchToAsync`) | F4 | ✅ | Ver "Decisões registradas" e log de execução abaixo — a parte de "drenar-e-falhar no engine" foi decidida como não necessária (ver decisão) |
+| 3 | Guardas de dispose atômicas (`Interlocked`) em `RingBufferValue` e `RingBufferManager` | F2, F10 | ✅ | Ver "Decisões registradas" e log de execução abaixo |
+| 4 | Timeout de heartbeat de fato aplicado (`Task.WhenAny`/`WaitAsync` em vez de `Task.Run` + token) | R3 | ✅ | **Correção de rastreamento:** este item, na síntese original do relatório, citava "Estabilidade F3, Resiliência R3" como se fossem o mesmo bug — não são. F3 (`ObjectDisposedException` durante dispose com heartbeat em voo) é um bug diferente, no mesmo trecho de código; fica sob o item #5 agora. Ver "Decisões registradas" e log de execução abaixo. |
+| 5 | Limpeza incondicional do `DisposeAsync` (catch amplo + `finally`; dispose do item no handler de `ChannelClosedException`) | F3, F5, R2/R12 | ✅ | Ver "Decisões registradas" e log de execução abaixo |
+| 6 | README Quickstart (`cancellation` não declarada) + remover instrução errada de DI (`IRingBufferManualScaleService<T>` injetável) | U-01, U-02 | ✅ | Ver "Decisões registradas" e log de execução abaixo — todos os itens do P0 concluídos |
+| — | Testes de regressão: factory lançando `Exception`, double-dispose concorrente, dispose durante warmup em andamento (timeout rígido), dispose durante heartbeat ativo | cobre 1–4 | ⏳ | Escritos como parte do protocolo vermelho/verde de cada item acima, não como item isolado |
+
+## P1 — Mesmo release ou follow-up imediato
+
+| # | Correção | Fecha | Status |
+|---|---|---|---|
+| 7 | Tag de resultado (sucesso/falha/timeout) em `scale.operations`/`scale.duration` + `ActivityStatusCode.Error` no span de scale | R8 | ⏳ |
+| 8 | Desacoplar prazo de scale-up da janela de amostragem (ou validar/documentar `delta × FactoryTimeout`); manter itens parciais; redimensionar `RingBufferPlusRabbitSample` | R5 | ⏳ |
+| 9 | Corrigir fórmula de alvo de scale-up para não travar quando `initialCapacity == minCapacity` | R4 | ⏳ |
+| 10 | CHANGELOG: tabela de nomes de interface antigo→novo + nota sobre remoção de `SwitchToAsync` de `IRingBufferService<T>` | U-08 | ⏳ |
+| 11 | Corrigir as 6 afirmações de documentação erradas/ambíguas (U-03, U-04, U-05, U-06, U-07, U-21) | U-03–U-07, U-21 | ⏳ |
+
+## P2 — Escalado (decisão do mantenedor antes de qualquer código)
+
+| # | Decisão | Relacionado | Status | Escolha registrada |
+|---|---|---|---|---|
+| A | `LockWhenScaling()` no builder de autoscale: remover (breaking change) vs. manter como no-op documentado com `[Obsolete]` | F8, U-06, U-10 | ⛔ | — |
+| B | Warmup que falha destrói a instância para sempre: manter e documentar loudly vs. adicionar caminho de retry | F1-adjacente, U-22 | ⛔ | — |
+| C | Limiar de falhas do autoscale: corrigir código (`>=`) vs. corrigir 4 locais de documentação | F7, R7, R10, U-07 | ⛔ | — |
+
+## P3 — Backlog de higiene/documentação (sem urgência de release)
+
+Estabilidade F6, F7, F9, F11 · Resiliência R6, R9, R10, R11 · Usabilidade U-09, U-11 a U-20, U-23, U-24 — tratados em lote depois que P0/P1/P2 fecharem, sem plano item-a-item por ora.
+
+---
+
+## Decisões registradas
+
+### P0 #1 — Fronteira de exceção no engine (F1 / R1)
+
+- **Escopo:** cirúrgico — só nos 3 pontos-folha onde a `Factory`/`Dispose` do usuário é chamada (`CreateItemsAsync`, `RemoveItemsAsync`, `CreateSingleReplacementAsync`), sem rede de segurança genérica em `RunEngineAsync`.
+- **Sinalização de falha:** propagar a exceção real via `TrySetException`, não `TrySetResult(false)`.
+- **Reconciliação necessária:** propagar a exceção real exige resolver o TCS no ponto onde ele existe — `ProcessCommandAsync` (casos `Warmup`/`Switch`) e, para consistência, `ProcessTickAsync`/caso `Fault` (sem TCS, só log). Isso significa que `ProcessCommandAsync` também foi tocado, não só os 3 pontos-folha — uma pequena extensão do escopo "cirúrgico" combinado, mecânica e diretamente ligada aos 4 call-sites já existentes de `MoveToCapacityAsync`, não uma rede de segurança genérica nova.
+- **Limitação residual identificada durante a implementação (não corrigida agora, registrada para not perder):** com `LockWhenScaling=false` (o padrão), `SwitchToAsync` retorna `true` imediatamente por curto-circuito (`!LockWhenScaling || await completion.Task`) **antes** de observar a exceção — ou seja, para a configuração padrão, uma falha real de `Factory` durante um `Switch` continua invisível para quem chamou `SwitchToAsync`, apesar da propagação de exceção agora existir no motor. Isso é o mesmo tema já catalogado em F9/U-04 (contrato de retorno do `SwitchToAsync` obscuro) — não abriu um novo item, mas fica registrado aqui para quando F9/U-04 forem tratados.
+
+### P0 #2 — Token de cancelamento nos awaits do engine (F4)
+
+- **Escopo:** cirúrgico — só limitar `WarmupCoreAsync`'s `completion.Task` e `SwitchToAsync`'s `accepted.Task`/`completion.Task` com `.WaitAsync(_lifetime.Token)`, reaproveitando os catches de `OperationCanceledException` já existentes. Sem drenagem de comandos abandonados dentro de `RunEngineAsync`.
+- **Descoberta importante durante a investigação (corrige o entendimento do achado F4 original):** a suposição inicial — "qualquer comando escrito no canal antes do cancelamento é abandonado" — está **errada**. Um probe direto no `System.Threading.Channels.Channel<T>` mostrou que, uma vez que o loop do engine já leu com sucesso pelo menos um comando, ele drena via `TryRead` (síncrono, não cancelável) tudo que já estiver no buffer, **sem nunca reconsultar o cancelamento**, até o buffer ficar genuinamente vazio. Só nesse ponto — engine ocioso, esperando em `WaitToReadAsync` — é que existe uma corrida real entre "dado chegou" e "cancelamento solicitado", sem ordem garantida entre os dois. Isso significa que F4 é uma corrida de dados genuína dentro do `Channel<T>`, não um bug estrutural de "todo comando na fila é sempre descartado". O caso mais fácil de acionar essa corrida é exatamente o do relatório original: `WarmupAsync()` disparado e `DisposeAsync()` chamado imediatamente depois, sem esperar — confirmado empiricamente em ~97% das iterações (29/30) contra o código não corrigido.
+- **Consequência para o teste:** não é possível forçar essa corrida de forma 100% determinística de fora do canal (não é uma questão de timing/delay, é uma corrida real de conclusão entre duas continuations). Seguindo a regra 5 (protocolo vermelho/verde) do CLAUDE.md global — "nomear o mecanismo, dizer o que foi feito em vez disso" — o teste é um loop de estresse limitado (10 iterações), não uma reprodução de tiro único.
+
+### P0 #3 — Guardas de dispose atômicas (F2 / F10)
+
+- **Padrão:** `Interlocked.Exchange` sobre uma flag `int` em vez de `if (!_disposed) { _disposed = true; ... }` sobre um `bool` simples. Não há alternativa razoável em C# (não existe sobrecarga de `Interlocked` para `bool`); não é um ponto de decisão real.
+- **`RingBufferValue`:** campo `_disposed` (só usado dentro de `DisposeAsync`) trocado de `bool` para `int`, guarda diretamente com `Interlocked.Exchange`.
+- **`RingBufferManager`:** decisão de escopo — em vez de converter o `_disposed` (`bool`) existente, usado em outros 6 pontos de leitura tolerantes a desatualização (`AcquireAsync`, `SwitchToAsync`, `WarmupAsync`, `WarmupCoreAsync` ×2), foi adicionado um campo **separado** `_disposeGuard` (`int`), usado só para a atomicidade da entrada em `DisposeAsync`. Evita espalhar a mudança para pontos que o próprio relatório já classificou como "higiene, não defeito".
+- **F10 — vermelho não alcançado, registrado explicitamente (regra 5, passo 3 do CLAUDE.md):** o mecanismo é o mesmo de F2 (check-then-set não atômico), mas a corrida não reproduziu em duas tentativas — o probe original do relatório (300 disposals concorrentes) e uma tentativa nesta correção com threads dedicadas e sincronização mais agressiva (1000 iterações, ~12 minutos), ambas com 0 exceções. Diferença de F2 (que reproduziu de forma confiável mesmo com um mecanismo de sincronização mais simples): plausivelmente a janela entre `Interlocked.Exchange` malsucedido... isto é, entre o check e o set em `RingBufferManager.DisposeAsync` compete com muito mais trabalho ao redor (criação de `Meter`/`ActivitySource`, objeto maior, mais campos) do que a classe minúscula `RingBufferValue`, tornando a janela de corrida ainda mais estreita na prática. A correção foi aplicada mesmo assim, com base no padrão já comprovado necessário em F2 — o teste de 1000 iterações foi removido da suíte permanente por não agregar sinal a um custo de 12 minutos por execução.
+
+### P0 #4 — Timeout de heartbeat de fato aplicado (R3) — e correção de rastreamento (F3)
+
+- **Correção de rastreamento encontrada ao revisar o código antes de implementar:** a síntese original (§3, item 4, do relatório) citava "Estabilidade F3, Resiliência R3" como se fossem o mesmo bug fechado pela mesma correção. Não são — são dois defeitos diferentes no mesmo trecho (`RunHeartbeatAsync`/`RingBufferManager.cs:623-631,616` vs. `:151,615,640-643,270-275`). F3 (`ObjectDisposedException` escapando do `DisposeAsync` quando o `AcquireAsync` interno do heartbeat corre com a virada de `_disposed`) segue **aberto**, e foi corretamente realocado para o item #5, cujo escopo (alargar o catch de `Task.WhenAll(pending)` em `DisposeAsync` para `Exception`) já o fecha. O relatório (`relatorio-viabilidade-ringbufferplus-v5.md`) foi atualizado com uma nota explícita de correção em vez de silenciosamente reescrito.
+- **Mecânica da correção de R3:** `Task.Run(() => callback(...), pulseTimeout.Token)` → `Task.Run(() => callback(...))` seguido de `.WaitAsync(pulseTimeout.Token)` sobre a task resultante (mesmo idioma do P0#2). `pulseTimeout` agora é ligado a `_lifetime` (`CreateLinkedTokenSource` + `CancelAfter`), igual ao padrão já usado em `CreateItemsAsync`/`CreateSingleReplacementAsync`, para reagir mais rápido a um shutdown.
+- **Decisão sobre o item em timeout:** `Invalidate()` — descarta e substitui via `ReplaceOne`, em vez de devolver ao pool enquanto o callback perdido pode ainda estar tocando nele. A task abandonada é observada via `ContinueWith` só para logar uma falha tardia, sem nunca ser aguardada de novo.
+
+### P0 #5 — Limpeza incondicional do `DisposeAsync` (F3, F5, R2, R12)
+
+- **Estrutura:** tudo entre `_lifetime.CancelAsync()` e o `await Task.WhenAll(pending)` movido para dentro de um `try`; a drenagem de `_availableItems` + o dispose de `_lifetime`/`_meter`/`_activitySource` movidos para um `finally` que roda sempre, mesmo se algo acima lançar.
+- **Decisão sobre logging no catch alargado:** em vez de um `catch (Exception)` totalmente silencioso (que seria a leitura literal do relatório), mantive `catch (OperationCanceledException)` silencioso (como já era — esperado no shutdown normal) e adicionei um `catch (Exception ex) { LogError(ex); }` separado — nunca relança, mas preserva alguma observabilidade de uma falha inesperada em um pump de fundo, em vez de ficar 100% silencioso.
+- **`TurnbackAsync`:** o handler de `ChannelClosedException` agora descarta o item (`DisposeItemAsync`) em vez de só ignorar — fecha F5 e R12 (mesmo caminho de código, mesma correção).
+- **F3 fechado como esperado:** o `ObjectDisposedException` do heartbeat continua acontecendo internamente (nada em `RunHeartbeatAsync` foi alterado nesta correção), mas agora fica contido pelo catch alargado do `Task.WhenAll(pending)` em vez de escapar do `DisposeAsync`.
+- **R2 fechado pela combinação de P0#2 + P0#5:** o await de `_warmup.Value` já não trava (P0#2 limitou o `WarmupCoreAsync` internamente com `_lifetime.Token`), e agora a limpeza é incondicional (P0#5) — não foi necessário adicionar um timeout separado a esse await especificamente, como o relatório original sugeriu como opção.
+
+### P0 #6 — README Quickstart + guia de DI (U-01, U-02)
+
+- **README:** adicionada `CancellationToken cancellation = default;` como segunda linha do Quickstart. Verificado com um probe fora do repositório: o snippet original falha com `CS0103` ×2 (confirmando U-01 exatamente), o snippet corrigido compila e executa.
+- **Guia de DI:** removida a instrução de injetar `IRingBufferManualScaleService<T>` diretamente (linha 46: "or the more specific type, if you inject that instead"; linha 54: a metade "inject/resolve it as..."). Texto agora afirma corretamente que só `IRingBufferService<T>` é registrado, e orienta o pattern-match — igual ao que o próprio sample (`WeatherForecastController.cs`) já faz.
+- **Correção adicional encontrada ao verificar o texto antes de editar:** a frase "Casting blindly throws `InvalidOperationException`" também estava errada — confirmei em `RingBufferBuilder.cs:130,158,179` que todo `Build()` (fixo, elástico, autoscale) chama o mesmo `BuildCore`, que sempre retorna `RingBufferManager<T>` (sempre implementa `IRingBufferManualScaleService<T>`), então o pattern-match/cast **nunca falha** — é a chamada subsequente a `SwitchToAsync` que lança, quando `ManualSwitchAllowed` é `false`. Corrigido o texto para refletir isso.
+- Nenhuma mudança de código de produção — puramente documental.
+## Registro de execução (log de iterações)
+
+| Data | Iteração | O que foi feito | Vermelho→Verde | Observações |
+|---|---|---|---|---|
+| 2026-08-20 | 0 | Relatório movido para `/TODO`; este plano de ação criado a partir da §3 do relatório | — | Nenhuma correção de código iniciada ainda |
+| 2026-08-20 | 1 | P0#1 implementado: `CreateItemsAsync`/`RemoveItemsAsync`/`CreateSingleReplacementAsync` agora capturam exceções não-cancelamento (não só timeout); `ProcessCommandAsync`/`ProcessTickAsync` resolvem o TCS do comando com a exceção real (`TrySetException`) ou logam (Fault/Tick/ReplaceOne), mantendo o engine vivo. Descoberta adicional durante a implementação (não estava nos relatórios originais): `Dispose()`/`DisposeAsync()` de um item do usuário lançando exceção durante scale-down (`RemoveItemsAsync`) também matava o engine pelo mesmo motivo — corrigido junto (helper `DisposeItemsDefensivelyAsync`). | 3 testes escritos (`WarmupAsync_WhenFactoryThrows_...`, `SwitchToAsync_WhenFactoryThrowsDuringScaleUp_...`, `AutoScaleAcquireFault_WhenTriggeredScaleUpFactoryThrows_...`) confirmados **vermelhos** contra o código não corrigido via `git stash` (falharam por travamento/autoscale morto, não por erro de compilação), depois **verdes** após reaplicar a correção. Suíte completa: 80/80 passando em net8.0/net9.0/net10.0, 0 warnings novos. | O 3º teste inicialmente usou `ElasticCapacity(2,2,6,...)` (init==min), que caiu no defeito R4 (não relacionado) e mascarou o resultado — corrigido para `ElasticCapacity(4,2,6,...)` para isolar só F1/R1. |
+| 2026-08-20 | 2 | P0#2 implementado: `WarmupCoreAsync`/`SwitchToAsync` agora limitam seus awaits de TCS do engine com `_lifetime.Token`. | Primeira tentativa de teste (comando `Switch` "atrás" de outro em processamento) **passou incorretamente** contra o código não corrigido — investigação revelou que o `Channel<T>` drena itens já bufferizados sem checar cancelamento, então esse cenário nunca reproduzia F4 de verdade. Reescrito como o repro original do relatório (`WarmupAsync()` + `DisposeAsync()` imediato, em loop de 10 iterações) — confirmado **vermelho** (falha na 2ª iteração, ~97% de taxa de reprodução medida em probe separado), depois **verde** após a correção, estável em 5 execuções repetidas. Suíte completa: 81/81 passando em net8.0/net9.0/net10.0, 0 warnings novos. | Ver decisão acima sobre a natureza de corrida real de F4 — o relatório original (seção 5, achado F4) foi mantido como está pois a conclusão prática (hang confirmado, corrigido) continua correta; a nuance do mecanismo está registrada aqui e não precisa de correção no relatório para não duplicar conteúdo. |
+| 2026-08-20 | 3 | P0#3 implementado: `RingBufferValue._disposed` (bool → int) e `RingBufferManager._disposeGuard` (novo campo int) agora usam `Interlocked.Exchange` na guarda de `DisposeAsync`. | **F2:** primeira tentativa de teste (`Barrier(2)` + `Task.Run`, 2000 iterações) **não reproduziu** (0/2000) — reescrito com threads dedicadas + `ManualResetEventSlim` para sincronização mais apertada (5000 iterações), confirmado **vermelho** (39/5000 duplicatas), depois **verde**, estável em 3 execuções repetidas (15000 tentativas). **F10:** mesma abordagem de thread dedicada tentada em escala (1000 iterações, ~12 min) — **não reproduziu** (0 exceções), igual ao probe original do relatório (0/300). Correção aplicada mesmo assim (regra 5, passo 3) e o teste caro/sem sinal foi removido da suíte. Suíte completa: 82/82 passando em net8.0/net9.0/net10.0, 0 warnings novos, ~1s de execução (sem o teste removido). | A diferença de reprodutibilidade entre F2 e F10 com o mesmo idioma de corrida está registrada na decisão acima. |
+| 2026-08-20 | 4 | **Correção de rastreamento antes de implementar:** F3 (Estabilidade) e R3 (Resiliência) foram identificados como bugs diferentes, não o mesmo — ver decisão acima. P0#4 implementado só para R3: `RunHeartbeatAsync` agora usa `Task.Run(callback)` + `.WaitAsync(pulseTimeout.Token)` (`pulseTimeout` ligado a `_lifetime`) em vez de passar o token direto ao `Task.Run`; no timeout, o item é invalidado (`Invalidate()`) em vez de devolvido ao pool, e a task abandonada é observada via `ContinueWith` para logar uma falha tardia sem nunca ser aguardada de novo. | 1 teste escrito (`HeartBeat_CallbackBlocksPastPulseBudget_DoesNotStopThePump_AndInvalidatesTheItem`) — primeira tentativa usou `FixedCapacity(1)`, que falhou por violar a validação de capacidade mínima (2); corrigido para `FixedCapacity(2)` com verificação de 2 acquires sequenciais para provar a substituição. Confirmado **vermelho** ("Heartbeat pump stopped after the first invocation blocked past its pulse budget"), depois **verde**, estável em 5 execuções repetidas. Suíte completa: 83/83 passando em net8.0/net9.0/net10.0, 0 warnings novos. | F3 continua aberto — será fechado junto com P0#5. |
+| 2026-08-20 | 5 | P0#5 implementado: `DisposeAsync` agora envolve tudo entre `_lifetime.CancelAsync()` e `Task.WhenAll(pending)` num `try`, com a drenagem de itens + dispose de `_lifetime`/`_meter`/`_activitySource` num `finally`; `Task.WhenAll(pending)` ganhou um segundo catch (`Exception ex) { LogError(ex); }`) além do `OperationCanceledException` silencioso já existente; `TurnbackAsync`'s catch de `ChannelClosedException` agora descarta o item em vez de só ignorar. Fecha F3 (rastreado desde a iteração 4), F5, R2 e R12. | **F3:** teste com `HeartBeat(_=>{}, 15ms)` + dispose imediato **não reproduziu** (0/400) — igual ao repro original do relatório, precisava de um atraso aleatório de 10-40ms entre warmup e dispose (não imediato); corrigido e confirmado **vermelho** com o stack trace exato do achado original (`ObjectDisposedException` em `AcquireAsync` via `RunHeartbeatAsync:683` escapando por `DisposeAsync:274`), depois **verde**. **F5/R12:** teste com um probe `IDisposable` compartilhado entre dois slots (`Capacity=MinCapacity=MaxCapacity=2`) confirmou **vermelho** (`DisposeCount` 1 em vez de 2 esperado — a drenagem descartava um slot, mas o item devolvido depois do dispose não), depois **verde**. Suíte completa: 85/85 passando em net8.0/net9.0/net10.0, 0 warnings novos. | Todos os 5 itens do P0 relacionados a `RingBufferManager`/`RingBufferValue` estão concluídos; resta só o item #6 (puramente documental). |
+| 2026-08-20 | 6 | P0#6 implementado: README Quickstart ganhou `CancellationToken cancellation = default;`; guia de DI perdeu a instrução de injetar `IRingBufferManualScaleService<T>` diretamente e ganhou a correção sobre o que de fato lança (`SwitchToAsync`, não o cast). Nenhuma mudança de código de produção. | README: probe fora do repo confirmou **vermelho** (`CS0103` ×2) com o snippet original, **verde** (compila e roda) com o corrigido. Guia de DI: correção verificada por leitura direta do código (`RingBufferBuilder.cs:130,158,179`, `RingBufferManager.cs:39`), sem necessidade de teste automatizado (é documentação, não há vermelho/verde de suíte aplicável). Build completo da solução: 0 erros, 0 warnings. | **Todos os 6 itens do P0 (bloqueadores de release) estão concluídos.** Próximo: P1 (§3 do relatório) ou as 3 decisões escaladas em §4, conforme preferência. |

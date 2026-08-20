@@ -43,7 +43,7 @@ public class WeatherForecastController(IRingBufferService<int> ringBufferService
 
 ## What happens internally
 
-`AddRingBuffer<T>` registers a singleton factory that, on first resolution, hands your callback an `IRingBufferBuilder<T>` plus the `IServiceProvider` — use the latter to pull in `IHostApplicationLifetime` (for the lifetime token) or any other registered dependency your `Factory` needs. Whatever concrete builder/service type your callback returns (`IRingBufferService<T>` or `IRingBufferManualScaleService<T>`) is what gets resolved for every `IRingBufferService<T>` (or the more specific type, if you inject that instead) injection point.
+`AddRingBuffer<T>` registers a singleton factory that, on first resolution, hands your callback an `IRingBufferBuilder<T>` plus the `IServiceProvider` — use the latter to pull in `IHostApplicationLifetime` (for the lifetime token) or any other registered dependency your `Factory` needs. Only `IRingBufferService<T>` is registered — regardless of the more specific type your callback's builder chain returns, injecting `IRingBufferManualScaleService<T>` directly is not possible; see the trade-off below for manual switching.
 
 `WarmupRingBufferAsync<T>(app, name, token?)` looks up the registered singleton by name among every `IRingBufferService<T>` for that `T`, then calls `WarmupAsync` on it — with the given `token`, or `IHostApplicationLifetime.ApplicationStopping` if none is passed. It throws `ArgumentNullException` if no buffer with that name and type was registered — it does not silently no-op.
 
@@ -51,7 +51,7 @@ Because the DI container owns the singleton's lifetime, disposal on host shutdow
 
 ## Trade-offs / limitations
 
-- If your buffer needs manual switching (`SwitchToAsync`), inject/resolve it as `IRingBufferManualScaleService<T>` — or, if you only have an `IRingBufferService<T>` in hand (e.g. it flowed through code that only knows the base type), pattern-match: `if (service is IRingBufferManualScaleService<int> manual) { ... }`. Casting blindly throws `InvalidOperationException` if the underlying builder went through `AutoScaleAcquireFault` (see [ADR007](../adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)).
+- If your buffer needs manual switching (`SwitchToAsync`), pattern-match the injected `IRingBufferService<T>`: `if (service is IRingBufferManualScaleService<int> manual) { ... }`. The pattern-match itself always succeeds; it is the subsequent call to `SwitchToAsync` that throws `InvalidOperationException` if the underlying builder went through `AutoScaleAcquireFault` (see [ADR007](../adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)).
 - Multiple `T`s each registered under `AddRingBuffer<T>` resolve independently — `WarmupRingBufferAsync<T>` only searches among services registered for that specific `T`, so a name collision across different `T`s is not a conflict.
 
 ## Common errors
