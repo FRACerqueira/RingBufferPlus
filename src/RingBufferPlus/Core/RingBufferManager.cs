@@ -92,10 +92,6 @@ namespace RingBufferPlus.Core
 
         public int SamplesCount { get; init; }
 
-        public int? ScaleDownInit { get; init; }
-
-        public int? ScaleDownMax { get; init; }
-
         public bool AutoScaleFault { get; init; }
 
         public byte NumberFault { get; init; }
@@ -371,7 +367,20 @@ namespace RingBufferPlus.Core
             if (!reached)
             {
                 var err = new InvalidOperationException("RingBuffer did not reach initial capacity");
-                LogError(err);
+                // An ordinary DisposeAsync() racing this warmup is not a genuine capacity failure - it
+                // surfaces as the very same "reached = false" (the engine loop resolves the command's
+                // completion with TrySetResult(false) when MoveToCapacityAsync throws
+                // OperationCanceledException, see RunEngineAsync). Logging it as an ERROR would
+                // mislead an on-call engineer into thinking the factory was unhealthy during a clean
+                // shutdown (same bug class as R15).
+                if (_lifetime.IsCancellationRequested)
+                {
+                    LogMessage("Warmup cancelled by shutdown before reaching initial capacity.");
+                }
+                else
+                {
+                    LogError(err);
+                }
                 throw err;
             }
 
@@ -535,7 +544,7 @@ namespace RingBufferPlus.Core
             }
             var median = AutoScaleDecision.Median(_samples);
             _samples.Clear();
-            var target = AutoScaleDecision.EvaluateScaleDown(median, IsInitCapacity, IsMaxCapacity, MinCapacity, Capacity, ScaleDownInit, ScaleDownMax);
+            var target = AutoScaleDecision.EvaluateScaleDown(median, CurrentCapacity, MinCapacity, Capacity, AutoScaleFault);
             if (target.HasValue)
             {
                 try
@@ -822,11 +831,13 @@ namespace RingBufferPlus.Core
                         await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
                         await acquired.DisposeAsync().ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException) when (!_lifetime.IsCancellationRequested)
+                    catch (OperationCanceledException) when (!heartbeatWork.IsCompleted)
                     {
-                        // The callback blocked past its pulse budget. It keeps running on its own
+                        // The callback is still running - either it blocked past its own pulse
+                        // budget (F12), or an ordinary shutdown cancelled _lifetime while the
+                        // callback was still going (F15). Either way it keeps running on its own
                         // thread-pool thread - a blocking synchronous callback cannot be forcibly
-                        // cancelled, so it may still be reading/writing the resource right now (F12).
+                        // cancelled, so it may still be reading/writing the resource right now.
                         // Two separate concerns, handled on two different timelines: replace the slot
                         // right away (via ReplaceOne directly, bypassing TurnbackAsync's combined
                         // dispose-then-replace) so capacity is not lost while the callback runs - same
@@ -836,7 +847,14 @@ namespace RingBufferPlus.Core
                         // caller's own object (a DB connection, a RabbitMQ channel). Its eventual
                         // outcome is still observed so a late fault cannot surface as an unobserved
                         // task exception.
-                        LogError(new TimeoutException("Timeout Heart Beat"));
+                        if (!_lifetime.IsCancellationRequested)
+                        {
+                            LogError(new TimeoutException("Timeout Heart Beat"));
+                        }
+                        else
+                        {
+                            LogMessage("Heart Beat cancelled by shutdown, callback still running - deferring dispose.");
+                        }
                         _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
                         _ = heartbeatWork.ContinueWith(async t =>
                         {

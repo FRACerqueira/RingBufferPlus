@@ -1304,6 +1304,59 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // 1.22b - An ordinary DisposeAsync() racing a still-blocked heartbeat callback must not
+        // dispose the resource either (F15, Rodada 3): the F12 fix's guard,
+        // "when (!_lifetime.IsCancellationRequested)", correctly isolates a genuine pulse-budget
+        // timeout, but excludes the case where _lifetime itself is what cancelled the same linked
+        // pulseTimeout - an ordinary shutdown, not a timeout. That case fell through to the
+        // generic catch, which disposed the resource immediately - the exact race F12 had already
+        // fixed for the timeout path, reopened for the shutdown path. See
+        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, F15.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAStillBlockedHeartbeatCallback_DoesNotDisposeTheResourceWhileStillInUse()
+        {
+            DisposableProbe? firstProbe = null;
+            using var callbackStarted = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+
+            IRingBufferBuilder<DisposableProbe> builder = new RingBufferBuilder<DisposableProbe>("ContractDisposeRacesBlockedHeartbeat", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new DisposableProbe()))
+                .HeartBeat(value =>
+                {
+                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
+                        && !ReferenceEquals(firstProbe, value.Current))
+                    {
+                        return;
+                    }
+                    callbackStarted.Set();
+                    // A pulse budget of 5s means DisposeAsync() below - fired well inside that
+                    // budget - is an ordinary shutdown, not a pulse-budget timeout.
+                    releaseCallback.Wait(TimeSpan.FromSeconds(5));
+                    value.Current.Touch();
+                }, pulse: TimeSpan.FromSeconds(5))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            // pulse also governs the interval before the first heartbeat fires, so the callback
+            // only starts around the 5s mark - wait comfortably past that.
+            Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(7)), "Expected the heartbeat callback to start.");
+
+            // Dispose while the callback is still blocked, well inside its 5s pulse budget.
+            await service.DisposeAsync();
+
+            releaseCallback.Set();
+            // Give the callback time to wake up and call Touch().
+            await Task.Delay(300);
+
+            Assert.NotNull(firstProbe);
+            Assert.False(firstProbe!.TouchedAfterDispose, "Expected the resource to still be usable by the callback at the moment it touches it - an ordinary shutdown must not dispose it while the callback might still be using it.");
+        }
+
+        // ---------------------------------------------------------------------
         // 1.23 - maxConsecutiveFactoryFailures (R14, Rodada 2): default (0) must keep today's
         // fail-fast behavior (a single item's failure still gives up on the rest of the batch);
         // opting in to a higher value must let the batch keep trying the remaining not-yet-
@@ -1452,6 +1505,116 @@ namespace RingBufferPlus.Tests
             await service.DisposeAsync();
 
             Assert.DoesNotContain(errors, ex => ex is TimeoutException te && te.Message.Contains("Timeout factory (replacement)"));
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.25 - An ordinary DisposeAsync() racing an in-progress WarmupAsync() must not be logged
+        // as "RingBuffer did not reach initial capacity" (Finding A, Rodada 3 - Resiliência): the
+        // warmup completion wait is bounded by _lifetime.Token so a concurrent dispose does not
+        // hang it forever, but the catch that observes that cancellation treated it identically to
+        // a genuine factory failure to reach capacity, logging it as an ERROR during an ordinary
+        // clean shutdown. Same bug class as R15, in a code path R15 did not touch. See TODO/
+        // relatorio-viabilidade-ringbufferplus-v5.md, Finding A (Resiliência, Rodada 3).
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAnInProgressWarmup_DoesNotLogAFalseCapacityFailure()
+        {
+            var errors = new List<Exception>();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringWarmupNoFalseFailure", null);
+            var service = builder
+                .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(5), ct); return 1; }, TimeSpan.FromSeconds(10))
+                .OnError((_, ex) => errors.Add(ex))
+                .FixedCapacity(2)
+                .Build();
+
+            var warmupTask = service.WarmupAsync();
+            // Give the engine time to dequeue Warmup and start CreateItemsAsync (the factory is
+            // mid-delay) before racing it with a normal dispose.
+            await Task.Delay(200);
+            await service.DisposeAsync();
+            await Record.ExceptionAsync(() => warmupTask);
+
+            Assert.DoesNotContain(errors, ex => ex is InvalidOperationException ioe && ioe.Message.Contains("did not reach initial capacity"));
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.26 - A fault-triggered scale-up that only partially succeeds (R14's tolerated
+        // failures) can land off-tier, strictly between Capacity and MaxCapacity. Idleness there
+        // must still eventually trigger a scale-down (R16, Rodada 3) instead of getting stuck at
+        // that off-tier capacity forever: AutoScaleDecision.EvaluateScaleDown originally only ever
+        // evaluated at the exact initial or maximum capacity, using a safety margin computed once
+        // from Min/Init/MaxCapacity - unreachable from most off-tier positions. See TODO/
+        // relatorio-viabilidade-ringbufferplus-v5.md, R16.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_PartialScaleUpLandsOffTier_StillEventuallyScalesDown()
+        {
+            var callCount = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractOffTierScaleDown", null);
+            var service = builder
+                .Factory(_ =>
+                {
+                    var n = Interlocked.Increment(ref callCount);
+                    if (n <= 4)
+                    {
+                        // Warmup fill (Capacity=4) - always succeeds.
+                        return Task.FromResult(1);
+                    }
+                    var scaleUpAttempt = n - 4;
+                    if (scaleUpAttempt % 2 == 1)
+                    {
+                        // Odd attempts fail, even attempts succeed - never 2 consecutive
+                        // failures, so maxConsecutiveFactoryFailures: 1 tolerates every one of
+                        // them and the batch runs to completion. 3 of the 6 requested items
+                        // succeed, landing capacity at 4 + 3 = 7, strictly between Capacity(4)
+                        // and MaxCapacity(10).
+                        throw new InvalidOperationException("Simulated transient factory failure.");
+                    }
+                    return Task.FromResult(1);
+                }, TimeSpan.FromSeconds(5), maxConsecutiveFactoryFailures: 1)
+                .ElasticCapacity(4, 2, 10, 3, TimeSpan.FromMilliseconds(600))
+                .AutoScaleAcquireFault(1)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .Build();
+            await service.WarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 4; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Pool is empty - this acquire times out and enqueues the autoscale Fault, which
+            // attempts to scale 4 -> 10 but only partially succeeds (3 of 6), landing at 7.
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            var landedOffTierDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.CurrentCapacity != 7 && DateTime.UtcNow < landedOffTierDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(7, service.CurrentCapacity);
+
+            // Release everything so the pool becomes fully idle - the scale-down-eligible
+            // condition.
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+
+            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.CurrentCapacity == 7 && DateTime.UtcNow < scaleDownDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.CurrentCapacity < 7, "Expected the off-tier capacity (7) to still be eligible for scale-down once idle, instead of being stuck there forever.");
+
+            await service.DisposeAsync();
         }
     }
 }

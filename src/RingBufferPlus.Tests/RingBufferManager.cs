@@ -32,8 +32,6 @@ namespace RingBufferPlus.Tests
                 PulseHeartBeat = TimeSpan.FromSeconds(1),
                 SamplesBase = TimeSpan.FromSeconds(1),
                 SamplesCount = 5,
-                ScaleDownInit = 3,
-                ScaleDownMax = 15,
                 AutoScaleFault = true,
                 NumberFault = 3,
                 AcquireTimeout = TimeSpan.FromSeconds(1),

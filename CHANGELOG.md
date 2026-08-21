@@ -38,6 +38,9 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - A heartbeat callback that blocks past its pulse budget no longer risks a use-after-dispose race on the resource it's still holding — the slot is still replaced promptly (as before), but the stuck resource itself is now only disposed once the orphaned callback actually finishes.
 - A scale-up (or heartbeat-triggered replacement) that only partially completes now keeps trying the remaining items instead of abandoning them on the first item's failure/timeout, when `maxConsecutiveFactoryFailures` is opted into (see Added, above).
 - A normal `DisposeAsync` racing an in-progress scale-up or replacement is no longer logged as a factory `TimeoutException` - only a genuine per-item/overall timeout is.
+- A normal `DisposeAsync` racing a heartbeat callback that is still running no longer disposes the pooled resource out from under it - this now holds regardless of whether the callback is still inside its own pulse budget, closing a gap the previous fix (above) left open for the ordinary-shutdown case.
+- A normal `DisposeAsync` racing an in-progress `WarmupAsync()` is no longer logged as `InvalidOperationException("RingBuffer did not reach initial capacity")` - only a genuine failure to reach capacity is.
+- Autoscale-on-fault's scale-down evaluation no longer gets permanently stuck at an off-tier capacity left by a partial scale-up/down (e.g. `maxConsecutiveFactoryFailures` tolerating some failures during a scale-up) - it now re-evaluates from wherever the buffer actually is, using a safety margin scaled to that capacity instead of one fixed to the exact initial/maximum tier.
 
 ## [5.0.0] - 2026-08-12
 

@@ -11,6 +11,7 @@ It is generated automatically by the `AdrIndexer` AdrPlus plugin — do not edit
 | [ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down](ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md) | Concurrency model for RingBufferManager scale up and down | V02 | Accepted (2026-08-20) |
 | [ADR002V01-multi-targeting-policy-for-net8-net9-net10-and-test-matrix](ADR002V01-multi-targeting-policy-for-net8-net9-net10-and-test-matrix.md) | Multi-targeting policy for net8 net9 net10 and net10-only CI test execution | V01 | Accepted (2026-08-11) |
 | [ADR003V01-median-sample-autoscaling-algorithm](ADR003V01-median-sample-autoscaling-algorithm.md) | Median-sample autoscaling algorithm | V01 | Accepted (2026-08-11) |
+| [ADR003V02-median-sample-autoscaling-algorithm](ADR003V02-median-sample-autoscaling-algorithm.md) | Median-sample autoscaling algorithm | V02 | Accepted (2026-08-21) |
 | [ADR004V01-semantic-versioning-policy-and-fluent-api-stability](ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md) | Semantic versioning policy and fluent API stability | V01 | Accepted (2026-08-11) |
 | [ADR004V02-semantic-versioning-policy-and-fluent-api-stability](ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md) | Semantic versioning policy and fluent API stability | V02 | Accepted (2026-08-20) |
 | [ADR005V01-async-disposal-strategy-and-graceful-shutdown](ADR005V01-async-disposal-strategy-and-graceful-shutdown.md) | Async disposal strategy and graceful shutdown | V01 | Accepted (2026-08-11) |

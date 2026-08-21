@@ -31,7 +31,11 @@ namespace RingBufferPlus
         /// otherwise healthy batch. Default is 0: the first failure gives up on the rest of the batch
         /// immediately (whatever succeeded before it is still kept) - the same behavior as before this
         /// parameter existed. Raise it if your factory has occasional, recoverable hiccups and you want
-        /// the batch to keep trying the remaining items instead of abandoning them.</param>
+        /// the batch to keep trying the remaining items instead of abandoning them. If a tolerated
+        /// failure is itself a <paramref name="timeout"/> rather than a fast exception, raising this
+        /// value multiplies <paramref name="timeout"/>'s own worst-case blocking effect: the batch can
+        /// now stay blocked for roughly <c>(maxConsecutiveFactoryFailures + 1) * timeout</c> before
+        /// giving up on a given item, not just <paramref name="timeout"/>.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 
@@ -91,13 +95,19 @@ namespace RingBufferPlus
         /// </summary>
         /// <remarks>
         /// The scale-up process is executed when the failure threshold defined by <paramref name="numberOfFaults"/> is reached.
-        /// The scale-down process is performed based on the initial or maximum capacity when the number of
-        /// available buffers is greater than a value. There is no scale-down from minimum capacity: minimum capacity is the floor.
+        /// A scale-up (or scale-down) that only partially completes can land the buffer strictly between two
+        /// named capacities - scale-down evaluation still applies from there, not only from the exact initial
+        /// or maximum capacity. There is no scale-down from minimum capacity: minimum capacity is the floor.
         /// <para>
-        /// The scale-down when it is at initial capacity is calculated using the formula: Initial capacity - Minimum capacity + 2.
+        /// While above initial capacity (including, but not limited to, exactly maximum capacity), the
+        /// scale-down target is initial capacity, evaluated using the formula: current capacity - initial
+        /// capacity + 2. At exactly maximum capacity this is the same as: maximum capacity - initial capacity + 2.
         /// </para>
         /// <para>
-        /// The scale-down when it is at maximum capacity is calculated using the formula: Maximum capacity - Initial capacity + 2.
+        /// While at or below initial capacity (including, but not limited to, exactly initial capacity),
+        /// down to minimum capacity, the scale-down target is minimum capacity, evaluated using the formula:
+        /// current capacity - minimum capacity + 2. At exactly initial capacity this is the same as: initial
+        /// capacity - minimum capacity + 2.
         /// </para>
         /// <para>
         /// The scale-down process is executed when the calculated median of the samples collected via

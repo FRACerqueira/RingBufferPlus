@@ -59,7 +59,6 @@ namespace RingBufferPlusBasicTriggerScale
             {
                 await using (var buffer2 = await rb.AcquireAsync(cts.Token))
                 {
-                    //AcquireAsync fault
                     await using (var buffer3 = await rb.AcquireAsync(cts.Token))
                     {
                         Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
@@ -80,9 +79,9 @@ namespace RingBufferPlusBasicTriggerScale
             {
                 await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
                 {
-                    //AcquireAsync fault
                     await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
                     {
+                        //AcquireAsync fault
                         await using (var buffer4 = await rb.AcquireAsync(tokenapplifetime))
                         {
                             Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");

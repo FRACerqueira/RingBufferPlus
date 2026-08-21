@@ -49,6 +49,10 @@ Two things that are easy to miss because they follow directly from what counts a
 - This is always on — there is no builder method to disable it. It costs nothing to leave alone if you don't use it; there is nothing to configure either.
 - No RingBufferPlus-specific NuGet package is needed on either end: the emitting side needs none (see [ADR008](../adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md)), and the consuming side just needs whatever OpenTelemetry SDK/exporter you'd use for any other `System.Diagnostics.DiagnosticSource`-based library.
 
+## Logging: a normal shutdown is not the same signal as a genuine timeout
+
+This guide otherwise covers `Meter`/`ActivitySource` only — `Logger`/`OnError` (see [the heartbeat guide](usage-heartbeat.md) and [the background logger guide](usage-background-logger.md)) are a separate signal, but this distinction is worth knowing if you alert on logged errors: a scale-up or item-replacement factory call that is still in flight when `DisposeAsync()` runs (an ordinary, clean shutdown racing a background operation) logs informationally via `Logger`/`OnError` (e.g. `"ScaleUp cancelled by shutdown..."`) — it does **not** log a `TimeoutException` at error level. Only a genuine per-item or overall `FactoryTimeout` expiring still produces a `LogError`-level `TimeoutException`. If your alerting treats every logged `TimeoutException` from this library as a factory/broker health signal, a clean restart racing a scale operation should no longer trip it — and if you previously saw such an error disappear after upgrading, this is why.
+
 ## Common errors
 
 - Expecting `AddMeter("RingBufferPlus")`/`AddSource("RingBufferPlus")` to only pick up one specific buffer — they subscribe by name, not by instance; every buffer in the process with that default name shares the subscription. Use the `buffer.name` tag/attribute to split them apart in your dashboard/query, not a separate subscription per buffer.

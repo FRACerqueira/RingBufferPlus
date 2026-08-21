@@ -26,8 +26,6 @@ namespace RingBufferPlus.Core
         private int _minCapacity;
         private int _maxCapacity;
         private int _sampleUnit;
-        private int? _scaledownInit;
-        private int? _scaledownMax;
         private bool _elastic;
         private bool _autoScaleFault;
         private byte _numberFault;
@@ -204,8 +202,6 @@ namespace RingBufferPlus.Core
                 PulseHeartBeat = _pulseHeartBeat,
                 SamplesBase = _samplebasetime,
                 SamplesCount = _sampleUnit,
-                ScaleDownInit = _scaledownInit,
-                ScaleDownMax = _scaledownMax,
                 AutoScaleFault = _autoScaleFault,
                 NumberFault = _numberFault,
                 AcquireTimeout = _acquireTimeout,
@@ -277,17 +273,6 @@ namespace RingBufferPlus.Core
                     LogError(err);
                     throw err;
                 }
-            }
-
-            if (_autoScaleFault)
-            {
-                _scaledownInit = _initcapacity - _minCapacity + 2;
-                _scaledownMax = _maxCapacity - _initcapacity + 2;
-            }
-            else
-            {
-                _scaledownInit = null;
-                _scaledownMax = null;
             }
         }
 

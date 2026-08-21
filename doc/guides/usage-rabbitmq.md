@@ -42,6 +42,7 @@ Each `Factory` call opens one new `IChannel` on the shared `IConnection` you alr
 
 - The underlying `IConnection` is a single point of failure shared by every pooled channel — this library does not reconnect it for you. If the connection drops, every subsequent `Factory` call (on scale-up or item replacement) fails, and existing `AcquireAsync` calls degrade to `Successful = false` once their channels are exhausted or broken.
 - `AutoScaleAcquireFault` reacts to *publish-side* backpressure (acquire timeouts), not to broker-side conditions (e.g. a slow consumer causing publisher confirms to back up) — those need their own monitoring.
+- If channel creation on the broker fails only occasionally (transient, not the connection-lost case above), `Factory(value, timeout, maxConsecutiveFactoryFailures)` lets a scale-up/warmup batch tolerate a run of consecutive failures and keep trying the remaining items instead of abandoning the whole batch on the first one — see the [autoscale guide](usage-elastic-autoscale.md) for the trade-off this introduces with `FactoryTimeout`.
 
 ## Common errors
 

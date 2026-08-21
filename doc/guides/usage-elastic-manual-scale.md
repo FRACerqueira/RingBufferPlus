@@ -28,7 +28,7 @@ await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
 await rb.DisposeAsync();
 ```
 
-`ElasticCapacity(...)` returns an `IRingBufferElasticBuilder<T>`, which is where `MinCapacity`/`MaxCapacity` become meaningful and `SwitchToAsync` becomes available on the built service — as long as you don't also call `AutoScaleAcquireFault` (that combination is covered by the [autoscale guide](usage-elastic-autoscale.md), and the two are mutually exclusive by design, see [ADR007](../adr/ADR007V01-redesign-of-the-public-fluent-api-surface.md)).
+`ElasticCapacity(...)` returns an `IRingBufferElasticBuilder<T>`, which is where `MinCapacity`/`MaxCapacity` become meaningful and `SwitchToAsync` becomes available on the built service — as long as you don't also call `AutoScaleAcquireFault` (that combination is covered by the [autoscale guide](usage-elastic-autoscale.md), and the two are mutually exclusive by design, see [ADR007](../adr/ADR007V02-redesign-of-the-public-fluent-api-surface.md)).
 
 ## What happens internally
 

@@ -20,11 +20,11 @@ An instance of [`IRingBufferAutoScaleBuilder`](../IRingBufferAutoScaleBuilder-1.
 
 ### Remarks
 
-The scale-up process is executed when the failure threshold defined by *numberOfFaults* is reached. The scale-down process is performed based on the initial or maximum capacity when the number of available buffers is greater than a value. There is no scale-down from minimum capacity: minimum capacity is the floor.
+The scale-up process is executed when the failure threshold defined by *numberOfFaults* is reached. A scale-up (or scale-down) that only partially completes can land the buffer strictly between two named capacities - scale-down evaluation still applies from there, not only from the exact initial or maximum capacity. There is no scale-down from minimum capacity: minimum capacity is the floor.
 
-The scale-down when it is at initial capacity is calculated using the formula: Initial capacity - Minimum capacity + 2.
+While above initial capacity (including, but not limited to, exactly maximum capacity), the scale-down target is initial capacity, evaluated using the formula: current capacity - initial capacity + 2. At exactly maximum capacity this is the same as: maximum capacity - initial capacity + 2.
 
-The scale-down when it is at maximum capacity is calculated using the formula: Maximum capacity - Initial capacity + 2.
+While at or below initial capacity (including, but not limited to, exactly initial capacity), down to minimum capacity, the scale-down target is minimum capacity, evaluated using the formula: current capacity - minimum capacity + 2. At exactly initial capacity this is the same as: initial capacity - minimum capacity + 2.
 
 The scale-down process is executed when the calculated median of the samples collected via [`ElasticCapacity`](../IRingBufferBuilder-1/ElasticCapacity.md) reaches those values.
 

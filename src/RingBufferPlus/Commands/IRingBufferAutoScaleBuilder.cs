@@ -36,7 +36,11 @@ namespace RingBufferPlus
         /// scattered across an otherwise healthy batch. Default is 0: the first failure gives up on the
         /// rest of the batch immediately (whatever succeeded before it is still kept) - the same behavior
         /// as before this parameter existed. Raise it if your factory has occasional, recoverable hiccups
-        /// and you want the batch to keep trying the remaining items instead of abandoning them.</param>
+        /// and you want the batch to keep trying the remaining items instead of abandoning them. If a
+        /// tolerated failure is itself a <paramref name="timeout"/> rather than a fast exception, raising
+        /// this value multiplies <paramref name="timeout"/>'s own worst-case blocking effect: the batch
+        /// can now stay blocked for roughly <c>(maxConsecutiveFactoryFailures + 1) * timeout</c> before
+        /// giving up on a given item, not just <paramref name="timeout"/>.</param>
         /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         IRingBufferAutoScaleBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 

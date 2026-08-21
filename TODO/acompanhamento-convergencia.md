@@ -2,29 +2,39 @@
 
 Complementa [relatorio-viabilidade-ringbufferplus-v5.md](./relatorio-viabilidade-ringbufferplus-v5.md) (achados, ponto no tempo, atualizado in-place com ✅) e [plano-de-acao.md](./plano-de-acao.md) (decisões e log de execução, iteração a iteração).
 
-**Objetivo deste documento:** este processo de auditoria não é um evento único — ele se repete (nova rodada de revisão de estabilidade/resiliência/usabilidade) até que os resultados convirjam para um estado estável. Os outros dois documentos respondem "o que está errado" e "o que foi feito"; este responde uma terceira pergunta, que nenhum dos dois cobre bem: **a série de rodadas está convergindo (menos achados, severidade caindo, sem regressão) ou divergindo (achados novos aparecendo, severidade subindo)?** Atualizado só ao final de cada rodada completa de auditoria — não a cada iteração/fix (isso já é o papel do `plano-de-acao.md`).
+**Objetivo deste documento:** este processo de auditoria não é um evento único — ele se repete (nova rodada de revisão, ver escopo abaixo) até que os resultados convirjam para um estado estável. Os outros dois documentos respondem "o que está errado" e "o que foi feito"; este responde uma terceira pergunta, que nenhum dos dois cobre bem: **a série de rodadas está convergindo (menos achados, severidade caindo, sem regressão) ou divergindo (achados novos aparecendo, severidade subindo)?** Atualizado só ao final de cada rodada completa de auditoria — não a cada iteração/fix (isso já é o papel do `plano-de-acao.md`).
+
+## Escopo da auditoria — pilares por rodada
+
+O escopo (quais pilares cada passe independente cobre) é decidido com o mantenedor antes de cada rodada — não é reaproveitado silenciosamente da rodada anterior (ver nota abaixo). Histórico:
+
+| Rodadas | Pilares | Nota |
+|---|---|---|
+| 1–3 | Estabilidade, Resiliência, Usabilidade | Escopo original, definido na primeira mensagem desta auditoria. |
+| 4+ | Estabilidade, Resiliência, Usabilidade, **Observabilidade** | Adicionado permanentemente a partir da Rodada 4 (2026-08-20), inclusive — vale para a Rodada 4 e para **todas** as rodadas seguintes (5, 6, ...), não é um passe pontual só daquela rodada. Evidência de duas rodadas mostrando o mesmo padrão pego só de raspão pelo passe de Resiliência: R8 (Rodada 1, métricas de scale reportando sucesso em operações que falharam) e R15 (Rodada 2, log de `TimeoutException` num shutdown normal). O comportamento estava certo (ou já corrigido); o *sinal* que chega a quem opera em produção é que mentia. Fernando perguntou explicitamente se havia um pilar não observado, e confirmou a adição a partir da Rodada 4 (as Rodadas 2 e 3 não tiveram essa pergunta refeita antes de serem lançadas — lacuna de processo identificada e registrada, ver `plano-de-acao.md`). |
 
 ## Critério de convergência
 
 Considera-se convergido/estável quando, por **2 rodadas consecutivas**:
 
-- Zero achados abertos de severidade Crítica ou Alta, em qualquer um dos 3 pilares (Estabilidade, Resiliência, Usabilidade).
+- Zero achados abertos de severidade Crítica ou Alta, em qualquer um dos pilares em escopo naquela rodada (ver tabela acima — 3 pilares até a Rodada 3, 4 a partir da Rodada 4).
 - Nenhum achado novo introduzido pela própria correção da rodada anterior (regressão).
 - O total de achados abertos não cresce rodada a rodada.
 
-Antes disso, o processo está "em convergência, ainda não estável" (achados abertos caindo, mas ainda não bateu o critério) ou "divergindo" (achados abertos ou severidade subindo).
+Antes disso, o processo está "em convergência, ainda não estável" (achados abertos caindo, mas ainda não bateu o critério) ou "divergindo" (achados abertos ou severidade subindo). Uma rodada que amplia o escopo (like a Rodada 4) naturalmente pode revelar achados novos que rodadas anteriores, com escopo menor, não tinham como encontrar — isso não é "divergência", é escopo maior enxergando mais.
 
 ## Estado atual
 
 | | |
 |---|---|
-| Rodada corrente | 2 — ✅ **encerrada** (todos os achados acionáveis corrigidos; restam só F13/F14/R16, registrados por completude, sem ação planejada) |
+| Rodada corrente | 3 — ✅ **encerrada** (todos os achados acionáveis corrigidos, incluindo o lote de Usabilidade F-U30 a F-U34; restam só R13/F13/F14/R18, registrados por completude/decisão, sem ação planejada) |
 | Status da Rodada 1 | ✅ **Encerrada.** P0/P1/P2/P3 100% concluídos, commit `526c8ba` enviado (`git push`, `develop`). 47/48 achados fechados; só o R13 (parcial — lado documentável fechado, arquitetura fora de escopo) ficou aberto. |
 | Status da Rodada 2 | ✅ **Encerrada.** Levantamento (3 passes independentes, 2026-08-20) — **0 regressões** nos 47 achados fechados da Rodada 1. 11 achados novos; **F12 (Alta), R14 (Média-Alta), R15 (Baixa-Média) e o lote de documentação (U-25 a U-29) — todos corrigidos** (vermelho→verde onde havia comportamento, 102/102 em net10.0). Restam apenas F13/F14/R16, registrados por completude, sem reprodução, sem ação planejada. |
-| Total de achados (acumulado) | 59 (48 da Rodada 1 + 11 novos da Rodada 2) |
-| Fechados até agora | 55 / 59 (93%) |
-| Abertos até agora | 4 / 59 — **zero Crítico, zero Alto** — R13 (parcial, decisão), F13/F14/R16 (registrados por completude, sem ação planejada) |
-| Critério de convergência atingido? | Não ainda — precisa de 2 rodadas consecutivas "limpas" (zero Crítico/Alto). A Rodada 2, no levantamento inicial, teve o F12 (Alta) aberto — então não conta como limpa mesmo já corrigida agora. A Rodada 3 é a primeira candidata real a contar. |
+| Status da Rodada 3 | ✅ **Encerrada.** Re-auditoria completa (3 passes independentes, mesmo escopo de 3 pilares — a Rodada 3 já estava lançada quando a lacuna do escopo foi identificada, então manteve os 3 originais; Observabilidade entra a partir da Rodada 4) contra o estado pós-Rodada-2. **0 regressões** nos achados fechados. **F15 (Alta), R16 (reavaliado de Baixa para Média, reproduzido), R17 (Média, novo) e o lote de Usabilidade (F-U30 a F-U34) — todos corrigidos** com vermelho→verde onde havia comportamento (107/107 em net8.0/net9.0/net10.0, doc/comentário-only para o lote de Usabilidade); R13×R14 ganhou uma nota de documentação. Uma revisão adicional do advisor sobre a própria correção do R16, antes de encerrar, achou 3 lacunas: doc XML de `AutoScaleAcquireFault` desatualizada (corrigida), o ADR003 promovido para **V02** (emenda registrando o refinamento, decisão do mantenedor), e um caso degenerado pré-existente (`initialCapacity = 2`) registrado como **R18**, sem correção nesta rodada (decisão do mantenedor). Restam F13/F14/R18 (registrados, sem ação planejada). |
+| Total de achados (acumulado) | 67 (48 da Rodada 1 + 11 da Rodada 2 + 8 novos da Rodada 3: F15, R17, R18, F-U30 a F-U34) |
+| Fechados até agora | 63 / 67 (94%) |
+| Abertos até agora | 4 / 67 — **zero Crítico, zero Alto** — R13 (parcial, decisão), F13/F14 (registrados por completude, sem ação planejada), R18 (registrado por decisão, sem ação planejada) |
+| Critério de convergência atingido? | Não ainda — precisa de 2 rodadas consecutivas "limpas" (zero Crítico/Alto **no levantamento inicial**, não só depois de corrigido). A Rodada 2 teve o F12 (Alta) no levantamento inicial — não conta. A Rodada 3 teve o F15 (Alta) no levantamento inicial — também não conta, mesmo já corrigido agora. A Rodada 4 é a primeira candidata real a contar como "limpa" se seu próprio levantamento inicial não trouxer Crítico/Alto. |
 
 ## Tabela de rodadas
 
@@ -32,20 +42,23 @@ Antes disso, o processo está "em convergência, ainda não estável" (achados a
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | 1 | 2026-08-20 | v5.1.0 | Auditoria inicial (3 passes independentes: Estabilidade, Resiliência, Usabilidade) sobre a v5.0.0 publicada | 0 (de 4) | 0 (de 13) | 2 (de 14)¹ | 1 (de 17)² | 1 (de 48) | 47 | 1 (R13 — descoberta, não regressão) | Estabilidade: ✅ pronto. Resiliência: ✅ pronto (exceto R13, decisão fora de escopo). Usabilidade: ✅ pronto. |
 | 2 | 2026-08-20 | v5.1.0 | Re-auditoria completa (3 passes independentes, mesma metodologia) contra o estado pós-P3 | 0 | 1 (F12) | 3 (R13, R14, U-25)³ | 8 (F13, F14, R15, R16, U-26 a U-29)⁴ | 12 (de 59) | 0 | 11 (F12-F14, R14-R16, U-25 a U-29 — descobertas, não regressões) | Estabilidade: 1 achado Alta confirmado, ainda não corrigido. Resiliência: 1 achado Média-Alta confirmado, ainda não corrigido. Usabilidade: ressalvas menores remanescentes. |
+| 3 | 2026-08-20/21 | v5.1.0 | Re-auditoria completa (3 passes independentes, mesmo escopo de 3 pilares) contra o estado pós-Rodada-2, com reconfirmação explícita das correções da própria Rodada 2 além de achados novos; mais uma revisão adicional do advisor sobre a própria correção do R16, antes de encerrar | 0 | 0 (F15 corrigido) | 1 (R13, parcial — R16/R17 corrigidos) | 3 (F13, F14, R18 — F-U30 a F-U34 corrigidos) | 4 (de 67) | 8 (F15, R16, R17, F-U30 a F-U34) | 8 (F15, R17, R18, F-U30 a F-U34 — descobertas; R16 é reavaliação de um achado já existente, não uma descoberta nova) | Estabilidade: 1 achado Alta confirmado e corrigido (F15) — mesma causa raiz achada de forma independente pela Resiliência (Finding B). Resiliência: R14/R15 reconfirmados corretos; R16 reavaliado (Baixa→Média, reproduzido) e corrigido, com um caso degenerado pré-existente registrado como R18 (Baixa, sem correção); R17 novo (Média) e corrigido; R13 quantificado (amplificação com R14), doc-only. Usabilidade: 5 achados de documentação/comentários (F-U30 a F-U34), decididos por severidade e todos corrigidos. |
 
 ¹ Rodada 1, final: dos 14 originalmente "Média", só R13 (Média) ficou aberto no fechamento do P3 — mas a Rodada 2 reclassifica o total acumulado; ver detalhamento abaixo. ² Rodada 1 final: nenhum "Baixa" restou aberto (todos fechados no P3) — a coluna soma 1 só pela contagem combinada com a Rodada 2. ³ Rodada 2: Média-Alta (R14) + Média (R13, U-25). ⁴ Rodada 2: Baixa-Média (R15, U-26) + Baixa (F13, F14, R16, U-27, U-28, U-29). Ver detalhamento por severidade abaixo para os números exatos por rodada.
 
 ### Detalhamento por severidade
 
-| Severidade | Rodada 1 (total/fechados/abertos) | Rodada 2 (total/fechados/abertos) | Aberto acumulado |
-|---|---|---|---|
-| Crítica | 4 / 4 / 0 | — | 0 |
-| Alta | 13 / 13 / 0 | F12 (1/1/0 ✅) | 0 |
-| Média-Alta | 1 / 1 / 0 | R14 (1/1/0 ✅) | 0 |
-| Média | 13 / 12 / 1 (R13) | U-25 ✅ (1/1/0) | 1 |
-| Baixa-Média | 2 / 2 / 0 | R15 ✅, U-26 ✅ (2/2/0) | 0 |
-| Baixa | 15 / 15 / 0 | F13, F14, R16 (abertos), U-27 ✅, U-28 ✅, U-29 ✅ (6/3/3) | 3 |
-| **Total** | **48 / 47 / 1** | **11 / 8 / 3** | **4 (de 59)** |
+| Severidade | Rodada 1 (total/fechados/abertos) | Rodada 2 (total/fechados/abertos) | Rodada 3 (total/fechados/abertos) | Aberto acumulado |
+|---|---|---|---|---|
+| Crítica | 4 / 4 / 0 | — | — | 0 |
+| Alta | 13 / 13 / 0 | F12 (1/1/0 ✅) | F15 (1/1/0 ✅) | 0 |
+| Média-Alta | 1 / 1 / 0 | R14 (1/1/0 ✅) | — | 0 |
+| Média | 13 / 12 / 1 (R13) | U-25 ✅ (1/1/0) | R17 ✅, F-U30 ✅ (2/2/0)¹ | 1 (R13, parcial) |
+| Baixa-Média | 2 / 2 / 0 | R15 ✅, U-26 ✅ (2/2/0) | F-U31 ✅, F-U32 ✅ (2/2/0) | 0 |
+| Baixa | 15 / 15 / 0 | F13, F14, R16 (abertos), U-27 ✅, U-28 ✅, U-29 ✅ (6/3/3) | F-U33 ✅, F-U34 ✅, R18 (3/2/1)¹ | 3 (F13, F14, R18) |
+| **Total** | **48 / 47 / 1** | **11 / 8 / 3** | **8 / 7 / 1** | **4 (de 67)** |
+
+¹ **R16** (registrado na Rodada 2 como Baixa, não reproduzido) foi reavaliado e reproduzido na Rodada 3 pela Resiliência — reclassificado para **Média** e corrigido na mesma rodada. Não está contado na linha "Média" da Rodada 3 acima (é reavaliação de um achado já existente, mesmo padrão de F13/F14/R13 não serem recontados quando só reavaliados) nem no total de 67 (já fazia parte dos 59 anteriores). **R18** (novo, achado numa revisão adicional do advisor sobre a própria correção do R16, 2026-08-21) é um caso degenerado pré-existente da margem de segurança (`initialCapacity = 2`), registrado sem correção nesta rodada — está contado na linha "Baixa" da Rodada 3 e permanece aberto no acumulado.
 
 ## Leitura
 
@@ -60,6 +73,17 @@ Antes disso, o processo está "em convergência, ainda não estável" (achados a
 - Nenhum Alto/Crítico permanece aberto agora, mas isso não conta retroativamente para o critério de convergência: o levantamento inicial da Rodada 2 *teve* um Alto aberto (F12), então essa rodada específica não é "limpa" para fins do critério de 2 rodadas consecutivas — a Rodada 3 é a primeira candidata real.
 - Restam apenas F13/F14/R16 (Baixa, registrados por completude, sem reprodução) — nenhuma ação planejada para eles.
 
+**Rodada 3 (encerrada — todos os achados acionáveis corrigidos):**
+- **Nenhuma regressão** — as correções da Rodada 2 (F12, R14, R15, U-25 a U-29) foram todas reconfirmadas.
+- **F15 (Alta, confirmado em execução) é o padrão exato que esta auditoria recorrente existe para capturar, de novo:** a própria correção do F12 (Rodada 2) deixou uma lacuna residual — seu guard cobria "o callback ainda está rodando E foi um timeout de pulso", mas não "o callback ainda está rodando E foi um `DisposeAsync()` comum". Achado de forma independente por dois passes (Estabilidade, e Resiliência via "Finding B") na mesma rodada — evidência de que a causa raiz era real, não um artefato de metodologia de um único passe. **Corrigido** trocando o guard de "quem cancelou" para "o callback ainda está rodando" (`!heartbeatWork.IsCompleted`).
+- **R17 (Média, novo), corrigido** — mesma classe do R15 (ambiguidade cancelamento-genuíno vs. shutdown), em `WarmupCoreAsync`, um local que o R15 não tinha tocado.
+- **R16 (reavaliado de Baixa/não-reproduzida para Média/reproduzida), corrigido com um trade-off discutido em duas etapas** — mesmo padrão do R14 na Rodada 2 (uma segunda decisão aparece só ao implementar a primeira, não antes): (1) Fernando escolheu corrigir a arquitetura em vez de só reclassificar/registrar; (2) ao implementar, ficou claro que só alargar a banda de elegibilidade não resolveria o cenário exato reproduzido (limiar fixo, matematicamente inalcançável numa capacidade menor que `MaxCapacity`) — Fernando escolheu escalar a margem de segurança por `currentCapacity` em vez de manter o limiar fixo, resolvendo o caso geral, não só o caso reproduzido.
+- **R13, reavaliado e quantificado** (amplificação linear exata com o R14 quando a falha tolerada é um timeout) — endereçado só por documentação (decisão de arquitetura mantida, aprovado direto sem escalonar).
+- **Lote de Usabilidade (F-U30 a F-U34), decidido por severidade a pedido do mantenedor e todos corrigidos, direto (sem trade-off em nenhum):** F-U30 (Média) — `usage-heartbeat.md` descrevia comportamento pré-F12 no timeout, reescrito. F-U31/F-U32 (Baixa-Média) — links `ADR007V01` obsoletos (mesma classe do U-26/U-27; a varredura achou 2 extras em `doc/architecture/overview.md`, fora do escopo original, corrigidos junto) e comentário mal posicionado num sample. F-U33/F-U34 (Baixa) — `maxConsecutiveFactoryFailures` e a distinção de log do R15 não estavam descobríveis em nenhum guia narrativo.
+- **Revisão adicional do advisor sobre a própria correção do R16, antes de encerrar a rodada — 3 lacunas achadas e endereçadas:** (1) a doc XML de `AutoScaleAcquireFault` ainda descrevia as fórmulas fixas antigas de scale-down (o próprio ADR003 a cita como fonte de verdade) — corrigida; (2) `doc/architecture/overview.md` instrui explicitamente revisar/superseder o ADR relevante quando o "porquê" de algo muda, não só corrigir o comentário — Fernando decidiu **criar o [ADR003V02](../doc/adr/ADR003V02-median-sample-autoscaling-algorithm.md)** (emenda registrando o refinamento; o algoritmo de mediana em si, decisão original do ADR003, não mudou); (3) o comentário de código sobre a correção ("sempre alcançável") estava incorreto num caso degenerado pré-existente (`initialCapacity = 2` — a fórmula fixa original tinha o mesmo problema, não é regressão do R16) — Fernando decidiu **registrar como R18, sem correção nesta rodada**. F-U33 também ganhou o marcador ✅ CORRIGIDO que faltava no relatório (inconsistência com este documento).
+- Resta F13/F14 (reavaliados, inalterados) e R18 (novo, registrado por decisão) — nenhuma ação planejada para nenhum dos três.
+- O levantamento inicial desta rodada também *teve* um Alto aberto (F15) — mesma regra do critério de convergência: mesmo já corrigida, esta rodada não conta como "limpa". A Rodada 4 é a primeira candidata real, e é também a primeira a rodar com Observabilidade como 4º pilar.
+
 ## Próxima rodada
 
-Rodada 2 encerrada. Disparar a Rodada 3 (nova auditoria completa) quando o mantenedor decidir — é o primeiro candidato real a contar como "rodada limpa" para o critério de convergência, já que a Rodada 2 teve o F12 (Alta) no levantamento inicial. Focar em (a) confirmar que as correções de F12/R14/R15/U-25 a U-29 não introduziram nada novo, e (b) reavaliar se F13/F14/R16 ainda merecem ficar só registrados ou se algo mudou.
+Rodada 3 encerrada. Disparar a Rodada 4 (nova auditoria completa, agora com 4 pilares — Estabilidade, Resiliência, Usabilidade, **Observabilidade**) quando o mantenedor decidir; é o primeiro candidato real a contar como "rodada limpa" para o critério de convergência, já que tanto a Rodada 2 (F12) quanto a Rodada 3 (F15) tiveram um Alto no levantamento inicial. Focar em (a) confirmar que as correções de F15/R16/R17/F-U30 a F-U34 não introduziram nada novo, (b) reavaliar se F13/F14/R18 ainda merecem ficar só registrados, e (c) a primeira varredura dedicada de Observabilidade (métricas/logs/traces refletindo a realidade), em vez de achados pegos de raspão por outro pilar.
