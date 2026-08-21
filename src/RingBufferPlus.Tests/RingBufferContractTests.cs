@@ -1357,6 +1357,63 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // 1.29 - With initialCapacity == 2 (the minimum legal value), the R16 fix's own margin
+        // formula collapses to currentCapacity itself, making scale-down from above initial
+        // capacity mathematically unreachable regardless of position - including exactly at
+        // MaxCapacity, not just off-tier (Rodada 4, R18). Fixed by capping the margin at
+        // currentCapacity - 1. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, R18.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AutoScaleAcquireFault_WithMinimumLegalInitialCapacity_StillScalesDownFromMaxCapacity()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMinimumInitialCapacityScaleDown", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 3, TimeSpan.FromMilliseconds(600))
+                .AutoScaleAcquireFault(1)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .Build();
+            await service.WarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 2; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Pool is empty - this acquire times out and enqueues the autoscale Fault, scaling
+            // 2 -> 6 (MaxCapacity).
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.IsMaxCapacity, "Expected the fault-triggered scale-up to reach max capacity.");
+
+            // Release everything so the pool becomes fully idle - before the R18 fix, this could
+            // never scale down from here, no matter how idle, because initialCapacity == 2 made
+            // the margin mathematically unreachable even at the exact maximum capacity.
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+
+            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.IsMaxCapacity && DateTime.UtcNow < scaleDownDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.False(service.IsMaxCapacity, "Expected scale-down from MaxCapacity to still be reachable when initialCapacity is the minimum legal value (2), instead of being stuck there forever.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
         // 1.23 - maxConsecutiveFactoryFailures (R14, Rodada 2): default (0) must keep today's
         // fail-fast behavior (a single item's failure still gives up on the rest of the batch);
         // opting in to a higher value must let the batch keep trying the remaining not-yet-
@@ -1615,6 +1672,136 @@ namespace RingBufferPlus.Tests
             Assert.True(service.CurrentCapacity < 7, "Expected the off-tier capacity (7) to still be eligible for scale-down once idle, instead of being stuck there forever.");
 
             await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.27 - A heartbeat tick's own internal acquire can race DisposeAsync() in a narrow window
+        // where _disposed is already true but _lifetime.Token has not yet observed cancellation
+        // (Rodada 4, Estabilidade): AcquireCoreAsync's ObjectDisposedException.ThrowIf(_disposed,
+        // this) throws in that window, and RunHeartbeatAsync's outer catch only caught
+        // OperationCanceledException - the ObjectDisposedException propagated out, faulted
+        // _heartbeatTask, and DisposeAsync's own Task.WhenAll(pending) generic catch logged it as
+        // an unexpected error, indistinguishable from a genuine fault. Same bug class as
+        // R15/F15/R17 (an ordinary shutdown miscategorized as a failure), in a location none of
+        // those fixes touched. This is a narrow, timing-dependent race, not deterministically
+        // reproducible on demand - reproduced probabilistically over many iterations with a very
+        // small PulseHeartBeat to maximize the hit rate, per the red/green protocol's guidance for
+        // races too narrow to hit reliably a single time.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingTheHeartbeatsOwnFirstAcquire_NeverLogsAnObjectDisposedException()
+        {
+            var errors = new List<Exception>();
+            for (var i = 0; i < 300; i++)
+            {
+                IRingBufferBuilder<int> builder = new RingBufferBuilder<int>($"ContractHeartbeatAcquireDisposeRace{i}", null);
+                var service = await builder
+                    .Factory(_ => Task.FromResult(1))
+                    .OnError((_, ex) => errors.Add(ex))
+                    .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
+                    .FixedCapacity(2)
+                    .BuildWarmupAsync();
+
+                // Timed to land near the first pulse's elapse, not immediately after warmup - the
+                // race needs the heartbeat loop past its Task.Delay(pulse) and heading into its own
+                // acquire, not still inside the delay (where an ordinary OperationCanceledException
+                // is already handled cleanly).
+                await Task.Delay(1);
+                await service.DisposeAsync();
+            }
+
+            Assert.DoesNotContain(errors, ex => ex is ObjectDisposedException);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.27b - A residual instance of the same shutdown-vs-failure ambiguity found while
+        // verifying the fix above (Rodada 4, Estabilidade): if a fast heartbeat callback finishes
+        // at nearly the same instant an ordinary DisposeAsync() cancels _lifetime, the F12/F15
+        // catch's own guard ("!heartbeatWork.IsCompleted") can evaluate false even though this was
+        // just an ordinary shutdown - the exception then fell through to the generic catch, which
+        // logged the resulting OperationCanceledException/TaskCanceledException as an
+        // unconditional error. Disposing the resource in that fallthrough was still safe (the
+        // callback had genuinely already finished) - only the log level was wrong.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_RacingAFastHeartbeatCallbackThatFinishesAtTheSameInstant_NeverLogsItAsAnError()
+        {
+            var errors = new List<Exception>();
+            for (var i = 0; i < 300; i++)
+            {
+                IRingBufferBuilder<int> builder = new RingBufferBuilder<int>($"ContractHeartbeatFastFinishDisposeRace{i}", null);
+                var service = await builder
+                    .Factory(_ => Task.FromResult(1))
+                    .OnError((_, ex) => errors.Add(ex))
+                    .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
+                    .FixedCapacity(2)
+                    .BuildWarmupAsync();
+
+                // Timed to land near the first pulse's elapse, same as the ObjectDisposedException
+                // race above - needed here too, since the callback only runs (and only has a
+                // chance to race its own completion against _lifetime cancelling) once the loop is
+                // past its initial Task.Delay(pulse).
+                await Task.Delay(1);
+                await service.DisposeAsync();
+            }
+
+            Assert.DoesNotContain(errors, ex => ex is OperationCanceledException);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.28 - DisposeAsync() must actually wait (bounded by PulseHeartBeat) for an orphaned
+        // heartbeat callback's deferred dispose (F12/F15) to finish, not merely schedule it and
+        // return (Rodada 4, Estabilidade): the deferred continuation was fire-and-forget, so
+        // DisposeAsync's own Task.WhenAll(pending) never included it - the pooled resource could
+        // still be undisposed by the time DisposeAsync() returned, a real leak if the host process
+        // exits shortly after. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, Rodada 4.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WaitsForAnOrphanedHeartbeatCallbacksDeferredDispose_BeforeReturning()
+        {
+            DisposableProbe? firstProbe = null;
+            using var callbackStarted = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+
+            IRingBufferBuilder<DisposableProbe> builder = new RingBufferBuilder<DisposableProbe>("ContractDisposeWaitsForDeferredHeartbeatDispose", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new DisposableProbe()))
+                .HeartBeat(value =>
+                {
+                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
+                        && !ReferenceEquals(firstProbe, value.Current))
+                    {
+                        return;
+                    }
+                    callbackStarted.Set();
+                    releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                }, pulse: TimeSpan.FromMilliseconds(500))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
+            // Let the 500ms pulse timeout actually fire while the callback is still blocked, so
+            // the F12/F15 deferred-dispose continuation gets enqueued.
+            await Task.Delay(700);
+
+            // Release the callback shortly after DisposeAsync() starts waiting - well within the
+            // PulseHeartBeat grace period DisposeAsync now allows for the deferred dispose.
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(150);
+                releaseCallback.Set();
+            });
+
+            await service.DisposeAsync();
+
+            Assert.NotNull(firstProbe);
+            Assert.Equal(1, firstProbe!.DisposeCount);
         }
     }
 }

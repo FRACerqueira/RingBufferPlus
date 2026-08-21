@@ -34,6 +34,7 @@
 // carries no scaleTrigger (see below) - the initial fill is not a "scale operation" in the
 // manual/auto sense the scale.* metrics describe.
 
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using System.Threading.Channels;
@@ -63,6 +64,11 @@ namespace RingBufferPlus.Core
         private Task? _heartbeatTask;
         private Task? _sampleTickTask;
         private Task? _loggerTask;
+
+        // Deferred dispose continuations from an orphaned heartbeat callback (F12/F15) - added
+        // only from RunHeartbeatAsync's own loop, so by the time _heartbeatTask (awaited in
+        // DisposeAsync before this bag is snapshotted) has completed, no more entries can arrive.
+        private readonly ConcurrentBag<Task> _pendingHeartbeatDisposals = new();
 
         private bool _disposed;
         private int _disposeGuard;
@@ -177,6 +183,7 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("acquire.success", true));
                 activity?.SetTag("success", true);
                 activity?.SetTag("timed_out", false);
+                activity?.SetStatus(ActivityStatusCode.Ok);
                 return new RingBufferValue<T>(Name, sw.Elapsed, true, item, TurnbackAsync);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
@@ -196,6 +203,11 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("acquire.success", false));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", timedOut);
+                // Only a genuine timeout is a health signal worth an Error status (Round 4,
+                // Observabilidade - finding O2) - reaching this catch without timedOut means
+                // _lifetime (an ordinary shutdown) is what ended the wait instead, same
+                // distinction R15/F15/R17/O1 already make elsewhere.
+                activity?.SetStatus(timedOut ? ActivityStatusCode.Error : ActivityStatusCode.Ok);
                 return new RingBufferValue<T>(Name, sw.Elapsed, false, default!, null);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
@@ -209,6 +221,8 @@ namespace RingBufferPlus.Core
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", false);
                 activity?.SetTag("cancelled", true);
+                // The caller choosing to cancel their own call is not a buffer health problem.
+                activity?.SetStatus(ActivityStatusCode.Ok);
                 throw;
             }
         }
@@ -316,6 +330,35 @@ namespace RingBufferPlus.Core
                     // configured logger/ErrorHandler rather than being fully silent.
                     LogError(ex);
                 }
+
+                // _heartbeatTask has already completed (awaited above), so RunHeartbeatAsync's own
+                // loop can no longer add to this bag - safe to snapshot now (Round 4, Estabilidade).
+                // Without this wait, DisposeAsync could return while a resource an orphaned
+                // heartbeat callback (F12/F15) was still holding had not yet actually been
+                // disposed - a real leak if the process exits shortly after DisposeAsync returns,
+                // not merely a delay.
+                if (!_pendingHeartbeatDisposals.IsEmpty)
+                {
+                    var deferredDisposals = _pendingHeartbeatDisposals.ToArray();
+                    try
+                    {
+                        // Bounded, not indefinite: the orphaned callback that owns these can never
+                        // be forcibly cancelled, so it may still be permanently hung. PulseHeartBeat
+                        // is reused as the grace period - the same budget the pump itself already
+                        // gives a single heartbeat cycle.
+                        await Task.WhenAll(deferredDisposals).WaitAsync(PulseHeartBeat).ConfigureAwait(false);
+                    }
+                    catch (TimeoutException)
+                    {
+                        LogMessage($"DisposeAsync did not wait for {deferredDisposals.Length} orphaned heartbeat callback(s) still running past the grace period - their resource(s) will be disposed once/if the callback(s) finish, but not before this DisposeAsync() call returned.");
+                    }
+                    catch (Exception ex)
+                    {
+                        // Each deferred continuation already logs its own DisposeItemAsync failure
+                        // internally and never rethrows - this only catches the wrapper itself.
+                        LogError(ex);
+                    }
+                }
             }
             finally
             {
@@ -368,11 +411,12 @@ namespace RingBufferPlus.Core
             {
                 var err = new InvalidOperationException("RingBuffer did not reach initial capacity");
                 // An ordinary DisposeAsync() racing this warmup is not a genuine capacity failure - it
-                // surfaces as the very same "reached = false" (the engine loop resolves the command's
-                // completion with TrySetResult(false) when MoveToCapacityAsync throws
-                // OperationCanceledException, see RunEngineAsync). Logging it as an ERROR would
-                // mislead an on-call engineer into thinking the factory was unhealthy during a clean
-                // shutdown (same bug class as R15).
+                // surfaces as the very same "reached = false" (MoveToCapacityAsync's own CreateItemsAsync
+                // call absorbs the cancellation internally rather than throwing it - see R15/CreateItemsAsync
+                // - and simply returns a partial/zero count, so ProcessCommandAsync's Warmup case resolves
+                // the command's completion with TrySetResult(false) directly, not via an exception). Logging
+                // it as an ERROR would mislead an on-call engineer into thinking the factory was unhealthy
+                // during a clean shutdown (same bug class as R15).
                 if (_lifetime.IsCancellationRequested)
                 {
                     LogMessage("Warmup cancelled by shutdown before reaching initial capacity.");
@@ -625,17 +669,26 @@ namespace RingBufferPlus.Core
                 {
                     // `ok` also reflects a scale attempt that threw (it stays false, set only on the
                     // success path above) - so a failed or timed-out operation is never recorded
-                    // identically to a successful one.
-                    activity?.SetStatus(ok ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+                    // identically to a successful one. But `!ok` alone conflates a genuine factory
+                    // failure/timeout with an ordinary DisposeAsync() racing this operation (the
+                    // same distinction R15/F15/R17/R18 already make for logs - Round 4,
+                    // Observabilidade, finding O1) - token is always _lifetime.Token for every
+                    // caller of this method that passes a scaleTrigger, so this check is exactly
+                    // that same "was this shutdown, not failure" test.
+                    var cancelledByShutdown = !ok && token.IsCancellationRequested;
+                    activity?.SetStatus(ok || cancelledByShutdown ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+                    activity?.SetTag("cancelled", cancelledByShutdown);
                     _scaleOperations.Add(1,
                         new KeyValuePair<string, object?>("buffer.name", Name),
                         new KeyValuePair<string, object?>("direction", direction),
                         new KeyValuePair<string, object?>("trigger", scaleTrigger),
-                        new KeyValuePair<string, object?>("success", ok));
+                        new KeyValuePair<string, object?>("success", ok),
+                        new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
                     _scaleDuration.Record(sw!.Elapsed.TotalSeconds,
                         new KeyValuePair<string, object?>("buffer.name", Name),
                         new KeyValuePair<string, object?>("direction", direction),
-                        new KeyValuePair<string, object?>("success", ok));
+                        new KeyValuePair<string, object?>("success", ok),
+                        new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
                 }
             }
         }
@@ -856,7 +909,11 @@ namespace RingBufferPlus.Core
                             LogMessage("Heart Beat cancelled by shutdown, callback still running - deferring dispose.");
                         }
                         _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
-                        _ = heartbeatWork.ContinueWith(async t =>
+                        // .Unwrap() so the tracked Task actually completes when the inner await
+                        // does, not merely when the async lambda is first scheduled - needed for
+                        // DisposeAsync to be able to wait on real completion (below), not just on
+                        // "was this continuation started" (Round 4, Estabilidade).
+                        var deferredDispose = heartbeatWork.ContinueWith(async t =>
                         {
                             if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
                             try
@@ -867,7 +924,20 @@ namespace RingBufferPlus.Core
                             {
                                 LogError(ex);
                             }
-                        }, TaskScheduler.Default);
+                        }, TaskScheduler.Default).Unwrap();
+                        _pendingHeartbeatDisposals.Add(deferredDispose);
+                    }
+                    catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
+                    {
+                        // heartbeatWork.IsCompleted was already true by the time this exception was
+                        // observed (the sibling catch's guard above did not match), so the callback
+                        // is not still touching the resource - disposing now is safe. But the
+                        // exception itself is still just an ordinary shutdown ending the wait, not a
+                        // genuine failure - a residual instance of the same shutdown-vs-failure
+                        // ambiguity R15/F15/R17/O1 already fix elsewhere, found while verifying this
+                        // catch's own guard (Round 4, Estabilidade).
+                        LogMessage("Heart Beat cancelled by shutdown after the callback had already finished.");
+                        await acquired.DisposeAsync().ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -879,6 +949,14 @@ namespace RingBufferPlus.Core
             }
             catch (OperationCanceledException)
             {
+                //ignore: manager disposed
+            }
+            catch (ObjectDisposedException)
+            {
+                // Same "manager disposed" shutdown as the OperationCanceledException case above -
+                // there is a narrow window where DisposeAsync has already set _disposed but
+                // _lifetime.Token has not yet observed cancellation; a heartbeat tick's own
+                // internal acquire in that window throws this instead (Round 4, Estabilidade).
                 //ignore: manager disposed
             }
         }

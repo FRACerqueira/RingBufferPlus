@@ -50,6 +50,7 @@ namespace Microsoft.Extensions.DependencyInjection
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="token">The <see cref="CancellationToken"/>. Default value is <see cref="IHostApplicationLifetime.ApplicationStopping"/>.</param>
         /// <exception cref="ArgumentNullException">Buffer name is null, or no buffer with that name and <typeparamref name="T"/> was registered. An empty string is accepted as a name.</exception>
+        /// <exception cref="InvalidOperationException">The RingBuffer did not reach initial capacity - propagated from the inner <see cref="IRingBufferService{T}.WarmupAsync(CancellationToken)"/> call.</exception>
         public static async Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, CancellationToken? token = null)
         {
             ArgumentNullException.ThrowIfNull(buffername);

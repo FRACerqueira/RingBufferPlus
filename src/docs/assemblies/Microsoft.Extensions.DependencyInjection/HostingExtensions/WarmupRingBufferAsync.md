@@ -23,6 +23,7 @@ public static Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffern
 | exception | condition |
 | --- | --- |
 | ArgumentNullException | Buffer name is null, or no buffer with that name and *T* was registered. An empty string is accepted as a name. |
+| InvalidOperationException | The RingBuffer did not reach initial capacity - propagated from the inner [`WarmupAsync`](../../RingBufferPlus/IRingBufferService-1/WarmupAsync.md) call. |
 
 ### Remarks
 

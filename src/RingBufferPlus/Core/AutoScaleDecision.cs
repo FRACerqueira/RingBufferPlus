@@ -19,12 +19,20 @@ namespace RingBufferPlus.Core
     // buffer got stuck there forever regardless of how idle it became. The margin below is scaled
     // to currentCapacity instead of a fixed tier, so an off-tier position is no longer stuck
     // *relative to where it landed*; it reduces to the exact original formula whenever
-    // currentCapacity is exactly at the initial or maximum capacity. This does not, by itself,
-    // fix the margin formula's own pre-existing degenerate case: when initial capacity is 2 (the
-    // minimum legal value), "current - capacity + 2" equals currentCapacity itself, which the
-    // median (bounded by currentCapacity) can never exceed - scale-down from above initial
-    // capacity is unreachable regardless of position, exactly as with the original fixed formula.
-    // Registered, not fixed here (out of R16's original scope) - see the viability report.
+    // currentCapacity is exactly at the initial or maximum capacity.
+    //
+    // R18/R19 (Rodada 4): the R16 margin formula ("distance from tier" + 2) is really an active-
+    // usage threshold in disguise - "active < capacity - 2" for the upper band, "active <=
+    // minCapacity - 2" for the lower one (active = currentCapacity - median idle). When the
+    // paired boundary constant (capacity, or minCapacity) is 2 - the minimum legal value - that
+    // active-usage threshold collapses to 0, or below: the upper band becomes mathematically
+    // unreachable (R18: no idle count can ever exceed currentCapacity), and the lower band becomes
+    // reachable only by exactly zero acquisitions across the entire sampling window (R19 - not
+    // impossible, but a materially stricter bar than any other minCapacity value tolerates). Fixed
+    // by capping each threshold at currentCapacity - 1 - guaranteeing the median (bounded by
+    // currentCapacity) can always in principle cross it - which only changes behavior for the
+    // capacity == 2 / minCapacity == 2 configurations the R18/R19 threshold-collapse affects;
+    // every other configuration's threshold was already below this cap and is unaffected.
     internal static class AutoScaleDecision
     {
         /// <summary>
@@ -74,8 +82,10 @@ namespace RingBufferPlus.Core
             if (currentCapacity > capacity)
             {
                 // Reduces to the original "maxCapacity - capacity + 2" whenever currentCapacity
-                // is exactly maxCapacity.
-                if (median > currentCapacity - capacity + 2)
+                // is exactly maxCapacity - except capped below currentCapacity so it is never
+                // mathematically unreachable when capacity == 2 (R18).
+                var threshold = Math.Min(currentCapacity - capacity + 2, currentCapacity - 1);
+                if (median > threshold)
                 {
                     return capacity;
                 }
@@ -84,8 +94,10 @@ namespace RingBufferPlus.Core
             if (currentCapacity > minCapacity)
             {
                 // Reduces to the original "capacity - minCapacity + 2" whenever currentCapacity
-                // is exactly capacity.
-                if (median >= currentCapacity - minCapacity + 2)
+                // is exactly capacity - except capped so it never demands exactly zero active
+                // usage when minCapacity == 2 (R19).
+                var threshold = Math.Min(currentCapacity - minCapacity + 2, currentCapacity - 1);
+                if (median >= threshold)
                 {
                     return minCapacity;
                 }

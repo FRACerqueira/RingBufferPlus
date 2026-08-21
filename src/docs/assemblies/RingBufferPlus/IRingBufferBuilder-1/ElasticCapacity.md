@@ -23,6 +23,10 @@ public IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int min
 
 An instance of [`IRingBufferElasticBuilder`](../IRingBufferElasticBuilder-1.md).
 
+### Remarks
+
+*baseTimer*/*numberSamples* configure the scale-down sampling cadence only (used by autoscale-on-fault's evaluation) - they do not bound a scale-up or scale-down operation's own deadline. A scale-up's deadline is `quantity * FactoryTimeout` (see [`Factory`](./Factory.md)); a scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever capacity was actually gained or removed is kept.
+
 ### See Also
 
 * interface [IRingBufferElasticBuilder&lt;T&gt;](../IRingBufferElasticBuilder-1.md)

@@ -23,6 +23,7 @@ A Task representing the asynchronous operation.
 | exception | condition |
 | --- | --- |
 | InvalidOperationException | The RingBuffer did not reach initial capacity. |
+| ObjectDisposedException | The instance was already disposed. |
 
 ### See Also
 

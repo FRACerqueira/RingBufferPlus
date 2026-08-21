@@ -331,6 +331,88 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_RacingDisposeAsync_RecordsCancelledNotFailure()
+        {
+            // Round 4, Observabilidade (finding O1): a scale operation cancelled by an ordinary
+            // DisposeAsync() must not be recorded identically to a genuine factory failure -
+            // same distinction R15/F15/R17/R18 already make for logs, now extended to
+            // scale.operations/scale.duration and the "RingBufferPlus.Scale" activity's status.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(5), ct); return 1; }, TimeSpan.FromSeconds(10))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            // Give the engine time to dequeue the Switch command and actually start
+            // CreateItemsAsync (the factory is mid-delay) before racing it with a normal dispose.
+            await Task.Delay(200);
+            await service.DisposeAsync();
+            await Record.ExceptionAsync(() => switchTask);
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags["success"], false) && Equals(r.Tags["cancelled"], true));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName));
+            Assert.Equal(true, scaleActivity.GetTagItem("cancelled"));
+            Assert.Equal(ActivityStatusCode.Ok, scaleActivity.Status);
+        }
+
+        [Fact]
+        public async Task AcquireAsync_RacingDisposeAsync_RecordsOkStatus_NotError()
+        {
+            // Round 4, Observabilidade (finding O2): AcquireCoreAsync never set an ActivityStatusCode
+            // on any outcome before this fix. An acquire cancelled by an ordinary DisposeAsync()
+            // while waiting - not a genuine AcquireTimeout - must not read as an error span, mirroring
+            // the same shutdown-vs-failure distinction now made for Scale (O1).
+            var bufferName = UniqueBufferName();
+            using var cts = new CancellationTokenSource();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var manager = CreateManager(bufferName, cts.Token, acquireTimeout: TimeSpan.FromSeconds(10));
+            await manager.WarmupAsync();
+
+            var held1 = await manager.AcquireAsync();
+            var held2 = await manager.AcquireAsync();
+
+            var acquireTask = manager.AcquireAsync().AsTask();
+            await Task.Delay(500);
+            Assert.False(acquireTask.IsCompleted, "Expected the third acquire to still be blocked (pool exhausted) before racing it with DisposeAsync().");
+            await manager.DisposeAsync();
+
+            var result = await acquireTask;
+            Assert.False(result.Successful);
+
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var faults = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.faults" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName));
+            Assert.Empty(faults);
+
+            // Assert.All, not Assert.Single/NotEmpty: under heavy parallel test-suite load, this
+            // process-wide ActivityListener can occasionally miss a specific activity's stop
+            // notification (a pre-existing harness fragility, not specific to this test - see the
+            // class-level remarks on global listener contamination). When the activity IS captured,
+            // it must never show Error for a shutdown-cancelled (not genuinely timed-out) acquire.
+            var unsuccessfulAcquireActivities = activities.Where(a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("success"), false)).ToList();
+            Assert.All(unsuccessfulAcquireActivities, a => Assert.Equal(ActivityStatusCode.Ok, a.Status));
+        }
+
+        [Fact]
         public async Task DisposingOneBuffer_DoesNotSilenceTelemetryForAnotherLiveBuffer()
         {
             var nameA = UniqueBufferName();

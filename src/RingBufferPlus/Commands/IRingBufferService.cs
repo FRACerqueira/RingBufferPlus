@@ -85,6 +85,7 @@ namespace RingBufferPlus
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>
         /// <returns>A <see cref="Task"/> representing the asynchronous operation.</returns>
         /// <exception cref="InvalidOperationException">The RingBuffer did not reach initial capacity.</exception>
+        /// <exception cref="ObjectDisposedException">The instance was already disposed.</exception>
         Task WarmupAsync(CancellationToken cancellation = default);
     }
 }

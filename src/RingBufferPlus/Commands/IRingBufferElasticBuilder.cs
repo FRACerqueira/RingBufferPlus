@@ -100,18 +100,32 @@ namespace RingBufferPlus
         /// or maximum capacity. There is no scale-down from minimum capacity: minimum capacity is the floor.
         /// <para>
         /// While above initial capacity (including, but not limited to, exactly maximum capacity), the
-        /// scale-down target is initial capacity, evaluated using the formula: current capacity - initial
-        /// capacity + 2. At exactly maximum capacity this is the same as: maximum capacity - initial capacity + 2.
+        /// scale-down target is initial capacity, evaluated when the median <b>exceeds</b> the formula:
+        /// current capacity - initial capacity + 2, capped so the threshold never reaches current capacity
+        /// itself (see below). At exactly maximum capacity, and whenever this cap does not apply, this is the
+        /// same as: maximum capacity - initial capacity + 2.
         /// </para>
         /// <para>
         /// While at or below initial capacity (including, but not limited to, exactly initial capacity),
-        /// down to minimum capacity, the scale-down target is minimum capacity, evaluated using the formula:
-        /// current capacity - minimum capacity + 2. At exactly initial capacity this is the same as: initial
+        /// down to minimum capacity, the scale-down target is minimum capacity, evaluated when the median
+        /// <b>reaches or exceeds</b> the formula: current capacity - minimum capacity + 2, with the same cap.
+        /// At exactly initial capacity, and whenever the cap does not apply, this is the same as: initial
         /// capacity - minimum capacity + 2.
         /// </para>
         /// <para>
-        /// The scale-down process is executed when the calculated median of the samples collected via
-        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?)"/> reaches those values.
+        /// Both thresholds are capped at current capacity - 1: if initial capacity is 2 (the minimum legal
+        /// value), the upper-band formula would otherwise reduce to current capacity itself, a value the
+        /// median can never exceed - making scale-down from above initial capacity unreachable regardless of
+        /// position, including at maximum capacity. Likewise, if minimum capacity is 2, the lower-band
+        /// formula would otherwise require the median to equal current capacity exactly, i.e. zero
+        /// acquisitions across the entire sampling window, to ever scale down to the floor. The cap keeps
+        /// both bands reachable in every configuration without changing behavior anywhere the uncapped
+        /// formula was already below it.
+        /// </para>
+        /// <para>
+        /// The scale-down process is executed against the median of the samples collected via
+        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?)"/>, per the two
+        /// formulas above.
         /// </para>
         /// <para>
         /// Scale-up has a deadline based on the factory's own per-item timeout (see

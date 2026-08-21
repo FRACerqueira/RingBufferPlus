@@ -16,7 +16,18 @@ public Task<bool> SwitchToAsync(ScaleSwitch value)
 
 ### Return Value
 
-A Task representing the asynchronous operation. The result is `false` when the buffer is already at the requested capacity. Otherwise it is `true` — except when [`LockWhenScaling`](../IRingBufferElasticBuilder-1/LockWhenScaling.md) is enabled, in which case the result instead reflects whether the scale operation actually reached the target capacity (`true`) or was undone on its own timeout (`false`). A call made while another scale operation is already in flight is queued behind it, not rejected.
+A Task representing the asynchronous operation. The result is `false` when the buffer is already at the requested capacity. Otherwise it is `true` — except when [`LockWhenScaling`](../IRingBufferElasticBuilder-1/LockWhenScaling.md) is enabled, in which case the result instead reflects whether the scale operation fully reached the target capacity (`true`) or only partially completed before its own timeout (`false`). A partial result is not undone: whatever capacity was actually gained or removed before the timeout is kept, and [`CurrentCapacity`](../IRingBufferService-1/CurrentCapacity.md) reflects it. A call made while another scale operation is already in flight is queued behind it, not rejected.
+
+### Exceptions
+
+| exception | condition |
+| --- | --- |
+| InvalidOperationException | The buffer has a fixed capacity, or autoscale-on-fault is enabled - reachable only by escaping the type system (casting to [`IRingBufferManualScaleService`](../IRingBufferManualScaleService-1.md) from a plain [`IRingBufferService`](../IRingBufferService-1.md) reference), since the type-level exclusivity (ADR007) otherwise prevents calling this at all. |
+| ObjectDisposedException | The instance was already disposed. |
+
+### Remarks
+
+If the implicit warmup this method triggers previously failed and has not been retried via an explicit call to [`WarmupAsync`](../IRingBufferService-1/WarmupAsync.md), this rethrows that same failure.
 
 ### See Also
 

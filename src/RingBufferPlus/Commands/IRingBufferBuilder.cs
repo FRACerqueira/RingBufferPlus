@@ -89,9 +89,14 @@ namespace RingBufferPlus
         /// <paramref name="minCapacity"/>, <paramref name="initialCapacity"/> and <paramref name="maxCapacity"/>
         /// via <see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch)"/>.
         /// </summary>
-        /// <para>
-        /// The <paramref name="baseTimer"/> is used as the scale-up/scale-down timeout time base. When the timeout is reached the scale operation is undone.
-        /// </para>
+        /// <remarks>
+        /// <paramref name="baseTimer"/>/<paramref name="numberSamples"/> configure the scale-<b>down</b> sampling
+        /// cadence only (used by autoscale-on-fault's evaluation) - they do not bound a scale-up or scale-down
+        /// operation's own deadline. A scale-up's deadline is <c>quantity * FactoryTimeout</c> (see
+        /// <see cref="IRingBufferBuilder{T}.Factory(Func{CancellationToken, Task{T}}, TimeSpan?, byte)"/>); a
+        /// scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever
+        /// capacity was actually gained or removed is kept.
+        /// </remarks>
         /// <param name="initialCapacity">Initial/startup capacity. Value must be greater than or equal to <paramref name="minCapacity"/> and less than or equal to <paramref name="maxCapacity"/>.</param>
         /// <param name="minCapacity">The minimal buffer capacity. Value must be greater than or equal to 2.</param>
         /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
