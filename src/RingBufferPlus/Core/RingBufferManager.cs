@@ -198,9 +198,15 @@ namespace RingBufferPlus.Core
                     }
                     _acquireFaults.Add(1, new KeyValuePair<string, object?>("buffer.name", Name));
                 }
+                // acquire.timed_out mirrors the activity's own "timed_out" tag (Round 5,
+                // Observabilidade - finding O6): without it, this histogram's failed rows can't be
+                // told apart from an ordinary shutdown/caller-cancellation, same gap O1/O2 already
+                // closed on the metrics/activity side of Scale/Acquire elsewhere.
                 _acquireDuration.Record(sw.Elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
-                    new KeyValuePair<string, object?>("acquire.success", false));
+                    new KeyValuePair<string, object?>("acquire.success", false),
+                    new KeyValuePair<string, object?>("acquire.timed_out", timedOut),
+                    new KeyValuePair<string, object?>("acquire.cancelled", false));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", timedOut);
                 // Only a genuine timeout is a health signal worth an Error status (Round 4,
@@ -217,7 +223,9 @@ namespace RingBufferPlus.Core
                 // outcome before it does, or a trace shows an outcome-less span for this call.
                 _acquireDuration.Record(sw.Elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
-                    new KeyValuePair<string, object?>("acquire.success", false));
+                    new KeyValuePair<string, object?>("acquire.success", false),
+                    new KeyValuePair<string, object?>("acquire.timed_out", false),
+                    new KeyValuePair<string, object?>("acquire.cancelled", true));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", false);
                 activity?.SetTag("cancelled", true);
@@ -289,7 +297,14 @@ namespace RingBufferPlus.Core
             {
                 await _lifetime.CancelAsync().ConfigureAwait(false);
                 _commands.Writer.TryComplete();
-                _logQueue.Writer.TryComplete();
+                // _logQueue is intentionally NOT completed here - DisposeAsync itself still has
+                // log-generating work ahead (the WhenAll failure catch below, the deferred-
+                // heartbeat-disposal block, and the item-drain loop in the finally all call
+                // LogMessage/LogError). Completing the queue this early silently drops every one
+                // of those under BackgroundLogger=true, since LogMessage/LogError only ever
+                // TryWrite to it in that mode, with no synchronous fallback (Round 5, Estabilidade,
+                // Finding B). It is completed, and _loggerTask awaited, at the very end of this
+                // method instead - after every possible log call above has already run.
 
                 // If a warmup was already in flight, let it unwind first (it observes cancellation
                 // and returns or throws) before snapshotting which background pumps to await -
@@ -313,7 +328,9 @@ namespace RingBufferPlus.Core
                 var pending = new List<Task> { _engineTask };
                 if (_heartbeatTask is not null) pending.Add(_heartbeatTask);
                 if (_sampleTickTask is not null) pending.Add(_sampleTickTask);
-                if (_loggerTask is not null) pending.Add(_loggerTask);
+                // _loggerTask is deliberately NOT included here - it can only finish once
+                // _logQueue is completed, which is deferred to the end of this method (see above).
+                // Awaiting it here, before that completion, would hang forever.
 
                 try
                 {
@@ -350,7 +367,12 @@ namespace RingBufferPlus.Core
                     }
                     catch (TimeoutException)
                     {
-                        LogMessage($"DisposeAsync did not wait for {deferredDisposals.Length} orphaned heartbeat callback(s) still running past the grace period - their resource(s) will be disposed once/if the callback(s) finish, but not before this DisposeAsync() call returned.");
+                        // Warning, not Debug (Round 5, Observabilidade, finding O8): this is not an
+                        // ordinary shutdown-vs-failure case like the sibling messages elsewhere -
+                        // a resource is now leaked for an indeterminate time past this DisposeAsync()
+                        // call, comparably significant to the existing "RingBuffer without resource"
+                        // LogWarning.
+                        LogWarning($"DisposeAsync did not wait for {deferredDisposals.Length} orphaned heartbeat callback(s) still running past the grace period - their resource(s) will be disposed once/if the callback(s) finish, but not before this DisposeAsync() call returned.");
                     }
                     catch (Exception ex)
                     {
@@ -366,14 +388,42 @@ namespace RingBufferPlus.Core
                 // unexpectedly throws - so pooled items and the buffer's own instrumentation are
                 // never left undisposed.
                 _availableItems.Writer.TryComplete();
+                var remainingItems = new List<T>();
                 while (_availableItems.Reader.TryRead(out var item))
                 {
-                    await DisposeItemAsync(item).ConfigureAwait(false);
+                    remainingItems.Add(item);
                 }
+                // Defensive, per-item (Round 5, Estabilidade, Finding A): a raw loop calling
+                // DisposeItemAsync directly would abort on the first item whose Dispose() throws,
+                // leaking every remaining item plus _lifetime/_meter/_activitySource below -
+                // permanently, since _disposeGuard makes a second DisposeAsync() call a silent
+                // no-op. This is the exact same failure mode R2 already fixed for the warmup-
+                // exception trigger; DisposeItemsDefensivelyAsync (already used by RemoveItemsAsync)
+                // is the same fix applied to this trigger.
+                await DisposeItemsDefensivelyAsync(remainingItems).ConfigureAwait(false);
 
                 _lifetime.Dispose();
                 _meter.Dispose();
                 _activitySource.Dispose();
+
+                // Only now, after every DisposeAsync-generated log call above has already run, is
+                // it safe to complete the queue and let the logger pump finish draining it (Finding B).
+                _logQueue.Writer.TryComplete();
+                if (_loggerTask is not null)
+                {
+                    try
+                    {
+                        await _loggerTask.ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        //ignore: expected once _lifetime is cancelled
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError(ex);
+                    }
+                }
             }
         }
 
@@ -625,13 +675,18 @@ namespace RingBufferPlus.Core
 
             _scaling = true;
             var ok = false;
+            // Set only by the scale-up branch, when a genuine (non-cancellation) factory failure
+            // happened somewhere in the batch even though it also made partial progress - see the
+            // cancelledByShutdown computation below (Round 5, Observabilidade, finding O7).
+            var hadGenuineFailure = false;
             try
             {
                 if (target > current)
                 {
                     var quantity = target - current;
                     LogMessage($"Starting ScaleUp {quantity}.");
-                    var created = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    var (created, batchHadGenuineFailure) = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    hadGenuineFailure = batchHadGenuineFailure;
                     LogMessage("End ScaleUp.");
                     ok = created == quantity;
                     // A partial scale-up still gained real, usable capacity - advance by however
@@ -674,8 +729,13 @@ namespace RingBufferPlus.Core
                     // same distinction R15/F15/R17/R18 already make for logs - Round 4,
                     // Observabilidade, finding O1) - token is always _lifetime.Token for every
                     // caller of this method that passes a scaleTrigger, so this check is exactly
-                    // that same "was this shutdown, not failure" test.
-                    var cancelledByShutdown = !ok && token.IsCancellationRequested;
+                    // that same "was this shutdown, not failure" test. `!hadGenuineFailure` closes
+                    // a gap in that same test (Round 5, finding O7): a batch can make partial
+                    // progress despite a real per-item failure, and then have its still-not-
+                    // attempted items cancelled by an ordinary shutdown moments later - without this
+                    // check, that real failure would be masked entirely, reported as "just a
+                    // shutdown" with no trace it happened.
+                    var cancelledByShutdown = !ok && token.IsCancellationRequested && !hadGenuineFailure;
                     activity?.SetStatus(ok || cancelledByShutdown ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
                     activity?.SetTag("cancelled", cancelledByShutdown);
                     _scaleOperations.Add(1,
@@ -693,7 +753,7 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private async Task<int> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
+        private async Task<(int Created, bool HadGenuineFailure)> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
         {
             var created = new List<T>(quantity);
             Exception? lastFailure = null;
@@ -767,7 +827,7 @@ namespace RingBufferPlus.Core
                 // instead of silently reporting zero progress (same contract as before).
                 throw lastFailure;
             }
-            return created.Count;
+            return (created.Count, lastFailure is not null);
         }
 
         private async Task DisposeItemsDefensivelyAsync(IEnumerable<T> items)
@@ -925,6 +985,19 @@ namespace RingBufferPlus.Core
                                 LogError(ex);
                             }
                         }, TaskScheduler.Default).Unwrap();
+                        // Prune already-finished entries before adding this one - otherwise a
+                        // chronically slow HeartBeat callback (timing out on every single pulse)
+                        // would grow this bag for as long as the buffer runs, not just for as long
+                        // as disposals are genuinely still in flight (Round 5, Estabilidade). Safe
+                        // to compact here without losing anything mid-air: this loop is the bag's
+                        // only writer (see the field's own comment), so nothing else can be adding
+                        // while this take/re-add sequence runs.
+                        var stillPending = new List<Task>();
+                        while (_pendingHeartbeatDisposals.TryTake(out var previousDispose))
+                        {
+                            if (!previousDispose.IsCompleted) stillPending.Add(previousDispose);
+                        }
+                        foreach (var previousDispose in stillPending) _pendingHeartbeatDisposals.Add(previousDispose);
                         _pendingHeartbeatDisposals.Add(deferredDispose);
                     }
                     catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)

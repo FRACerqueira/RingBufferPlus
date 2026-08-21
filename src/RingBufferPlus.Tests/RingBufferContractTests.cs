@@ -21,6 +21,7 @@ using System.Diagnostics;
 using System.Reflection;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
 using Moq;
 using RingBufferPlus.Core;
 
@@ -730,6 +731,39 @@ namespace RingBufferPlus.Tests
                 {
                     TouchedAfterDispose = true;
                 }
+            }
+        }
+
+        private sealed class ThrowingOnDisposeProbe : IDisposable
+        {
+            private readonly bool _throwOnDispose;
+            public ThrowingOnDisposeProbe(bool throwOnDispose) => _throwOnDispose = throwOnDispose;
+            public bool Disposed { get; private set; }
+            public void Dispose()
+            {
+                Disposed = true;
+                if (_throwOnDispose)
+                {
+                    throw new InvalidOperationException("Simulated pooled item Dispose() failure.");
+                }
+            }
+        }
+
+        private sealed class CapturingLogger : ILogger
+        {
+            public List<string> Messages { get; } = new();
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+            public bool IsEnabled(LogLevel logLevel) => true;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+            {
+                var message = formatter(state, exception);
+                lock (Messages) Messages.Add(message);
+            }
+
+            private sealed class NullScope : IDisposable
+            {
+                public static readonly NullScope Instance = new();
+                public void Dispose() { }
             }
         }
 
@@ -1802,6 +1836,138 @@ namespace RingBufferPlus.Tests
 
             Assert.NotNull(firstProbe);
             Assert.Equal(1, firstProbe!.DisposeCount);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.29 - DisposeAsync()'s idle-item drain loop (Rodada 5, Estabilidade, Finding A) was not
+        // actually unconditional, despite its own comment claiming so: a raw loop calling
+        // DisposeItemAsync directly for each idle item aborted on the first one whose Dispose()
+        // threw, leaking every remaining item plus _lifetime/_meter/_activitySource - permanently,
+        // since _disposeGuard makes a second DisposeAsync() call a silent no-op. Same failure mode
+        // R2 already fixed once, for the warmup-exception trigger; this is the same defect via a
+        // different trigger (an item's own Dispose() failing instead). Fixed by routing through
+        // the existing DisposeItemsDefensivelyAsync helper (already used by RemoveItemsAsync),
+        // which disposes every item regardless of any individual failure and logs instead of
+        // propagating. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, Rodada 5.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WhenAPooledItemsDisposeThrows_StillDisposesEveryOtherItem()
+        {
+            var probes = new List<ThrowingOnDisposeProbe>();
+            var index = 0;
+            var errors = new List<Exception>();
+
+            IRingBufferBuilder<ThrowingOnDisposeProbe> builder = new RingBufferBuilder<ThrowingOnDisposeProbe>("ContractDisposeThrowingItemStillDisposesRest", null);
+            var service = await builder
+                .Factory(_ =>
+                {
+                    var i = Interlocked.Increment(ref index);
+                    var probe = new ThrowingOnDisposeProbe(throwOnDispose: i == 2);
+                    lock (probes) probes.Add(probe);
+                    return Task.FromResult(probe);
+                })
+                .OnError((_, ex) => errors.Add(ex))
+                .FixedCapacity(3)
+                .BuildWarmupAsync();
+
+            await service.DisposeAsync();
+
+            Assert.Equal(3, probes.Count);
+            Assert.All(probes, p => Assert.True(p.Disposed, "Expected every idle item to be disposed, even though one of them threw."));
+            Assert.Contains(errors, ex => ex is InvalidOperationException);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.30 - With BackgroundLogger(true), DisposeAsync() completed and drained _logQueue (and
+        // awaited _loggerTask) before its own later log calls - the WhenAll-failure catch, the
+        // deferred-heartbeat-disposal grace-period message, and the item-drain loop's own defensive
+        // logging - ever ran, silently dropping every one of them (Rodada 5, Estabilidade, Finding
+        // B): LogMessage/LogError only ever TryWrite to that queue in background mode, with no
+        // synchronous fallback. Fixed by deferring _logQueue's completion and _loggerTask's await
+        // to the very end of DisposeAsync, after every possible log call above has already run.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WithBackgroundLoggerEnabled_StillDeliversItsOwnLateLogMessages()
+        {
+            var logger = new CapturingLogger();
+            using var callbackStarted = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeBackgroundLoggerLateMessages", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(logger)
+                .BackgroundLogger(true)
+                .HeartBeat(_ =>
+                {
+                    callbackStarted.Set();
+                    // Never actually released within the test - stays blocked well past
+                    // DisposeAsync's own PulseHeartBeat-bounded grace period for the deferred
+                    // dispose, forcing the grace-period-timeout LogMessage this test is about.
+                    releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                }, pulse: TimeSpan.FromMilliseconds(300))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
+            // Let the 300ms pulse timeout fire while the callback is still blocked, enqueueing the
+            // F12/F15 deferred-dispose continuation.
+            await Task.Delay(500);
+
+            await service.DisposeAsync();
+
+            Assert.Contains(logger.Messages, m => m.Contains("did not wait for"));
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.31 - _pendingHeartbeatDisposals (F12/F15's deferred-dispose bag) was only ever
+        // pruned by DisposeAsync itself, at the very end of the buffer's life - a HeartBeat
+        // callback that chronically overran its own pulse budget added one entry per timed-out
+        // pulse for as long as the buffer stayed alive, even though almost every one of those
+        // entries had already completed by the time the next pulse timed out. Unbounded growth
+        // for the buffer's entire runtime, not a correctness bug (Round 5, Estabilidade). Fixed
+        // by pruning already-completed entries out of the bag every time a new one is added.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task PendingHeartbeatDisposals_UnderAChronicallySlowHeartbeat_DoesNotGrowUnbounded()
+        {
+            var callbackCount = 0;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPendingHeartbeatDisposalsBounded", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .HeartBeat(_ =>
+                {
+                    Interlocked.Increment(ref callbackCount);
+                    // Always slower than the 100ms pulse below, so every single pulse times out
+                    // and enqueues a deferred-dispose entry - but still fast enough that each
+                    // entry finishes well before the next one is added.
+                    Thread.Sleep(180);
+                }, pulse: TimeSpan.FromMilliseconds(100))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (Volatile.Read(ref callbackCount) < 6 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.True(callbackCount >= 6, $"Expected at least 6 heartbeat callbacks, got {callbackCount}.");
+
+            // Give the most recent deferred dispose a moment to finish too, so this reads the
+            // steady-state bag size rather than catching it mid-cycle.
+            await Task.Delay(50);
+
+            var bag = (System.Collections.Concurrent.ConcurrentBag<Task>)GetPrivateField(service, "_pendingHeartbeatDisposals");
+            Assert.True(bag.Count <= 2, $"Expected the deferred-disposal bag to stay bounded despite {callbackCount} timed-out pulses, but it grew to {bag.Count} entries.");
+
+            await service.DisposeAsync();
         }
     }
 }

@@ -47,6 +47,12 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - Scale-down is no longer unreachable (from above initial capacity) or effectively unreachable (from at-or-below initial capacity, requiring exactly zero acquisitions) when `initialCapacity` or `minCapacity` is 2, the minimum legal value - the scale-down safety margin is now capped so it can never require more idleness than the buffer's own current capacity allows.
 - `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity now carry a `cancelled` tag, and no longer report a scale operation cancelled by an ordinary `DisposeAsync()` identically to a genuine factory failure (its `ActivityStatusCode` is `Ok`, not `Error`, when cancelled by shutdown).
 - The `RingBufferPlus.Acquire` activity now sets an `ActivityStatusCode` on every outcome (previously never set on any path) - `Error` only for a genuine `AcquireTimeout`, `Ok` for success, a caller cancellation, or an ordinary shutdown.
+- `DisposeAsync()`'s idle-item drain loop now disposes every remaining pooled item even if one of them throws on `Dispose()`, instead of aborting on the first failure and leaking the rest (plus the buffer's own `Meter`/`ActivitySource`).
+- With `BackgroundLogger(true)`, `DisposeAsync()` no longer silently drops its own later log messages (a background-pump failure, the heartbeat-disposal grace-period warning, or the item-drain loop's own defensive logging) by completing the log queue too early.
+- The internal bag tracking deferred heartbeat-callback resource disposals no longer grows unboundedly under a chronically slow `HeartBeat` callback - already-finished entries are pruned as new ones are added.
+- `acquire.duration` and the `RingBufferPlus.Acquire` activity now carry `acquire.timed_out`/`acquire.cancelled` tags on a failed outcome, distinguishing a genuine `AcquireTimeout` from an ordinary caller-cancellation or shutdown.
+- `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity no longer report a scale-up as an ordinary cancelled shutdown when a genuine factory failure occurred earlier in the same batch and a later attempt was then cancelled by `DisposeAsync()`.
+- The grace-period-timeout message logged when `DisposeAsync()` cannot wait for an orphaned heartbeat callback's deferred disposal is now a `LogWarning`, not an informational message - it is a real, indeterminate-duration resource leak, not an ordinary shutdown-vs-failure ambiguity.
 
 ## [5.0.0] - 2026-08-12
 

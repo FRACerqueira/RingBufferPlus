@@ -189,6 +189,49 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        [Trait("Category", "Contract")]
+        public async Task AcquireDuration_DistinguishesGenuineTimeoutFromCallerCancellation()
+        {
+            // Round 5, Observabilidade (finding O6): ringbufferplus.acquire.duration carried no tag
+            // distinguishing why an unsuccessful acquire failed - every failed row looked identical
+            // whether it was a genuine AcquireTimeout, an ordinary shutdown, or the caller's own
+            // token firing, unlike the "RingBufferPlus.Acquire" activity, which already carried
+            // timed_out/cancelled. Fixed by adding the same two tags to the metric.
+            var timeoutBufferName = UniqueBufferName();
+            using var timeoutCts = new CancellationTokenSource();
+            var (timeoutMeterListener, timeoutRecords) = StartMeterListener();
+
+            var manager = CreateManager(timeoutBufferName, timeoutCts.Token);
+            await manager.WarmupAsync();
+            var held1 = await manager.AcquireAsync();
+            var held2 = await manager.AcquireAsync();
+            var faulted = await manager.AcquireAsync();
+            Assert.False(faulted.Successful);
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+            await manager.DisposeAsync();
+            timeoutMeterListener.Dispose();
+
+            var timeoutDurations = timeoutRecords.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), timeoutBufferName) && Equals(r.Tags.GetValueOrDefault("acquire.success"), false)).ToList();
+            Assert.Contains(timeoutDurations, r => Equals(r.Tags.GetValueOrDefault("acquire.timed_out"), true) && Equals(r.Tags.GetValueOrDefault("acquire.cancelled"), false));
+
+            var cancelBufferName = UniqueBufferName();
+            using var cancelCts = new CancellationTokenSource();
+            var (cancelMeterListener, cancelRecords) = StartMeterListener();
+
+            var manager2 = CreateManager(cancelBufferName, cancelCts.Token);
+            await manager2.WarmupAsync();
+            using var callerCts = new CancellationTokenSource();
+            callerCts.Cancel();
+            await Assert.ThrowsAsync<TaskCanceledException>(() => manager2.AcquireAsync(callerCts.Token).AsTask());
+            await manager2.DisposeAsync();
+            cancelMeterListener.Dispose();
+
+            var cancelDurations = cancelRecords.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), cancelBufferName) && Equals(r.Tags.GetValueOrDefault("acquire.success"), false)).ToList();
+            Assert.Contains(cancelDurations, r => Equals(r.Tags.GetValueOrDefault("acquire.timed_out"), false) && Equals(r.Tags.GetValueOrDefault("acquire.cancelled"), true));
+        }
+
+        [Fact]
         public async Task AcquireFault_TriggersAutoScale_RecordsScaleOperation_WithAutoTrigger()
         {
             var bufferName = UniqueBufferName();
@@ -439,6 +482,64 @@ namespace RingBufferPlus.Tests
 
             var bDurations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), nameB));
             Assert.Contains(bDurations, r => Equals(r.Tags["acquire.success"], true));
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleUp_WithAGenuineFailureThenRacedByDisposeAsync_StillReportsTheFailure_NotJustCancelled()
+        {
+            // Round 5, Observabilidade (finding O7): cancelledByShutdown ("!ok && token was
+            // cancelled") could be true at the same time a genuine, non-cancellation factory
+            // failure had already happened earlier in the very same batch (tolerated via
+            // maxConsecutiveFactoryFailures, so the batch kept going and made partial progress).
+            // Before the fix, an ordinary DisposeAsync() racing the batch's still-unattempted
+            // items reported the whole attempt as "just cancelled by shutdown" - masking the real
+            // failure entirely, the exact opposite of what O1 exists to prevent.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var callIndex = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(async ct =>
+                {
+                    var n = Interlocked.Increment(ref callIndex);
+                    if (n <= 2) return 1; // warmup fill (Capacity=2)
+                    if (n == 3) return 1; // scale-up attempt 1: succeeds -> created.Count becomes 1
+                    if (n == 4) throw new InvalidOperationException("Simulated genuine factory failure.");
+                    // scale-up attempts 3+: slow, so DisposeAsync() can race them mid-flight
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    return 1;
+                }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(1)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .Build();
+            await service.WarmupAsync();
+
+            var held1 = await service.AcquireAsync();
+            var held2 = await service.AcquireAsync();
+            // Pool is empty - this acquire times out and enqueues the autoscale Fault, triggering
+            // a scale-up 2 -> 6 (quantity 4): attempt 1 succeeds, attempt 2 fails genuinely
+            // (tolerated), attempt 3 is mid-Task.Delay when we race it below.
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            await Task.Delay(300);
+            await service.DisposeAsync();
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName) && Equals(r.Tags.GetValueOrDefault("direction"), "up")).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags.GetValueOrDefault("success"), false) && Equals(r.Tags.GetValueOrDefault("cancelled"), false));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up"));
+            Assert.Equal(false, scaleActivity.GetTagItem("cancelled"));
+            Assert.Equal(ActivityStatusCode.Error, scaleActivity.Status);
         }
     }
 }

@@ -47,7 +47,7 @@ public class WeatherForecastController(IRingBufferService<int> ringBufferService
 
 `WarmupRingBufferAsync<T>(app, name, token?)` looks up the registered singleton by name among every `IRingBufferService<T>` for that `T`, then calls `WarmupAsync` on it — with the given `token`, or `IHostApplicationLifetime.ApplicationStopping` if none is passed. It throws `ArgumentNullException` if no buffer with that name and type was registered — it does not silently no-op.
 
-Because the DI container owns the singleton's lifetime, disposal on host shutdown (`await app.StopAsync()` / process exit) calls `DisposeAsync()` on it automatically — you don't need to call it yourself, unlike the console-app pattern in the other usage guides.
+Because the DI container owns the singleton's lifetime, disposal on host shutdown (`await app.StopAsync()` / process exit) calls `DisposeAsync()` on it automatically — you don't need to call it yourself, unlike the console-app pattern in the other usage guides. If a `HeartBeat` callback is configured and happens to be orphaned from a previous timeout when this runs, `DisposeAsync()` can take up to an extra `pulse` interval to return - worth accounting for if you've tuned `HostOptions.ShutdownTimeout` tightly against this buffer's expected disposal cost; see the [heartbeat guide](usage-heartbeat.md).
 
 ## Trade-offs / limitations
 
