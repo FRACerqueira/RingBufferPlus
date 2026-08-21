@@ -336,15 +336,17 @@ namespace RingBufferPlus.Core
                 {
                     await Task.WhenAll(pending).ConfigureAwait(false);
                 }
-                catch (OperationCanceledException)
-                {
-                    //ignore: expected once _lifetime is cancelled
-                }
                 catch (Exception ex)
                 {
                     // Disposal must be best-effort and never throw regardless of how a background
                     // pump ended, but an unexpected fault here is still worth surfacing through the
-                    // configured logger/ErrorHandler rather than being fully silent.
+                    // configured logger/ErrorHandler rather than being fully silent. No separate
+                    // OperationCanceledException catch is needed here (removed as dead code during
+                    // the between-rounds backlog cleanup, 2026-08-21): RunEngineAsync,
+                    // RunHeartbeatAsync, and RunSampleTickAsync each already fully own their own
+                    // OperationCanceledException at their own outermost level, so none of the tasks
+                    // in `pending` can ever propagate one here - this catch-all covers whatever else
+                    // might, same as before.
                     LogError(ex);
                 }
 
