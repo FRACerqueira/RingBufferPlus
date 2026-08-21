@@ -260,7 +260,13 @@ namespace RingBufferPlus.Core
                 }
                 return !LockWhenScaling || await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            // R24 (Round 7, Resiliência): only an ordinary shutdown of this buffer's own lifetime
+            // resolves to a plain `false` here - a raw OperationCanceledException/TaskCanceledException
+            // thrown by the factory itself (e.g. an HttpClient/gRPC/DB-driver's own unrelated internal
+            // timeout, surfaced as-is per the deliberate zero-progress contract confirmed in Round 6)
+            // must not be swallowed into an indistinguishable, exception-less `false` - it falls
+            // through this guard and propagates to the caller like any other genuine factory exception.
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
             {
                 return false;
             }
@@ -454,7 +460,13 @@ namespace RingBufferPlus.Core
                 // signal nobody will ever send.
                 reached = await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            // R23 (Round 7, Resiliência): only an ordinary shutdown of this buffer's own lifetime
+            // resolves to reached=false here - a raw OperationCanceledException/TaskCanceledException
+            // thrown by the factory itself (e.g. an HttpClient/gRPC/DB-driver's own unrelated internal
+            // timeout) must not be swallowed into the generic "did not reach initial capacity" message
+            // below, discarding the real exception. It falls through this guard and propagates as-is,
+            // same as any other genuine factory exception on a zero-progress batch (Round 6).
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
             {
                 reached = false;
             }
@@ -865,9 +877,32 @@ namespace RingBufferPlus.Core
         {
             foreach (var item in items)
             {
+                // N1/N2 (Round 7, Estabilidade): a pooled item's own Dispose()/DisposeAsync() had no
+                // bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
+                // (PulseHeartBeat, F16). Both callers of this method depend on it never hanging:
+                // DisposeAsync()'s own drain loop (N1, a hang there just delays/blocks shutdown
+                // itself) and RemoveItemsAsync (N2, far worse - it runs on the single-consumer
+                // engine's own thread during a scale-down, so a hang there stalled every other
+                // command, including the wait DisposeAsync() itself has on _engineTask, forever).
+                // PulseHeartBeat is reused as the grace period here too, same "can't cancel external
+                // code, so stop waiting instead" precedent F16 already established for the heartbeat
+                // case. DisposeItemAsync(item) never actually gets cancelled by the timeout (there is
+                // no way to force that on arbitrary user code) - it keeps running in the background,
+                // observed by nothing further, but it can never fault an unobserved exception either:
+                // any exception it eventually throws is still caught below, just later than this
+                // method waited for.
+                var disposeTask = DisposeItemAsync(item).AsTask();
                 try
                 {
-                    await DisposeItemAsync(item).ConfigureAwait(false);
+                    await disposeTask.WaitAsync(PulseHeartBeat).ConfigureAwait(false);
+                }
+                catch (TimeoutException)
+                {
+                    LogWarning("A pooled item's Dispose()/DisposeAsync() did not complete within the grace period - it will keep running in the background, but this call is no longer waiting for it.");
+                    _ = disposeTask.ContinueWith(t =>
+                    {
+                        if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
+                    }, TaskScheduler.Default);
                 }
                 catch (Exception disposeEx)
                 {
@@ -907,24 +942,28 @@ namespace RingBufferPlus.Core
                 var item = await Factory(_lifetime.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                 await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            // Same distinction as CreateItemsAsync (R15): a normal DisposeAsync racing this
+            // replacement cancels the same _lifetime token the per-item timeout is linked from -
+            // that is an ordinary shutdown, not evidence the factory is unhealthy.
+            catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
             {
-                // Same distinction as CreateItemsAsync (R15): a normal DisposeAsync racing this
-                // replacement cancels the same _lifetime token the per-item timeout is linked
-                // from - that is an ordinary shutdown, not evidence the factory is unhealthy.
-                if (_lifetime.IsCancellationRequested)
-                {
-                    LogMessage("Replacement cancelled by shutdown.");
-                }
-                else
-                {
-                    LogError(new TimeoutException("Timeout factory (replacement)"));
-                }
+                LogMessage("Replacement cancelled by shutdown.");
+            }
+            // R25 (Round 7, Resiliência): only the per-item factoryTimeout's own deadline actually
+            // elapsing counts as a genuine timeout worth fabricating a TimeoutException for - a raw
+            // OperationCanceledException/TaskCanceledException thrown by the factory itself (its own
+            // unrelated internal timeout, e.g. HttpClient/gRPC/a DB driver) is not that, and logging a
+            // fabricated TimeoutException for it discards the real exception entirely.
+            catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested)
+            {
+                LogError(new TimeoutException("Timeout factory (replacement)"));
             }
             catch (Exception ex)
             {
                 // A non-cancellation factory failure must not escape and kill the engine loop; there is
-                // no caller waiting on a replacement, so logging is the only outcome needed here.
+                // no caller waiting on a replacement, so logging is the only outcome needed here. This
+                // also now catches a factory-thrown OperationCanceledException that matched neither
+                // guard above (R25) - logging the real exception instead of a fabricated one.
                 LogError(ex);
             }
         }

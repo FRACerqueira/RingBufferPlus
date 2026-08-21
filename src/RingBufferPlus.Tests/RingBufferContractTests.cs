@@ -501,6 +501,96 @@ namespace RingBufferPlus.Tests
             await disposeTask;
         }
 
+        // ---------------------------------------------------------------------
+        // 1.36-1.38 - R23/R24/R25 (Round 7, Resiliência): a factory can throw
+        // OperationCanceledException/TaskCanceledException for its own unrelated reasons (an
+        // HttpClient/gRPC/DB driver's own internal timeout, nothing to do with this buffer's own
+        // _lifetime) - before these fixes, every catch below misclassified that as an ordinary
+        // shutdown, discarding the real exception. This completes (does not contradict) the
+        // Round 6-confirmed "surface the real factory exception on a zero-progress batch" contract
+        // - it just extends that contract to cover the case where the real exception happens to be
+        // OperationCanceledException-shaped.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task WarmupAsync_WhenFactoryThrowsOperationCanceledException_PropagatesTheRealException_NotAGenericWrapper()
+        {
+            var manager = CreateFixedManager(3, _ => throw new TaskCanceledException("factory's own unrelated timeout"));
+
+            var warmupTask = manager.WarmupAsync();
+            var completed = await Task.WhenAny(warmupTask, Task.Delay(TimeSpan.FromSeconds(3)));
+
+            Assert.Same(warmupTask, completed);
+            var ex = await Assert.ThrowsAsync<TaskCanceledException>(() => warmupTask);
+            Assert.Equal("factory's own unrelated timeout", ex.Message);
+
+            await manager.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhenFactoryThrowsOperationCanceledExceptionDuringScaleUp_PropagatesRealException_NotASilentFalse()
+        {
+            var throwing = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFactoryThrowsOceDuringScale", null);
+            var service = builder
+                .Factory(_ => throwing ? throw new TaskCanceledException("factory's own unrelated timeout") : Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            throwing = true;
+
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(switchTask, completed);
+            var switchEx = await Assert.ThrowsAsync<TaskCanceledException>(() => switchTask);
+            Assert.Equal("factory's own unrelated timeout", switchEx.Message);
+
+            Assert.True(service.IsInitCapacity);
+            throwing = false;
+            var acquireTask = service.AcquireAsync().AsTask();
+            var acquireCompleted = await Task.WhenAny(acquireTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(acquireTask, acquireCompleted);
+            Assert.True((await acquireTask).Successful);
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartbeatTriggeredReplacement_WhenFactoryThrowsOperationCanceledException_LogsTheRealException_NotAFabricatedTimeout()
+        {
+            var errors = new List<Exception>();
+            var replacementShouldThrow = false;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractReplacementFactoryThrowsOce", null);
+            var service = await builder
+                .Factory(_ => replacementShouldThrow ? throw new TaskCanceledException("factory's own unrelated timeout") : Task.FromResult(1))
+                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            replacementShouldThrow = true;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (!errors.Any(e => e is TaskCanceledException) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+
+            Assert.Contains(errors, e => e is TaskCanceledException && e.Message == "factory's own unrelated timeout");
+            Assert.DoesNotContain(errors, e => e is TimeoutException && e.Message == "Timeout factory (replacement)");
+
+            await service.DisposeAsync();
+        }
+
         [Fact]
         [Trait("Category", "Contract")]
         public async Task AutoScaleAcquireFault_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
@@ -746,6 +836,16 @@ namespace RingBufferPlus.Tests
                 {
                     throw new InvalidOperationException("Simulated pooled item Dispose() failure.");
                 }
+            }
+        }
+
+        private sealed class HangingDisposeProbe(ManualResetEventSlim release) : IAsyncDisposable
+        {
+            public async ValueTask DisposeAsync()
+            {
+                // Capped at 10s so a broken fix can't actually hang the test process forever - the
+                // assertions themselves are what prove the library-level bound (PulseHeartBeat) works.
+                await Task.Run(() => release.Wait(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
             }
         }
 
@@ -2129,6 +2229,71 @@ namespace RingBufferPlus.Tests
 
             var ex = Assert.Throws<InvalidOperationException>(() => fixedBuilder.Build());
             Assert.Equal("The command Factory is not defined.", ex.Message);
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.39-1.40 - N1/N2 (Round 7, Estabilidade): a pooled item's own Dispose()/DisposeAsync()
+        // had no bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
+        // (PulseHeartBeat, F16). N1: a hang in DisposeAsync()'s own idle-item drain loop just
+        // delayed/blocked shutdown itself. N2, far worse: RemoveItemsAsync runs on the single-
+        // consumer engine's own thread during a scale-down, so a hang there stalled every other
+        // command forever, including the wait DisposeAsync() itself has on _engineTask. Both fixed
+        // by bounding each item's dispose wait to PulseHeartBeat (same grace-period precedent F16
+        // already established) inside the shared DisposeItemsDefensivelyAsync helper.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WhenAnIdleItemsDisposeHangsForever_StillReturnsWithinTheGracePeriod()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractDrainLoopHangingDispose", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new HangingDisposeProbe(releaseHang)))
+                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var sw = Stopwatch.StartNew();
+            var disposeTask = service.DisposeAsync().AsTask();
+            var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            sw.Stop();
+
+            Assert.Same(disposeTask, completed);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"Expected DisposeAsync() to return within the grace period, took {sw.Elapsed}.");
+
+            releaseHang.Set();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleDown_WhenAnIdleItemsDisposeHangsForever_StillLetsTheEngineProcessLaterCommands()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractScaleDownHangingDispose", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(new HangingDisposeProbe(releaseHang)))
+                .ElasticCapacity(4, 2, 4, 1, TimeSpan.FromSeconds(5))
+                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            // Scale down 4 -> 2: RemoveItemsAsync pulls 2 idle items whose Dispose() hangs forever.
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(switchTask, completed);
+
+            // The engine must still be alive for further work - a second, unrelated command must
+            // not be stuck behind the first scale-down's hung item disposals.
+            var secondSwitchTask = service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            var secondCompleted = await Task.WhenAny(secondSwitchTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(secondSwitchTask, secondCompleted);
+
+            releaseHang.Set();
+            var disposeTask = service.DisposeAsync().AsTask();
+            var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            Assert.Same(disposeTask, disposeCompleted);
         }
     }
 }
