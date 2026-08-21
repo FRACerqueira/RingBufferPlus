@@ -16,7 +16,9 @@ namespace RingBufferPlus
         public readonly static TimeSpan FactoryTimeout = TimeSpan.FromSeconds(15);
 
         /// <summary>
-        /// The default timeout for the buffer health checks.
+        /// The default timeout for the buffer health checks. Also reused as the default grace period
+        /// bounding a single pooled item's own <c>Dispose()</c>/<c>DisposeAsync()</c> call during shutdown
+        /// or scale-down - this applies whether or not a <c>HeartBeat</c> callback is configured at all.
         /// </summary>
         public readonly static TimeSpan PulseHeartBeat = TimeSpan.FromSeconds(10);
 

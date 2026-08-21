@@ -21,7 +21,13 @@ namespace RingBufferPlus
         /// <summary>
         /// Sets the factory (required) to create an instance in the ring buffer asynchronously.
         /// </summary>
-        /// <param name="value">The handler to factory.</param>
+        /// <param name="value">The handler to factory. Receives a <see cref="CancellationToken"/> that
+        /// fires at this call's own <paramref name="timeout"/> deadline (and on shutdown) - honoring it
+        /// (passing it through to any awaited I/O, or checking it directly) is the caller's
+        /// responsibility. If the factory ignores the token and keeps running after this library has
+        /// already given up waiting on it, any instance it eventually produces is discarded without being
+        /// disposed - a resource leak (e.g. a database connection or broker channel left open) that this
+        /// library cannot detect or prevent on your behalf.</param>
         /// <param name="timeout">Per-item timeout for the factory call; also the deadline for the overall
         /// operation as <c>quantity * timeout</c> when creating several items at once (the initial warmup
         /// fill, or an autoscale-triggered scale-up) - so it bounds how long other engine operations (like
@@ -48,7 +54,9 @@ namespace RingBufferPlus
         /// Sets the HeartBeat in the ring buffer.
         /// </summary>
         /// <param name="value">The <see cref="RingBufferValue{T}"/>.</param>
-        /// <param name="pulse">The Heart Beat Interval. Default value is 10 seconds.</param>
+        /// <param name="pulse">The Heart Beat Interval. Also reused as the grace period bounding a single
+        /// pooled item's <c>Dispose()</c>/<c>DisposeAsync()</c> call during shutdown or scale-down, whether
+        /// or not <c>HeartBeat</c> itself is configured. Default value is 10 seconds.</param>
         /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         IRingBufferAutoScaleBuilder<T> HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse = null);
 

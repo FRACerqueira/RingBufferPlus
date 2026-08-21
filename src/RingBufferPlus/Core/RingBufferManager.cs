@@ -258,7 +258,18 @@ namespace RingBufferPlus.Core
                 {
                     return false;
                 }
-                return !LockWhenScaling || await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+                if (!LockWhenScaling)
+                {
+                    // Round 8 (Resiliência Finding 3): nobody awaits completion.Task on this
+                    // unlocked path - if the engine loop later resolves it via TrySetException on a
+                    // genuine scale failure, that fault becomes a genuinely unobserved task
+                    // exception once this TCS is garbage-collected. Merely attaching a
+                    // continuation does not mark the exception observed - reading .Exception
+                    // inside it is what actually does that.
+                    _ = completion.Task.ContinueWith(static t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
+                    return true;
+                }
+                return await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
             }
             // R24 (Round 7, Resiliência): only an ordinary shutdown of this buffer's own lifetime
             // resolves to a plain `false` here - a raw OperationCanceledException/TaskCanceledException
@@ -823,7 +834,12 @@ namespace RingBufferPlus.Core
                     factoryTimeout.CancelAfter(FactoryTimeout);
                     try
                     {
-                        var item = await Factory(overall.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
+                        // Round 8 (Resiliência Achado 1): factoryTimeout is linked FROM overall, so
+                        // it fires on everything overall does, plus the per-item deadline - passing
+                        // it here instead loses no cancellation signal, but actually stops a
+                        // well-behaved factory once .WaitAsync gives up on it, instead of leaving it
+                        // running orphaned.
+                        var item = await Factory(factoryTimeout.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                         created.Add(item);
                         consecutiveFailures = 0;
                     }
@@ -875,41 +891,57 @@ namespace RingBufferPlus.Core
 
         private async Task DisposeItemsDefensivelyAsync(IEnumerable<T> items)
         {
+            // N1/N2 (Round 7, Estabilidade): a pooled item's own Dispose()/DisposeAsync() had no
+            // bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
+            // (PulseHeartBeat, F16). Both callers of this method depend on it never hanging:
+            // DisposeAsync()'s own drain loop (N1, a hang there just delays/blocks shutdown
+            // itself) and RemoveItemsAsync (N2, far worse - it runs on the single-consumer
+            // engine's own thread during a scale-down, so a hang there stalled every other
+            // command, including the wait DisposeAsync() itself has on _engineTask, forever).
+            // PulseHeartBeat is reused as the grace period here too, same "can't cancel external
+            // code, so stop waiting instead" precedent F16 already established for the heartbeat
+            // case.
+            //
+            // Round 8 (Estabilidade F29 + Observabilidade): two gaps in the fix above. (1) a plain
+            // synchronous IDisposable.Dispose() blocks inline before any await point exists for
+            // WaitAsync to bound - Task.Run below pushes it onto a thread-pool thread first, same
+            // as the existing Task.Run(() => BufferHeartBeat?.Invoke(...)) pattern, so the grace
+            // period actually applies to it too. (2) the previous sequential foreach cost N x
+            // PulseHeartBeat for N hung items - Task.WhenAll bounds the whole batch by roughly one
+            // PulseHeartBeat instead.
+            var disposals = new List<Task>();
             foreach (var item in items)
             {
-                // N1/N2 (Round 7, Estabilidade): a pooled item's own Dispose()/DisposeAsync() had no
-                // bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
-                // (PulseHeartBeat, F16). Both callers of this method depend on it never hanging:
-                // DisposeAsync()'s own drain loop (N1, a hang there just delays/blocks shutdown
-                // itself) and RemoveItemsAsync (N2, far worse - it runs on the single-consumer
-                // engine's own thread during a scale-down, so a hang there stalled every other
-                // command, including the wait DisposeAsync() itself has on _engineTask, forever).
-                // PulseHeartBeat is reused as the grace period here too, same "can't cancel external
-                // code, so stop waiting instead" precedent F16 already established for the heartbeat
-                // case. DisposeItemAsync(item) never actually gets cancelled by the timeout (there is
-                // no way to force that on arbitrary user code) - it keeps running in the background,
-                // observed by nothing further, but it can never fault an unobserved exception either:
-                // any exception it eventually throws is still caught below, just later than this
-                // method waited for.
-                var disposeTask = DisposeItemAsync(item).AsTask();
-                try
+                disposals.Add(DisposeOneItemDefensivelyAsync(item));
+            }
+            await Task.WhenAll(disposals).ConfigureAwait(false);
+        }
+
+        private async Task DisposeOneItemDefensivelyAsync(T item)
+        {
+            // DisposeItemAsync(item) never actually gets cancelled by the timeout (there is no way
+            // to force that on arbitrary user code) - it keeps running in the background, observed
+            // by nothing further, but it can never fault an unobserved exception either: any
+            // exception it eventually throws is still caught below, just later than this method
+            // waited for.
+            var disposeTask = Task.Run(() => DisposeItemAsync(item).AsTask());
+            try
+            {
+                await disposeTask.WaitAsync(PulseHeartBeat).ConfigureAwait(false);
+            }
+            catch (TimeoutException)
+            {
+                LogWarning("A pooled item's Dispose()/DisposeAsync() did not complete within the grace period - it will keep running in the background, but this call is no longer waiting for it.");
+                _ = disposeTask.ContinueWith(t =>
                 {
-                    await disposeTask.WaitAsync(PulseHeartBeat).ConfigureAwait(false);
-                }
-                catch (TimeoutException)
-                {
-                    LogWarning("A pooled item's Dispose()/DisposeAsync() did not complete within the grace period - it will keep running in the background, but this call is no longer waiting for it.");
-                    _ = disposeTask.ContinueWith(t =>
-                    {
-                        if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
-                    }, TaskScheduler.Default);
-                }
-                catch (Exception disposeEx)
-                {
-                    // One item's Dispose()/DisposeAsync() throwing must not stop the rest from being
-                    // disposed, nor escape and kill the engine loop.
-                    LogError(disposeEx);
-                }
+                    if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
+                }, TaskScheduler.Default);
+            }
+            catch (Exception disposeEx)
+            {
+                // One item's Dispose()/DisposeAsync() throwing must not stop the rest from being
+                // disposed, nor escape and kill the engine loop.
+                LogError(disposeEx);
             }
         }
 
@@ -937,10 +969,16 @@ namespace RingBufferPlus.Core
         {
             using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             factoryTimeout.CancelAfter(FactoryTimeout);
+            var replaced = false;
             try
             {
-                var item = await Factory(_lifetime.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
+                // Round 8 (Resiliência Achado 1): factoryTimeout is linked FROM _lifetime, so it
+                // fires on everything _lifetime does, plus the per-item deadline - passing it here
+                // instead loses no cancellation signal, but actually stops a well-behaved factory
+                // once .WaitAsync gives up on it, instead of leaving it running orphaned.
+                var item = await Factory(factoryTimeout.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                 await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
+                replaced = true;
             }
             // Same distinction as CreateItemsAsync (R15): a normal DisposeAsync racing this
             // replacement cancels the same _lifetime token the per-item timeout is linked from -
@@ -965,6 +1003,16 @@ namespace RingBufferPlus.Core
                 // also now catches a factory-thrown OperationCanceledException that matched neither
                 // guard above (R25) - logging the real exception instead of a fabricated one.
                 LogError(ex);
+            }
+            finally
+            {
+                // The old item was already disposed before ReplaceOne was enqueued, so any failure
+                // above means the pool really shrank by one - without this, CurrentCapacity lies forever.
+                if (!replaced)
+                {
+                    var current = CurrentCapacity;
+                    Volatile.Write(ref _currentCapacity, current - 1);
+                }
             }
         }
 
@@ -1179,11 +1227,11 @@ namespace RingBufferPlus.Core
         {
             if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            if (BackgroundLogger)
-            {
-                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Debug, msg, null));
-            }
-            else
+            // Round 8 (F30): _logQueue is an unbounded channel, so TryWrite only fails once the
+            // queue has been completed (e.g. a late message logged after DisposeAsync already
+            // called _logQueue.Writer.TryComplete()) - falling back to a synchronous dispatch
+            // here means that message is still delivered instead of silently dropped.
+            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Debug, msg, null)))
             {
                 SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
             }
@@ -1193,11 +1241,7 @@ namespace RingBufferPlus.Core
         {
             if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            if (BackgroundLogger)
-            {
-                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Warning, msg, null));
-            }
-            else
+            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Warning, msg, null)))
             {
                 SafeInvokeSink(() => logMessageFoWrn(Logger, Name, msg, null));
             }
@@ -1206,11 +1250,15 @@ namespace RingBufferPlus.Core
         private void LogError(Exception error)
         {
             if (Logger is null && ErrorHandler is null) return;
-            if (BackgroundLogger)
+            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Error, null, error)))
             {
-                _logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Error, null, error));
+                DispatchLogErrorSynchronously(error);
             }
-            else if (ErrorHandler is null)
+        }
+
+        private void DispatchLogErrorSynchronously(Exception error)
+        {
+            if (ErrorHandler is null)
             {
                 var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {error.Message} ";
                 SafeInvokeSink(() => logMessageForErr(Logger!, Name, msg, error));

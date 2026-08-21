@@ -559,6 +559,69 @@ namespace RingBufferPlus.Tests
             await service.DisposeAsync();
         }
 
+        // ---------------------------------------------------------------------
+        // Round 8, Resiliência Finding 3: on the unlocked SwitchToAsync path (LockWhenScaling not
+        // set), the caller never awaits completion.Task - `!LockWhenScaling || await
+        // completion.Task...` short-circuits before the right side is ever evaluated. If the engine
+        // loop later resolves that TCS via TrySetException on a genuine scale failure, nothing ever
+        // observes the fault, and it surfaces as a genuinely unobserved task exception once the TCS
+        // is garbage-collected.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhenUnlockedAndTheScaleUpFails_DoesNotSurfaceAnUnobservedTaskException()
+        {
+            var scaleUpShouldThrow = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractUnlockedSwitchUnobservedException", null);
+            var service = await builder
+                .Factory(_ => scaleUpShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .OnError((_, _) => { })
+                .ElasticCapacity(2, 2, 4, 1, TimeSpan.FromSeconds(5))
+                .BuildWarmupAsync();
+
+            scaleUpShouldThrow = true;
+
+            var unobserved = new List<Exception>();
+            void Handler(object? sender, UnobservedTaskExceptionEventArgs e)
+            {
+                lock (unobserved) unobserved.Add(e.Exception.GetBaseException());
+                e.SetObserved();
+            }
+            TaskScheduler.UnobservedTaskException += Handler;
+            try
+            {
+                // Deliberately NOT using LockWhenScaling(): the unlocked path is exactly what's
+                // under test - it returns true immediately without waiting for the eventual outcome.
+                var switched = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+                Assert.True(switched);
+
+                // Give the engine loop time to actually process the Switch command and fault
+                // `completion` before forcing collection.
+                var deadline = DateTime.UtcNow.AddSeconds(3);
+                while (service.IsInitCapacity && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(20);
+                }
+
+                GC.Collect();
+                GC.WaitForPendingFinalizers();
+                GC.Collect();
+                await Task.Delay(100);
+            }
+            finally
+            {
+                TaskScheduler.UnobservedTaskException -= Handler;
+            }
+
+            lock (unobserved)
+            {
+                Assert.DoesNotContain(unobserved, e => e is InvalidOperationException ioe && ioe.Message == "factory down");
+            }
+
+            await service.DisposeAsync();
+        }
+
         [Fact]
         [Trait("Category", "Contract")]
         public async Task HeartbeatTriggeredReplacement_WhenFactoryThrowsOperationCanceledException_LogsTheRealException_NotAFabricatedTimeout()
@@ -846,6 +909,28 @@ namespace RingBufferPlus.Tests
                 // Capped at 10s so a broken fix can't actually hang the test process forever - the
                 // assertions themselves are what prove the library-level bound (PulseHeartBeat) works.
                 await Task.Run(() => release.Wait(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+            }
+        }
+
+        // Round 8 (Observabilidade): a plain synchronous IDisposable, unlike HangingDisposeProbe
+        // above - its Dispose() blocks the calling thread directly, with no await point of its own.
+        private sealed class HangingSyncDisposeProbe(ManualResetEventSlim release) : IDisposable
+        {
+            // Capped at 10s so a broken fix can't actually hang the test process forever - the
+            // assertions themselves are what prove the library-level bound (PulseHeartBeat) works.
+            public void Dispose() => release.Wait(TimeSpan.FromSeconds(10));
+        }
+
+        // Round 8 (Resiliência/F30): hangs past the grace period, then - once released - faults on
+        // its way out. Used to land a background dispose fault (the ContinueWith in
+        // DisposeOneItemDefensivelyAsync's TimeoutException branch) AFTER _logQueue has already
+        // been completed by DisposeAsync's own finally block.
+        private sealed class HangingThenThrowingDisposeProbe(ManualResetEventSlim release) : IAsyncDisposable
+        {
+            public async ValueTask DisposeAsync()
+            {
+                await Task.Run(() => release.Wait(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+                throw new InvalidOperationException("Simulated late dispose failure after grace period.");
             }
         }
 
@@ -2164,6 +2249,54 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Round 8 (F30): _logQueue is unbounded, so LogMessage/LogWarning/LogError's TryWrite only
+        // ever fails once the queue has been completed - DisposeAsync completes it only after the
+        // final item-drain loop returns, but a hung item's background dispose (Round 8 fix above)
+        // can fault well after that, once released. Before this fix that late LogError call was
+        // silently dropped.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task LogError_ForABackgroundDisposalThatFaultsAfterDisposeAsyncReturned_IsStillDelivered_NotSilentlyDropped()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            var errors = new List<Exception>();
+
+            IRingBufferBuilder<HangingThenThrowingDisposeProbe> builder = new RingBufferBuilder<HangingThenThrowingDisposeProbe>("ContractLateBackgroundDisposalFaultNotDropped", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new HangingThenThrowingDisposeProbe(releaseHang)))
+                .Logger(new CapturingLogger())
+                .BackgroundLogger(true)
+                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            // Returns once the grace period elapses for the hung idle item - _logQueue is now
+            // completed (DisposeAsync's finally block already ran to the end).
+            await service.DisposeAsync();
+
+            // Only now does the background dispose actually finish, and fault - strictly after the
+            // queue that LogError would normally write to has been closed.
+            releaseHang.Set();
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (errors)
+                {
+                    if (errors.Any(e => e is InvalidOperationException ioe && ioe.Message.Contains("Simulated late dispose failure"))) break;
+                }
+                await Task.Delay(20);
+            }
+            lock (errors)
+            {
+                Assert.Contains(errors, e => e is InvalidOperationException ioe && ioe.Message.Contains("Simulated late dispose failure"));
+            }
+        }
+
+        // ---------------------------------------------------------------------
         // 1.34 - Sweep for unguarded external-callback invocations (Round 7): TurnbackAsync's
         // Invalidate() branch called DisposeItemAsync(value.Current) then
         // _commands.Writer.TryWrite(EngineCommand.ReplaceOne()) with no guard around the dispose
@@ -2294,6 +2427,219 @@ namespace RingBufferPlus.Tests
             var disposeTask = service.DisposeAsync().AsTask();
             var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(disposeTask, disposeCompleted);
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 8, Estabilidade F29 + Observabilidade: DisposeItemsDefensivelyAsync's grace period
+        // (PulseHeartBeat) only ever bounded IAsyncDisposable.DisposeAsync() - a plain synchronous
+        // IDisposable.Dispose() blocks the calling thread before WaitAsync gets a chance to apply
+        // any bound at all. HangingDisposeProbe above is IAsyncDisposable and already dispatches to
+        // a background thread internally, so it never actually exercised this gap.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WhenAnIdleItemsSynchronousDisposeHangsForever_StillReturnsWithinTheGracePeriod()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            IRingBufferBuilder<HangingSyncDisposeProbe> builder = new RingBufferBuilder<HangingSyncDisposeProbe>("ContractDrainLoopHangingSyncDispose", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new HangingSyncDisposeProbe(releaseHang)))
+                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var sw = Stopwatch.StartNew();
+            var disposeTask = service.DisposeAsync().AsTask();
+            var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
+            sw.Stop();
+
+            Assert.Same(disposeTask, completed);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(3), $"Expected DisposeAsync() to return within the grace period, took {sw.Elapsed}.");
+
+            releaseHang.Set();
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 8, Estabilidade F29: the batch of idle items was disposed sequentially - N hung
+        // items cost N x PulseHeartBeat in total, not one bounded wait for the whole batch.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task DisposeAsync_WhenMultipleIdleItemsAllHangOnDispose_TheWholeBatchIsBoundedByOnePulseHeartBeat_NotN()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            IRingBufferBuilder<HangingSyncDisposeProbe> builder = new RingBufferBuilder<HangingSyncDisposeProbe>("ContractDrainLoopBatchHangingSyncDispose", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new HangingSyncDisposeProbe(releaseHang)))
+                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(4)
+                .BuildWarmupAsync();
+
+            var sw = Stopwatch.StartNew();
+            var disposeTask = service.DisposeAsync().AsTask();
+            // 4 hung items sequentially would cost ~4 x 200ms = 800ms just for the grace periods,
+            // on top of real dispatch overhead - budget well below that to prove concurrency, but
+            // above one grace period (200ms) plus scheduling slack.
+            var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromMilliseconds(700)));
+            sw.Stop();
+
+            Assert.Same(disposeTask, completed);
+            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(700), $"Expected the batch to be bounded by ~one PulseHeartBeat, took {sw.Elapsed}.");
+
+            releaseHang.Set();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.41 - Round 8, Resiliência: Invalidate() (and the heartbeat's stuck-item path) disposes
+        // the old item BEFORE enqueuing ReplaceOne, so by the time CreateSingleReplacementAsync
+        // runs, one real item is already gone from the pool. When its Factory call then fails, the
+        // method only logged - _currentCapacity was never touched - so CurrentCapacity reported the
+        // old, too-high number forever, with no retry and no correction. This is the same class of
+        // bug as Round 1's R1 ("perda silenciosa de capacidade via Invalidate()"), which was marked
+        // closed at the time but was never actually fixed for this code path.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenTheReplacementFactoryFails_DecrementsCurrentCapacity_InsteadOfReportingTheLostItem()
+        {
+            var errors = new List<Exception>();
+            var replacementShouldThrow = false;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractReplacementFailureLosesCapacity", null);
+            var service = await builder
+                .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.Equal(2, service.CurrentCapacity);
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            replacementShouldThrow = true;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync
+
+            // Stage 1: wait until the replacement attempt has actually run and failed, so a later
+            // capacity mismatch cannot be confused with "the replacement never happened".
+            var failureDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < failureDeadline)
+            {
+                lock (errors)
+                {
+                    if (errors.Any(e => e is InvalidOperationException ioe && ioe.Message == "factory down")) break;
+                }
+                await Task.Delay(20);
+            }
+            lock (errors)
+            {
+                Assert.Contains(errors, e => e is InvalidOperationException ioe && ioe.Message == "factory down");
+            }
+
+            // Stage 2: the old item is gone and no replacement arrived, so the pool really is one
+            // item smaller - CurrentCapacity must say so.
+            var capacityDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (service.CurrentCapacity == 2 && DateTime.UtcNow < capacityDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(1, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.42-1.43 - Round 8, Resiliência Achado 1: CreateItemsAsync passed Factory the batch-level
+        // token (overall.Token) and CreateSingleReplacementAsync passed it the full-lifetime token
+        // (_lifetime.Token) - neither is the token that actually fires at the per-item FactoryTimeout
+        // deadline (factoryTimeout.Token, itself linked from the other so it fires on every condition
+        // the old token did, plus the per-item deadline). A cooperative factory that honors
+        // CancellationToken was therefore never actually told to stop once .WaitAsync(factoryTimeout.Token)
+        // gave up waiting on it - it kept running, orphaned, and any eventual successful result was
+        // silently dropped without disposal. Passing factoryTimeout.Token instead costs nothing and lets
+        // a well-behaved factory actually stop. A factory that ignores cancellation entirely is
+        // unaffected by this fix and remains a documented caller responsibility - see the XML doc on
+        // Factory's `value` parameter.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenTheReplacementFactoryTimesOut_ActuallyCancelsTheAbandonedFactoryCall()
+        {
+            var callCount = 0;
+            var cancelledPromptly = new TaskCompletionSource<bool>();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractReplacementFactoryTokenPropagation", null);
+            var service = await builder
+                .Factory(async ct =>
+                {
+                    if (Interlocked.Increment(ref callCount) <= 2)
+                    {
+                        return 1; // the FixedCapacity(2) warmup fill
+                    }
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        cancelledPromptly.TrySetResult(true);
+                        throw;
+                    }
+                    return 2;
+                }, TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync (the slow 3rd factory call)
+
+            var completed = await Task.WhenAny(cancelledPromptly.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(cancelledPromptly.Task, completed);
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleUp_WhenFactoryTimesOut_ActuallyCancelsTheAbandonedFactoryCall()
+        {
+            var callCount = 0;
+            var cancelledPromptly = new TaskCompletionSource<bool>();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpFactoryTokenPropagation", null);
+            var service = await builder
+                .Factory(async ct =>
+                {
+                    if (Interlocked.Increment(ref callCount) <= 2)
+                    {
+                        return 1; // the ElasticCapacity warmup fill (initial = 2)
+                    }
+                    try
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(10), ct).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        cancelledPromptly.TrySetResult(true);
+                        throw;
+                    }
+                    return 2;
+                }, TimeSpan.FromMilliseconds(200))
+                .ElasticCapacity(2, 2, 4)
+                .BuildWarmupAsync();
+
+            _ = service.SwitchToAsync(ScaleSwitch.MaxCapacity); // triggers CreateItemsAsync(quantity: 2)
+
+            var completed = await Task.WhenAny(cancelledPromptly.Task, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(cancelledPromptly.Task, completed);
+
+            await service.DisposeAsync();
         }
     }
 }
