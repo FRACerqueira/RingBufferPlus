@@ -541,5 +541,60 @@ namespace RingBufferPlus.Tests
             Assert.Equal(false, scaleActivity.GetTagItem("cancelled"));
             Assert.Equal(ActivityStatusCode.Error, scaleActivity.Status);
         }
+
+        [Fact]
+        [Trait("Category", "Observability")]
+        public async Task ScaleUp_WithAZeroProgressGenuineFailureThenRacedByDisposeAsync_StillReportsTheFailure_NotJustCancelled()
+        {
+            // Round 6, Resiliência (O7-residual): the O7 fix (above) only threads hadGenuineFailure
+            // through CreateItemsAsync's tuple-return exit path. When the whole batch makes zero
+            // progress, CreateItemsAsync instead throws its own lastFailure directly - a second,
+            // different exit path the O7 fix never covered, reopening the exact same masking.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var callIndex = 0;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(async ct =>
+                {
+                    var n = Interlocked.Increment(ref callIndex);
+                    if (n <= 2) return 1; // warmup fill (Capacity=2)
+                    if (n == 3) throw new InvalidOperationException("Simulated genuine factory failure."); // scale-up attempt 1: fails genuinely, zero progress so far
+                    // scale-up attempts 2+: slow, so DisposeAsync() can race them mid-flight
+                    await Task.Delay(TimeSpan.FromSeconds(5), ct);
+                    return 1;
+                }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .AutoScaleAcquireFault(1)
+                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .Build();
+            await service.WarmupAsync();
+
+            var held1 = await service.AcquireAsync();
+            var held2 = await service.AcquireAsync();
+            // Pool is empty - this acquire times out and enqueues the autoscale Fault, triggering
+            // a scale-up 2 -> 6: attempt 1 fails genuinely (zero progress, tolerated), attempt 2
+            // is mid-Task.Delay when we race it below - the whole batch never creates anything,
+            // so CreateItemsAsync throws instead of returning.
+            var faulted = await service.AcquireAsync();
+            Assert.False(faulted.Successful);
+
+            await Task.Delay(300);
+            await service.DisposeAsync();
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName) && Equals(r.Tags.GetValueOrDefault("direction"), "up")).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags.GetValueOrDefault("success"), false) && Equals(r.Tags.GetValueOrDefault("cancelled"), false));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up"));
+            Assert.Equal(false, scaleActivity.GetTagItem("cancelled"));
+            Assert.Equal(ActivityStatusCode.Error, scaleActivity.Status);
+        }
     }
 }

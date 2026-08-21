@@ -1969,5 +1969,98 @@ namespace RingBufferPlus.Tests
 
             await service.DisposeAsync();
         }
+
+        // ---------------------------------------------------------------------
+        // 1.32 - F23 (Rodada 6, achado independentemente por Estabilidade e Observabilidade): no
+        // call to a user-supplied Logger/ErrorHandler was guarded against that callback itself
+        // throwing. On the heartbeat-timeout path, that meant a throwing OnError, invoked from
+        // LogError right before the ReplaceOne command is enqueued, aborted the whole catch block
+        // before ReplaceOne ever ran - permanently losing one pool slot (the stuck item is never
+        // replaced) and faulting _heartbeatTask. DisposeAsync()'s own Task.WhenAll(pending) then
+        // observes that fault, calls LogError(ex) to report it, which invokes the same throwing
+        // OnError again - this time with nothing catching it, making DisposeAsync() itself throw,
+        // directly contradicting its own "must never throw" design comment.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeatTimeout_WithAThrowingOnErrorHandler_StillReplacesTheStuckItemAndDisposesCleanly()
+        {
+            using var callbackStarted = new ManualResetEventSlim();
+            using var releaseCallback = new ManualResetEventSlim();
+
+            IRingBufferBuilder<DisposableProbe> builder = new RingBufferBuilder<DisposableProbe>("ContractHeartbeatThrowingOnError", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new DisposableProbe()))
+                .OnError((_, _) => throw new InvalidOperationException("user OnError sink bug"))
+                .HeartBeat(_ =>
+                {
+                    callbackStarted.Set();
+                    releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                }, pulse: TimeSpan.FromMilliseconds(200))
+                .AcquireTimeout(TimeSpan.FromMilliseconds(300))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
+            // Let the 200ms pulse timeout fire while the callback is still blocked - this is what
+            // triggers the throwing OnError call inside RunHeartbeatAsync's F12/F15 catch.
+            await Task.Delay(500);
+
+            // The stuck slot must still get replaced despite OnError throwing - both items must be
+            // acquirable, proving the pool wasn't left permanently one item short.
+            var first = await service.AcquireAsync();
+            var second = await service.AcquireAsync();
+            Assert.True(first.Successful, "Expected the first item to still be acquirable.");
+            Assert.True(second.Successful, "Expected the replacement item to be acquirable despite the throwing OnError handler.");
+            await first.DisposeAsync();
+            await second.DisposeAsync();
+
+            releaseCallback.Set();
+            await service.DisposeAsync(); // must not throw, even with a permanently-broken OnError handler
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.33 - F23's BackgroundLogger-specific half: with BackgroundLogger(true), a throwing
+        // OnError is invoked from inside RunLoggerAsync's own dispatch loop - unguarded, this
+        // faulted the pump on the very first bad message and silently dropped every message for
+        // the rest of the instance's life, with no exception surfacing anywhere (the queue is
+        // unbounded and nothing was left reading it).
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task BackgroundLogger_WhenOnErrorThrowsOnce_StillDeliversLaterMessages()
+        {
+            var callCount = 0;
+            var delivered = new List<Exception>();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBackgroundLoggerOnErrorThrowsOnce", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(new CapturingLogger())
+                .BackgroundLogger(true)
+                .OnError((_, ex) =>
+                {
+                    if (Interlocked.Increment(ref callCount) == 1)
+                    {
+                        throw new InvalidOperationException("user OnError sink bug");
+                    }
+                    lock (delivered) delivered.Add(ex);
+                })
+                .HeartBeat(_ => throw new InvalidOperationException("heartbeat callback boom"), pulse: TimeSpan.FromMilliseconds(80))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (Volatile.Read(ref callCount) < 3 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.True(callCount >= 3, $"Expected at least 3 OnError invocations (the pump must survive the first throw), got {callCount}.");
+            Assert.NotEmpty(delivered);
+
+            await service.DisposeAsync();
+        }
     }
 }

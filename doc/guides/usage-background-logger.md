@@ -28,7 +28,7 @@ With `BackgroundLogger()` enabled, every debug/warning/error log call enqueues a
 ## Trade-offs / limitations
 
 - Log ordering across different operations is preserved (single consumer, FIFO channel), but the *timing* of when a message actually reaches your sink is decoupled from when the triggering event happened — don't rely on wall-clock proximity between an operation and its log line if you enable this.
-- `DisposeAsync` drains and completes the log channel as part of shutdown, so no background log message is silently dropped on a graceful dispose — but a message enqueued after the channel is completed (e.g. from a task racing shutdown) is simply not written; this is inherent to any bounded-lifetime background consumer.
+- `DisposeAsync` drains and completes the log channel as part of shutdown, so no background log message is silently dropped on a graceful dispose — but a message enqueued after the channel is completed (e.g. from a task racing shutdown) is simply not written. This loss is specific to `BackgroundLogger(true)`'s fire-and-forget queue, not "inherent to any bounded-lifetime background consumer": the same late message under the default synchronous logging mode still reaches your `Logger`/`OnError`, just delayed rather than lost.
 
 ## Common errors
 

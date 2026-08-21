@@ -53,6 +53,8 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - `acquire.duration` and the `RingBufferPlus.Acquire` activity now carry `acquire.timed_out`/`acquire.cancelled` tags on a failed outcome, distinguishing a genuine `AcquireTimeout` from an ordinary caller-cancellation or shutdown.
 - `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity no longer report a scale-up as an ordinary cancelled shutdown when a genuine factory failure occurred earlier in the same batch and a later attempt was then cancelled by `DisposeAsync()`.
 - The grace-period-timeout message logged when `DisposeAsync()` cannot wait for an orphaned heartbeat callback's deferred disposal is now a `LogWarning`, not an informational message - it is a real, indeterminate-duration resource leak, not an ordinary shutdown-vs-failure ambiguity.
+- A throwing `Logger`/`OnError` sink can no longer permanently kill the background logger pump, permanently lose a pool slot and make `DisposeAsync()` itself throw via the heartbeat-timeout path, or otherwise escape into unrelated core operations - every invocation of the user-supplied sink is now defensively guarded.
+- `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity no longer report a scale-up as an ordinary cancelled shutdown when the batch made zero progress due to a genuine factory failure and a later attempt was then cancelled by `DisposeAsync()` - closing a residual gap in the previous fix (above) for this specific batch outcome.
 
 ## [5.0.0] - 2026-08-12
 

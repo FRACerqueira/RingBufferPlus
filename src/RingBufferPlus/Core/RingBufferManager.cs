@@ -679,8 +679,23 @@ namespace RingBufferPlus.Core
                 {
                     var quantity = target - current;
                     LogMessage($"Starting ScaleUp {quantity}.");
-                    var (created, batchHadGenuineFailure) = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
-                    hadGenuineFailure = batchHadGenuineFailure;
+                    int created;
+                    try
+                    {
+                        (created, hadGenuineFailure) = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                    }
+                    catch (Exception)
+                    {
+                        // O7-residual (Round 6, Resiliência): CreateItemsAsync's own throw path
+                        // (zero items created, every attempt failed for a real reason) skips the
+                        // tuple return entirely, so hadGenuineFailure would otherwise stay at its
+                        // default false here - reopening the exact masking O7 fixed, just via
+                        // CreateItemsAsync's other exit path. Always a genuine failure at this
+                        // point: CreateItemsAsync only ever throws its own lastFailure, which its
+                        // two per-item catches already keep free of ordinary cancellation (R15).
+                        hadGenuineFailure = true;
+                        throw;
+                    }
                     LogMessage("End ScaleUp.");
                     ok = created == quantity;
                     // A partial scale-up still gained real, usable capacity - advance by however
@@ -1061,15 +1076,18 @@ namespace RingBufferPlus.Core
             {
                 await foreach (var item in _logQueue.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
                 {
+                    // SafeInvokeSink on every dispatch below (F23): one bad message must not kill
+                    // this pump for the rest of the instance's life - the same defensive-wrap
+                    // principle DisposeItemsDefensivelyAsync already applies to pooled items.
                     if (!string.IsNullOrEmpty(item.Message))
                     {
                         if (item.LogLevel == LogLevel.Debug)
                         {
-                            logMessageForDbg(Logger!, Name, item.Message, null);
+                            SafeInvokeSink(() => logMessageForDbg(Logger!, Name, item.Message, null));
                         }
                         else if (item.LogLevel == LogLevel.Warning)
                         {
-                            logMessageFoWrn(Logger!, Name, item.Message, null);
+                            SafeInvokeSink(() => logMessageFoWrn(Logger!, Name, item.Message, null));
                         }
                     }
                     if (item.Error is not null)
@@ -1077,11 +1095,11 @@ namespace RingBufferPlus.Core
                         if (ErrorHandler is null)
                         {
                             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {item.Error.Message} ";
-                            logMessageForErr(Logger!, Name, msg, item.Error);
+                            SafeInvokeSink(() => logMessageForErr(Logger!, Name, msg, item.Error));
                         }
                         else
                         {
-                            ErrorHandler.Invoke(Logger, item.Error);
+                            SafeInvokeSink(() => ErrorHandler.Invoke(Logger, item.Error));
                         }
                     }
                 }
@@ -1106,7 +1124,7 @@ namespace RingBufferPlus.Core
             }
             else
             {
-                logMessageForDbg(Logger, Name, msg, null);
+                SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
             }
         }
 
@@ -1120,7 +1138,7 @@ namespace RingBufferPlus.Core
             }
             else
             {
-                logMessageFoWrn(Logger, Name, msg, null);
+                SafeInvokeSink(() => logMessageFoWrn(Logger, Name, msg, null));
             }
         }
 
@@ -1134,11 +1152,32 @@ namespace RingBufferPlus.Core
             else if (ErrorHandler is null)
             {
                 var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {error.Message} ";
-                logMessageForErr(Logger!, Name, msg, error);
+                SafeInvokeSink(() => logMessageForErr(Logger!, Name, msg, error));
             }
             else
             {
-                ErrorHandler.Invoke(Logger, error);
+                SafeInvokeSink(() => ErrorHandler.Invoke(Logger, error));
+            }
+        }
+
+        // A user-supplied Logger/ErrorHandler is untrusted external code (Round 6, F23 - found
+        // independently by both the Estabilidade and Observabilidade passes): if it throws, that
+        // must never be allowed to kill the logger pump (RunLoggerAsync, under
+        // BackgroundLogger=true), permanently break the heartbeat pump/leak a pooled item/make
+        // DisposeAsync() itself throw (the synchronous path, under BackgroundLogger=false), or
+        // otherwise escape into an unrelated core operation like WarmupAsync/AcquireAsync. There
+        // is nothing further to log about the failure - the sink itself is what's broken - so
+        // this is a silent best-effort swallow, extending the same "must never throw regardless
+        // of how a background pump ended" philosophy DisposeAsync's own comment already states.
+        private static void SafeInvokeSink(Action invoke)
+        {
+            try
+            {
+                invoke();
+            }
+            catch
+            {
+                //ignore: the logging/error sink itself threw - nothing further can be logged about it
             }
         }
 
