@@ -2062,5 +2062,73 @@ namespace RingBufferPlus.Tests
 
             await service.DisposeAsync();
         }
+
+        // ---------------------------------------------------------------------
+        // 1.34 - Sweep for unguarded external-callback invocations (Round 7): TurnbackAsync's
+        // Invalidate() branch called DisposeItemAsync(value.Current) then
+        // _commands.Writer.TryWrite(EngineCommand.ReplaceOne()) with no guard around the dispose
+        // call - a user item type throwing from Dispose()/DisposeAsync() there skipped the
+        // ReplaceOne enqueue entirely, permanently losing that pool slot. Same shape of bug as
+        // F19/F23: a later necessary step skipped because an earlier one, calling into
+        // external/user code, threw uncaught. The exception itself is expected to still
+        // propagate to the caller unchanged (no public contract change, unlike F19/F23 - this
+        // one is fixed with a `finally`, not a swallow) - only the replacement bookkeeping must
+        // not depend on that call succeeding.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenItemsDisposeThrows_StillQueuesAReplacement()
+        {
+            var callIndex = 0;
+            IRingBufferBuilder<ThrowingOnDisposeProbe> builder = new RingBufferBuilder<ThrowingOnDisposeProbe>("ContractInvalidateThrowingDispose", null);
+            var service = await builder
+                .Factory(_ =>
+                {
+                    var n = Interlocked.Increment(ref callIndex);
+                    return Task.FromResult(new ThrowingOnDisposeProbe(throwOnDispose: n == 1));
+                })
+                .AcquireTimeout(TimeSpan.FromMilliseconds(300))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            acquired.Invalidate();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => acquired.DisposeAsync().AsTask());
+
+            // The replacement must still have been queued despite the throw above - both slots
+            // must be acquirable, proving the pool wasn't left permanently one item short.
+            var first = await service.AcquireAsync();
+            var second = await service.AcquireAsync();
+            Assert.True(first.Successful, "Expected the untouched slot to still be acquirable.");
+            Assert.True(second.Successful, "Expected the replacement item to be acquirable despite the throwing Dispose().");
+            await first.DisposeAsync();
+            await second.DisposeAsync();
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.35 - Same unguarded-callback sweep (Round 7), same class of bug as F23, but in
+        // RingBufferBuilder<T> instead of RingBufferManager<T>: ValidateBuild's own LogError(err)
+        // calls invoked a throwing OnError with no guard, so the ErrorHandler's own bug replaced
+        // the real validation failure Build() was about to throw. Lower severity than F23/F24 -
+        // no running instance/pool state exists yet at this point - but same fix pattern.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public void Build_WhenOnErrorThrows_StillSurfacesTheRealValidationFailure()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBuildThrowingOnError", null);
+            var fixedBuilder = builder
+                .Logger(new CapturingLogger())
+                .OnError((_, _) => throw new InvalidOperationException("user OnError sink bug"))
+                .FixedCapacity(2);
+
+            var ex = Assert.Throws<InvalidOperationException>(() => fixedBuilder.Build());
+            Assert.Equal("The command Factory is not defined.", ex.Message);
+        }
     }
 }

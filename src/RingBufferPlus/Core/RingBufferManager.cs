@@ -503,8 +503,20 @@ namespace RingBufferPlus.Core
                 }
                 else
                 {
-                    await DisposeItemAsync(value.Current).ConfigureAwait(false);
-                    _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
+                    try
+                    {
+                        await DisposeItemAsync(value.Current).ConfigureAwait(false);
+                    }
+                    finally
+                    {
+                        // Round 7 (unguarded-callback sweep): must run even if the user's item
+                        // type throws from Dispose()/DisposeAsync() above - otherwise this slot
+                        // is permanently lost, same shape of bug as F19/F23 (a later necessary
+                        // step skipped because an earlier one, calling into external/user code,
+                        // threw uncaught). The exception itself (if any) still propagates to the
+                        // caller unchanged below - only the enqueue moved out of its way.
+                        _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
+                    }
                 }
             }
             catch (ChannelClosedException)
@@ -635,16 +647,14 @@ namespace RingBufferPlus.Core
             var target = AutoScaleDecision.EvaluateScaleDown(median, CurrentCapacity, MinCapacity, Capacity, AutoScaleFault);
             if (target.HasValue)
             {
-                try
-                {
-                    await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
-                }
-                catch (Exception ex)
-                {
-                    // No caller is waiting on a Tick-triggered scale-down; logging is the only outcome
-                    // needed, and the engine loop must keep running regardless.
-                    LogError(ex);
-                }
+                // No try/catch here (Round 7, shutdown-vs-genuine-failure sweep): EvaluateScaleDown
+                // only ever returns a target strictly below CurrentCapacity, so this call is always
+                // a scale-down - and a scale-down can never throw (RemoveItemsAsync never observes
+                // a token and never throws, R6; per-item dispose failures are already swallowed by
+                // DisposeItemsDefensivelyAsync, F19). The catch this replaced was unreachable -
+                // confirmed both structurally and empirically (a temporary throw-marker probe ran
+                // the full suite without ever hitting it) before removing it.
+                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
             }
         }
 
@@ -744,8 +754,20 @@ namespace RingBufferPlus.Core
                     // attempted items cancelled by an ordinary shutdown moments later - without this
                     // check, that real failure would be masked entirely, reported as "just a
                     // shutdown" with no trace it happened.
-                    var cancelledByShutdown = !ok && token.IsCancellationRequested && !hadGenuineFailure;
-                    activity?.SetStatus(ok || cancelledByShutdown ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+                    //
+                    // Scale-down is different in kind, not just degree (Round 7, shutdown-vs-
+                    // genuine-failure sweep): RemoveItemsAsync never observes any token and never
+                    // throws (R6) - a scale-down can only ever fully succeed or partially succeed
+                    // ("not enough idle items right now," entirely by design). There is no
+                    // cancellation path and no genuine-failure path to distinguish here at all, so
+                    // `!ok` on a scale-down must never be reported as ActivityStatusCode.Error - it
+                    // would misrepresent R6's own normal, expected outcome as a fault, contradicting
+                    // usage-observability.md's own documented contract ("Error only on a genuine
+                    // failed/timed-out attempt"). `success=false` alone (already correctly set
+                    // below regardless of direction) still signals "didn't fully reach target."
+                    var cancelledByShutdown = direction == "down" ? false : !ok && token.IsCancellationRequested && !hadGenuineFailure;
+                    var statusOk = direction == "down" || ok || cancelledByShutdown;
+                    activity?.SetStatus(statusOk ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
                     activity?.SetTag("cancelled", cancelledByShutdown);
                     _scaleOperations.Add(1,
                         new KeyValuePair<string, object?>("buffer.name", Name),

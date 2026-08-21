@@ -55,6 +55,9 @@ v5.0.0 already shipped (2026-08-12) and is not being revisited — this section 
 - The grace-period-timeout message logged when `DisposeAsync()` cannot wait for an orphaned heartbeat callback's deferred disposal is now a `LogWarning`, not an informational message - it is a real, indeterminate-duration resource leak, not an ordinary shutdown-vs-failure ambiguity.
 - A throwing `Logger`/`OnError` sink can no longer permanently kill the background logger pump, permanently lose a pool slot and make `DisposeAsync()` itself throw via the heartbeat-timeout path, or otherwise escape into unrelated core operations - every invocation of the user-supplied sink is now defensively guarded.
 - `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity no longer report a scale-up as an ordinary cancelled shutdown when the batch made zero progress due to a genuine factory failure and a later attempt was then cancelled by `DisposeAsync()` - closing a residual gap in the previous fix (above) for this specific batch outcome.
+- Invalidating an acquired item (`Invalidate()`) and disposing it no longer permanently loses that pool slot if the item's own `Dispose()`/`DisposeAsync()` throws - the replacement is now always queued regardless, with the item's own exception still propagating to the caller unchanged.
+- A throwing `OnError` handler encountered while `Build()`/`BuildWarmupAsync()` is reporting a real validation failure no longer replaces that failure with the handler's own exception.
+- `scale.operations`/`scale.duration` and the `RingBufferPlus.Scale` activity no longer report a normal, partial scale-down (not enough idle items available right now, by design) as `ActivityStatusCode.Error` - a scale-down can never genuinely fail or be cancelled, so it is now always reported as `Ok` regardless of whether it fully reached its target (`success` still reflects that).
 
 ## [5.0.0] - 2026-08-12
 

@@ -282,7 +282,7 @@ namespace RingBufferPlus.Core
         {
             if (_logger is null || !_logger.IsEnabled(LogLevel.Debug)) return;
 
-            logMessageForDbg(_logger, _uniqueName, message, null);
+            SafeInvokeSink(() => logMessageForDbg(_logger, _uniqueName, message, null));
         }
 
         private void LogError(Exception message)
@@ -291,11 +291,27 @@ namespace RingBufferPlus.Core
 
             if (_errorHandler == null)
             {
-                logMessageForErr(_logger, _uniqueName, message.ToString(), null);
+                SafeInvokeSink(() => logMessageForErr(_logger, _uniqueName, message.ToString(), null));
             }
             else
             {
-                _errorHandler?.Invoke(_logger, message);
+                SafeInvokeSink(() => _errorHandler?.Invoke(_logger, message));
+            }
+        }
+
+        // A user-supplied Logger/OnError is untrusted external code (Round 7, unguarded-callback
+        // sweep - same class as F23, found in RingBufferManager): if it throws while ValidateBuild
+        // is reporting a real validation failure, that throw must not replace/mask the actual
+        // exception ValidateBuild is about to throw to its own caller.
+        private static void SafeInvokeSink(Action invoke)
+        {
+            try
+            {
+                invoke();
+            }
+            catch
+            {
+                //ignore: the logging/error sink itself threw - nothing further can be logged about it
             }
         }
 

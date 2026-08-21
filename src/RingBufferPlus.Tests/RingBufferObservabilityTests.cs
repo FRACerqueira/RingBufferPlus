@@ -596,5 +596,49 @@ namespace RingBufferPlus.Tests
             Assert.Equal(false, scaleActivity.GetTagItem("cancelled"));
             Assert.Equal(ActivityStatusCode.Error, scaleActivity.Status);
         }
+
+        [Fact]
+        [Trait("Category", "Observability")]
+        public async Task ScaleDown_WithANormalPartialCompletion_IsNeverReportedAsError()
+        {
+            // Round 7, shutdown-vs-genuine-failure sweep: RemoveItemsAsync never observes a
+            // token and never throws (R6) - a scale-down that doesn't fully reach its target is
+            // always just "not enough idle items were available right now," entirely by design,
+            // never a genuine failure or a cancellation. Confirmed empirically (before the fix)
+            // that this normal outcome was reported as ActivityStatusCode.Error, contradicting
+            // usage-observability.md's own documented contract.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(5, 2, 5)
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            // Hold 4 of the 5 items so only 1 is idle - a scale-down to MinCapacity (2, needing
+            // to remove 3) can only actually remove 1, a normal partial (not failed) outcome.
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 4; i++) held.Add(await service.AcquireAsync());
+
+            var moved = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            Assert.False(moved, "Expected a partial (not full) scale-down given only 1 idle item.");
+
+            foreach (var h in held) await h.DisposeAsync();
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName) && Equals(r.Tags.GetValueOrDefault("direction"), "down")).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags.GetValueOrDefault("success"), false) && Equals(r.Tags.GetValueOrDefault("cancelled"), false));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "down"));
+            Assert.Equal(false, scaleActivity.GetTagItem("cancelled"));
+            Assert.Equal(ActivityStatusCode.Ok, scaleActivity.Status);
+        }
     }
 }
