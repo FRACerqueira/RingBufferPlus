@@ -521,15 +521,7 @@ namespace RingBufferPlus.Core
             {
                 await foreach (var cmd in _commands.Reader.ReadAllAsync(_lifetime.Token).ConfigureAwait(false))
                 {
-                    try
-                    {
-                        await ProcessCommandAsync(cmd).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        cmd.Accepted?.TrySetResult(false);
-                        cmd.Completion?.TrySetResult(false);
-                    }
+                    await ProcessCommandAsync(cmd).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException)
