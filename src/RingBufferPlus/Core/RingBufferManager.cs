@@ -526,20 +526,19 @@ namespace RingBufferPlus.Core
                 }
                 else
                 {
-                    try
-                    {
-                        await DisposeItemAsync(value.Current).ConfigureAwait(false);
-                    }
-                    finally
-                    {
-                        // Round 7 (unguarded-callback sweep): must run even if the user's item
-                        // type throws from Dispose()/DisposeAsync() above - otherwise this slot
-                        // is permanently lost, same shape of bug as F19/F23 (a later necessary
-                        // step skipped because an earlier one, calling into external/user code,
-                        // threw uncaught). The exception itself (if any) still propagates to the
-                        // caller unchanged below - only the enqueue moved out of its way.
-                        _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
-                    }
+                    // v6.0.0/ADR001V03 pre-work (Round 8 blast-radius sweep): enqueue the
+                    // replacement BEFORE awaiting the old item's own Dispose()/DisposeAsync(), not
+                    // after in a `finally`. That ordering meant a Dispose() that hangs forever left
+                    // this `finally` unreached (an unfinished await never lets it run), so the slot
+                    // was never replaced and CurrentCapacity stayed wrong forever - same shape of
+                    // bug as F27/F28/F29, a third call site those fixes did not touch. Pool-wide
+                    // capacity truthfulness must not depend on how long, or whether, a caller-owned
+                    // item's Dispose() ever returns - that call hanging is this caller's own
+                    // DisposeAsync() call hanging too (a local problem for them), not a reason for
+                    // shared pool state to go wrong for everyone else. The exception (if any) from
+                    // DisposeItemAsync below still propagates to the caller unchanged either way.
+                    _commands.Writer.TryWrite(EngineCommand.ReplaceOne());
+                    await DisposeItemAsync(value.Current).ConfigureAwait(false);
                 }
             }
             catch (ChannelClosedException)

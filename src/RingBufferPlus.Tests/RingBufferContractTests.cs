@@ -983,6 +983,115 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03 pre-work (Round 8 blast-radius sweep, paused finding): unlike its two
+        // siblings (DisposeAsync()'s drain loop, RemoveItemsAsync via DisposeItemsDefensivelyAsync),
+        // TurnbackAsync's Invalidate() branch awaited the old item's Dispose()/DisposeAsync() BEFORE
+        // enqueuing EngineCommand.ReplaceOne() in a `finally`. A Dispose() that hangs forever means
+        // that `finally` never runs (an unfinished await never lets it), so the slot is never
+        // replaced and CurrentCapacity is wrong forever from that point - same bug shape as
+        // F27/F28/F29, a third call site those fixes did not touch.
+        //
+        // Fixed by enqueuing the replacement first, unconditionally, before awaiting the old item's
+        // disposal: pool-wide capacity truthfulness must not depend on how long, or whether, that
+        // call ever returns - a caller-owned item type whose Dispose() hangs is that caller's own
+        // problem (their own DisposeAsync() call on the RingBufferValue<T> hangs too), not a reason
+        // for shared pool state to go wrong for everyone else. This is the "prefer truthful state
+        // over another track-and-observe guard" lens adopted in Round 8: the blast radius here is
+        // local (one caller's own call blocks), not global (nothing about the engine loop or a
+        // background pump depends on this call returning), so the fix is a direct reordering, not a
+        // fourth instance of the PulseHeartBeat-bounded defensive-dispose pattern.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenItemDisposeHangs_StillReplacesTheSlot_WithoutWaitingForIt()
+        {
+            using var release = new ManualResetEventSlim(false);
+            var factoryCalls = 0;
+            IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractInvalidateHangingDispose", null);
+            var service = builder
+                .Factory(_ =>
+                {
+                    Interlocked.Increment(ref factoryCalls);
+                    return Task.FromResult(new HangingDisposeProbe(release));
+                })
+                .FixedCapacity(2)
+                .Build();
+            await service.WarmupAsync();
+            Assert.Equal(2, factoryCalls);
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            acquired.Invalidate();
+
+            // Deliberately not awaited to completion: the old item's Dispose() is hanging (capped
+            // at 10s by the probe itself so a broken fix can't hang the test process forever).
+            var disposeTask = acquired.DisposeAsync().AsTask();
+            try
+            {
+                // The replacement's factory call must happen promptly - well before the hang ever
+                // resolves - because capacity truthfulness must not depend on the old item's own
+                // Dispose() returning.
+                var deadline = DateTime.UtcNow.AddSeconds(2);
+                while (Volatile.Read(ref factoryCalls) < 3 && DateTime.UtcNow < deadline)
+                {
+                    await Task.Delay(20);
+                }
+                Assert.Equal(3, Volatile.Read(ref factoryCalls));
+            }
+            finally
+            {
+                release.Set();
+                await disposeTask;
+                await service.DisposeAsync();
+            }
+        }
+
+        // ---------------------------------------------------------------------
+        // Companion to the test above: the reordered TryWrite(ReplaceOne()) now runs
+        // unconditionally as the first thing in the Invalidate() branch, including after the
+        // manager is already disposed - previously that combination never reached this branch's
+        // channel write at all, so it was untested. TryWrite on an already-completed channel
+        // (Channel<EngineCommand>.Writer.TryComplete(), no exception) returns false rather than
+        // throwing, so this must fall through and dispose the item exactly once, the same as the
+        // pre-existing non-Invalidate case (TurnbackAsync_AfterManagerDisposed_...) above.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_AfterManagerDisposed_StillDisposesTheItemExactlyOnce()
+        {
+            var probe = new DisposableProbe();
+            var manager = new RingBufferManager<DisposableProbe>(default)
+            {
+                Name = "ContractInvalidateAfterDispose",
+                Capacity = 2,
+                MinCapacity = 2,
+                MaxCapacity = 2,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromSeconds(5),
+                SamplesBase = TimeSpan.FromSeconds(5),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromMilliseconds(300),
+                Factory = _ => Task.FromResult(probe)
+            };
+            await manager.WarmupAsync();
+
+            var held = await manager.AcquireAsync();
+            held.Invalidate();
+            await manager.DisposeAsync();
+
+            // TryWrite(ReplaceOne()) against the already-completed _commands channel must not
+            // throw; DisposeItemAsync below it must still run.
+            var ex = await Record.ExceptionAsync(() => held.DisposeAsync().AsTask());
+            Assert.Null(ex);
+
+            // One for the still-idle item the drain loop disposed, one for `held` via this path -
+            // never zero (leaked), never more than twice (double-disposed).
+            Assert.Equal(2, probe.DisposeCount);
+        }
+
+        // ---------------------------------------------------------------------
         // 1.14 - The scale-up deadline must scale with the work requested (quantity * FactoryTimeout),
         // not with the sampling cadence (SamplesBase) - and a scale-up that still can't finish in
         // time must keep whatever capacity it already gained instead of discarding it. See TODO/
