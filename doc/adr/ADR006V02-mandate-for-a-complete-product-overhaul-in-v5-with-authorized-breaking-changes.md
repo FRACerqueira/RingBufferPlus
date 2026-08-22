@@ -1,7 +1,7 @@
 <!-- Do not remove this comment, lines and table (1-12) -->
 |Adr-Plus Fields|Values Migrated |
 |--|--|
-|File title md|Mandate for a complete product overhaul in v5 with authorized breaking changes|
+|File title md|Mandate for a complete product overhaul in v6.0.0, superseding a real v5.0.0 release|
 |Version|02|
 |Revision||
 |Scope||
@@ -83,4 +83,4 @@ This ADR authorizes, for v6.0.0, each item below (details and trade-offs live in
 * Refines: [ADR003V03](./ADR003V03-median-sample-autoscaling-algorithm.md) — autoscale algorithm swap authorized for v6.0.0, backed by evidence.
 * Refines: [ADR007V03](./ADR007V03-redesign-of-the-public-fluent-api-surface.md) — remaining public surface changes authorized for v6.0.0.
 * Supersedes (partially): [ADR006V01](./ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) — the SemVer-resumption target moves from v5.0.0 to v6.0.0; v5.0.0's own mandate and scope decisions remain historically valid.
-* Related: [ADR004V02](./ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md) — the SemVer/deprecation policy this ADR's resumption clause is updating the target release for.
+* Supersedes (partially): [ADR004V02](./ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md) — see [ADR004V03](./ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md), which this ADR authorizes: Stage (b)'s SemVer-resumption point moves from v5.0.0 to v6.0.0; everything else in ADR004's regime (the Stage (a)/(b) split, the v4.x total-cutoff support policy) remains unchanged.
