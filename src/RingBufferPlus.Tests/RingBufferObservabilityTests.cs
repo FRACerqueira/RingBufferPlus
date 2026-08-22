@@ -232,29 +232,35 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public async Task AcquireFault_TriggersAutoScale_RecordsScaleOperation_WithAutoTrigger()
+        public async Task WaitingCallers_TriggerBacklogReactiveAutoScale_RecordsScaleOperation_WithBacklogTrigger()
         {
             var bufferName = UniqueBufferName();
             using var cts = new CancellationTokenSource();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
 
-            // Capacity=2, MaxCapacity=4, NumberFault=0: the first acquire fault immediately triggers scale-up to MaxCapacity.
+            // Capacity=2, MaxCapacity=4: two callers unable to acquire immediately trigger the
+            // backlog-reactive signal (ADR001V03), which replaced the old fault-count trigger.
+            // Two concurrent waiters (not one) are used because backlog-reactive reacts
+            // proportionally to the net gap, not necessarily in one single jump to MaxCapacity
+            // like the old trigger did - EvaluateBacklogReactive re-checks after every batch
+            // completes, so MaxCapacity may be reached via more than one small successive batch.
             var manager = CreateManager(bufferName, cts.Token, capacity: 2, minCapacity: 1, maxCapacity: 4, autoScaleFault: true, numberFault: 0);
             await manager.WarmupAsync();
 
             var held1 = await manager.AcquireAsync();
             var held2 = await manager.AcquireAsync();
-            var faulted = await manager.AcquireAsync();
-            Assert.False(faulted.Successful);
+            var waiterTask1 = manager.AcquireAsync().AsTask();
+            var waiterTask2 = manager.AcquireAsync().AsTask();
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (!manager.IsMaxCapacity && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(25);
             }
-            Assert.True(manager.IsMaxCapacity, "Expected the acquire fault to trigger an auto scale-up to MaxCapacity.");
+            Assert.True(manager.IsMaxCapacity, "Expected the waiting callers to trigger a backlog-reactive scale-up to MaxCapacity.");
 
+            await Task.WhenAll(waiterTask1, waiterTask2);
             await held1.DisposeAsync();
             await held2.DisposeAsync();
             await manager.DisposeAsync();
@@ -263,11 +269,9 @@ namespace RingBufferPlus.Tests
             activityListener.Dispose();
 
             var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
-            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "auto"));
+            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "backlog"));
 
-            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName));
-            Assert.Equal("up", scaleActivity.GetTagItem("direction"));
-            Assert.Equal("auto", scaleActivity.GetTagItem("trigger"));
+            Assert.Contains(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up") && Equals(a.GetTagItem("trigger"), "backlog"));
         }
 
         [Fact]
@@ -513,18 +517,22 @@ namespace RingBufferPlus.Tests
                     return 1;
                 }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
                 .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(1)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
 
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
-            // Pool is empty - this acquire times out and enqueues the autoscale Fault, triggering
-            // a scale-up 2 -> 6 (quantity 4): attempt 1 succeeds, attempt 2 fails genuinely
-            // (tolerated), attempt 3 is mid-Task.Delay when we race it below.
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
+            // Manually triggers the scale-up 2 -> 6 (quantity 4): attempt 1 succeeds, attempt 2
+            // fails genuinely (tolerated), attempts 3/4 are mid-Task.Delay when we race them
+            // below. What's under test here (CreateItemsAsync's/FactoryBatchCompleted's telemetry
+            // correctness under a DisposeAsync race) is identical regardless of what dispatches
+            // the batch - SwitchToAsync gives an exact, deterministic quantity (4), unlike
+            // backlog-reactive's own proportional sizing (ADR001V03: reacts to the net gap, not a
+            // coarse tier jump), which would need several precisely-timed concurrent waiters to
+            // reconstruct the same batch size reliably.
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            Assert.True(accepted);
 
             await Task.Delay(300);
             await service.DisposeAsync();
@@ -567,19 +575,19 @@ namespace RingBufferPlus.Tests
                     return 1;
                 }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
                 .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(1)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
 
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
-            // Pool is empty - this acquire times out and enqueues the autoscale Fault, triggering
-            // a scale-up 2 -> 6: attempt 1 fails genuinely (zero progress, tolerated), attempt 2
-            // is mid-Task.Delay when we race it below - the whole batch never creates anything,
-            // so CreateItemsAsync throws instead of returning.
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
+            // Manually triggers the scale-up 2 -> 6: attempt 1 fails genuinely (zero progress,
+            // tolerated), attempts 2+ are mid-Task.Delay when we race them below - the whole batch
+            // never creates anything, so CreateItemsAsync throws instead of returning. See the
+            // sibling test above for why SwitchToAsync (deterministic quantity), not backlog-
+            // reactive, drives this.
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            Assert.True(accepted);
 
             await Task.Delay(300);
             await service.DisposeAsync();

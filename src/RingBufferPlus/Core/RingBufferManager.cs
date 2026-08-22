@@ -74,11 +74,17 @@ namespace RingBufferPlus.Core
         private int _disposeGuard;
         private int _currentCapacity;
         private volatile bool _scaling;
-        private int _faultCount;
+
+        // Backlog-reactive signal (ADR001V03): count of callers currently blocked in
+        // AcquireCoreAsync waiting for an item - mutated via Interlocked from any caller thread
+        // (unlike _currentCapacity, this is not sole-owner state, just a shared counter), read by
+        // the engine thread in EvaluateBacklogReactive.
+        private int _waitingCount;
 
         // Fábrica (ADR001V03): the currently in-flight background scale-up batch (DispatchScaleUp),
         // if any - only ever written by the engine thread (single consumer), and only ever one at
-        // a time (Switch/Fault both reject a new dispatch while _scaling is true). DisposeAsync
+        // a time (Switch rejects, and EvaluateBacklogReactive skips, a new dispatch while _scaling
+        // is true). DisposeAsync
         // reads this only after _engineTask has already been awaited to completion (so no further
         // write can race it) and awaits it too, so a batch still in flight at shutdown still gets
         // to record its telemetry and resolve its caller before DisposeAsync returns - see the
@@ -217,9 +223,44 @@ namespace RingBufferPlus.Core
             var sw = Stopwatch.StartNew();
             using var timeoutCts = new CancellationTokenSource(AcquireTimeout);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _lifetime.Token, cancellation);
+            var isWaiting = false;
             try
             {
-                var item = await _availableItems.Reader.ReadAsync(linked.Token).ConfigureAwait(false);
+                T item;
+                // linked.IsCancellationRequested is checked before the fast path so an already
+                // (or immediately) cancelled token still surfaces its genuine cancellation via
+                // ReadAsync below, exactly as before this fast path existed - a bare TryRead
+                // observes no token at all, and would otherwise let an available idle item mask a
+                // caller's own cancellation just because the pool happened to be non-empty.
+                if (!linked.IsCancellationRequested && _availableItems.Reader.TryRead(out var immediate))
+                {
+                    item = immediate;
+                }
+                else
+                {
+                    // Backlog-reactive signal (ADR001V03): a caller that cannot be served right
+                    // away is genuine, real-time demand - report it to the Orquestrador now,
+                    // before AcquireTimeout has any chance to elapse (the old fault-count trigger
+                    // below only reacts after that timeout already happened). Same R11 reasoning
+                    // as the fault path: the heartbeat's own internal acquire is a health check,
+                    // not consumer demand, so it must not count here either.
+                    Interlocked.Increment(ref _waitingCount);
+                    isWaiting = true;
+                    if (AutoScaleFault && countsTowardFaultBudget)
+                    {
+                        _commands.Writer.TryWrite(EngineCommand.Backlog());
+                    }
+                    item = await _availableItems.Reader.ReadAsync(linked.Token).ConfigureAwait(false);
+                    // Decrement right here, not in the shared finally below: this caller is no
+                    // longer waiting the instant it actually has an item, not after the telemetry
+                    // and RingBufferValue construction that follow. A later EvaluateBacklogReactive
+                    // call (e.g. from FactoryBatchCompleted, on another thread) reading _waitingCount
+                    // in between would otherwise still see this already-served caller as backlog -
+                    // narrowing that window is what keeps the documented approximation in
+                    // EvaluateBacklogReactive small in practice, not just tolerated in theory.
+                    Interlocked.Decrement(ref _waitingCount);
+                    isWaiting = false;
+                }
                 _acquireDuration.Record(sw.Elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", true));
@@ -233,11 +274,12 @@ namespace RingBufferPlus.Core
                 var timedOut = timeoutCts.IsCancellationRequested;
                 if (timedOut)
                 {
+                    // Fault-count-based autoscale triggering is retired (ADR001V03: the backlog-
+                    // reactive signal replaces it) - by the time a genuine AcquireTimeout is even
+                    // possible, this same caller already reported itself as backlog the moment it
+                    // started waiting (see the TryRead fast path above), well before this point.
+                    // acquire.faults below remains a pure diagnostic counter, unrelated to triggering.
                     LogWarning("RingBuffer without resource");
-                    if (AutoScaleFault && countsTowardFaultBudget)
-                    {
-                        _commands.Writer.TryWrite(EngineCommand.Fault());
-                    }
                     _acquireFaults.Add(1, new KeyValuePair<string, object?>("buffer.name", Name));
                 }
                 // acquire.timed_out mirrors the activity's own "timed_out" tag (Round 5,
@@ -274,6 +316,13 @@ namespace RingBufferPlus.Core
                 // The caller choosing to cancel their own call is not a buffer health problem.
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 throw;
+            }
+            finally
+            {
+                if (isWaiting)
+                {
+                    Interlocked.Decrement(ref _waitingCount);
+                }
             }
         }
 
@@ -648,8 +697,9 @@ namespace RingBufferPlus.Core
 
                 case EngineCommandKind.Switch:
                     var target = ResolveTarget(cmd.Target!.Value);
-                    // _scaling here means "a Fábrica batch dispatched by a previous Switch/Fault is
-                    // still in flight" (ADR001V03): with that batch now running in the background
+                    // _scaling here means "a Fábrica batch dispatched by a previous Switch or
+                    // backlog-reactive evaluation is still in flight" (ADR001V03): with that batch
+                    // now running in the background
                     // instead of blocking this loop, a second overlapping dispatch could each read a
                     // stale CurrentCapacity and independently add their own `created` on top of it,
                     // overshooting MaxCapacity. Rejecting here keeps "at most one batch at a time"
@@ -678,46 +728,12 @@ namespace RingBufferPlus.Core
                     }
                     break;
 
-                case EngineCommandKind.Fault:
-                    _faultCount++;
-                    // >= (not >): NumberFault's own doc says "after first fault" for its default of 1 -
-                    // the sample RingBufferPlusBasicTriggerScale passes 0 specifically to get "fires on
-                    // the first fault", which only holds if the comparison includes equality.
-                    if (_faultCount < NumberFault)
-                    {
-                        break;
-                    }
-                    if (_scaling)
-                    {
-                        // A scale-up dispatched by a previous Switch/Fault is still in flight - do not
-                        // start a second overlapping batch (same reasoning as the Switch case above).
-                        // _faultCount is deliberately left as-is: this fault is deferred, not consumed -
-                        // the next Fault/Tick after the in-flight batch completes re-evaluates from a
-                        // fresh, still-elevated count instead of losing it.
-                        break;
-                    }
-                    if (CurrentCapacity == MaxCapacity)
-                    {
-                        // F7: nothing to scale to right now, but forget this batch of faults anyway -
-                        // otherwise the counter piles up unboundedly while pinned at MaxCapacity, and
-                        // the very next fault after a later scale-down would immediately re-trigger a
-                        // scale back to MaxCapacity instead of requiring a fresh batch.
-                        _faultCount = 0;
-                        break;
-                    }
-                    // Must always be strictly greater than CurrentCapacity - a plain equality
-                    // check against MinCapacity picks Capacity even when Capacity == MinCapacity
-                    // (a legal configuration), making this a no-op (target == current) forever.
-                    var next = CurrentCapacity < Capacity ? Capacity : MaxCapacity;
-                    // R7's "only forget this batch of faults once the scale-up actually completed" is
-                    // now applied in the FactoryBatchCompleted case below (scaleTrigger == "auto" and
-                    // ok), once the dispatched batch's real outcome is known - it can no longer be
-                    // decided here, since the batch has not run yet at dispatch time.
-                    DispatchScaleUp(next, scaleTrigger: "auto", completion: null);
-                    break;
-
                 case EngineCommandKind.ReplaceOne:
                     await CreateSingleReplacementAsync().ConfigureAwait(false);
+                    break;
+
+                case EngineCommandKind.Backlog:
+                    EvaluateBacklogReactive();
                     break;
 
                 case EngineCommandKind.Tick:
@@ -742,8 +758,8 @@ namespace RingBufferPlus.Core
                 case EngineCommandKind.FactoryBatchCompleted:
                     // Telemetry (activity/meter) was already finalized inside DispatchScaleUp's own
                     // background task, unconditionally - see its comment for why. This case only
-                    // applies the sole-owner state changes: capacity, _scaling, _faultCount, and the
-                    // caller's completion.
+                    // applies the sole-owner state changes: capacity, _scaling, and the caller's
+                    // completion.
                     //
                     // Clear in-flight status BEFORE resolving the caller's completion (advisor
                     // review): a sequential caller that awaits completion (LockWhenScaling) must never
@@ -760,13 +776,6 @@ namespace RingBufferPlus.Core
                     }
                     var scaledUp = cmd.Created == cmd.Quantity;
                     _samples.Clear();
-                    if (cmd.ScaleTrigger == "auto" && scaledUp)
-                    {
-                        // R7: only forget this batch of faults once the scale-up actually completed -
-                        // see the Fault case's own comment for why a failed/partial attempt must not
-                        // burn the whole budget.
-                        _faultCount = 0;
-                    }
                     if (cmd.Completion is not null)
                     {
                         if (cmd.Failure is not null)
@@ -780,12 +789,67 @@ namespace RingBufferPlus.Core
                     }
                     else if (cmd.Failure is not null)
                     {
-                        // No caller is waiting on a Fault-triggered scale-up; logging is the only
+                        // No caller is waiting on a Backlog-triggered scale-up; logging is the only
                         // outcome needed, same as before this batch was dispatched in the background.
                         LogError(cmd.Failure);
                     }
+                    // Re-evaluate backlog right away, regardless of what triggered this batch: any
+                    // callers that started waiting while this one was in flight (and so had their own
+                    // Backlog command skipped below, since only one batch may be in flight at a time)
+                    // must not have to wait for their own AcquireTimeout to be addressed - see
+                    // EvaluateBacklogReactive's own remarks for why netting-out in-flight-creating
+                    // reduces to this deferred re-check under that one-at-a-time rule.
+                    EvaluateBacklogReactive();
                     break;
             }
+        }
+
+        // Backlog-reactive signal (ADR001V03): reacts to real, currently-waiting callers instead
+        // of a coarse fault count, before any AcquireTimeout elapses, proportional to the actual
+        // unmet demand - waiting callers minus what can already serve them (idle items). Replaces
+        // the old fault-count-based trigger entirely (removed: EngineCommandKind.Fault, _faultCount)
+        // - AutoScaleFault/NumberFault (public config) are unchanged for now, deliberately deferred
+        // to the ADR007V03 public-surface pass; AutoScaleFault still gates whether this signal is
+        // active at all, NumberFault is currently unused internally.
+        //
+        // The ADR's own formula also nets out "in-flight-creating" so overlapping backlog waves
+        // never duplicate a request; here that term is always zero by construction: a batch already
+        // in flight (from this signal or Switch) means _scaling is true, and this method returns
+        // before computing a gap at all, deferring to the follow-up call this method's own caller
+        // makes once FactoryBatchCompleted clears _scaling - any residual backlog gets addressed
+        // then, without ever risking two overlapping batches reading a stale CurrentCapacity
+        // independently (the same overshoot risk the Switch case's one-at-a-time rule protects
+        // against).
+        private void EvaluateBacklogReactive()
+        {
+            if (!AutoScaleFault || _scaling || CurrentCapacity >= MaxCapacity)
+            {
+                return;
+            }
+            // Known, accepted approximation ("simple, not exact" - same spirit as the
+            // consecutive-failures counter under concurrency, ADR001V03): _waitingCount is
+            // decremented in the served caller's own continuation (AcquireCoreAsync, immediately
+            // after ReadAsync returns - deliberately not in that method's shared finally, to keep
+            // this window as narrow as possible), which still runs asynchronously with respect to
+            // this method's own caller. A follow-up evaluation (from FactoryBatchCompleted, right
+            // after a batch completes) can therefore still, occasionally, see a just-served caller
+            // as "waiting" a moment longer than reality, computing a gap that is briefly too high
+            // and dispatching one extra small batch before the count catches up. This never risks
+            // exceeding MaxCapacity (still capped below) and self-corrects on the very next
+            // evaluation once the served caller's own decrement has run - at worst, a few
+            // more items than strictly necessary get created, which a later scale-down naturally
+            // reabsorbs once idle.
+            var gap = Volatile.Read(ref _waitingCount) - _availableItems.Reader.Count;
+            if (gap <= 0)
+            {
+                return;
+            }
+            var target = Math.Min(CurrentCapacity + gap, MaxCapacity);
+            if (target == CurrentCapacity)
+            {
+                return;
+            }
+            DispatchScaleUp(target, scaleTrigger: "backlog", completion: null);
         }
 
         // Fábrica (ADR001V03): dispatches a scale-up's bounded-concurrent factory batch onto the
@@ -794,8 +858,8 @@ namespace RingBufferPlus.Core
         // ReplaceOne, ...) while the batch is in flight. _currentCapacity is still mutated only on
         // the engine thread - later, when the batch's own FactoryBatchCompleted command is processed
         // - preserving the Orquestrador's sole-owner guarantee. Used only by Switch (manual) and
-        // Fault (auto) scale-up requests; Warmup and Tick's scale-down still call
-        // MoveToCapacityAsync directly, unchanged.
+        // EvaluateBacklogReactive (backlog) scale-up requests; Warmup and Tick's scale-down still
+        // call MoveToCapacityAsync directly, unchanged.
         private void DispatchScaleUp(int target, string scaleTrigger, TaskCompletionSource<bool>? completion)
         {
             var current = CurrentCapacity;
@@ -1240,7 +1304,7 @@ namespace RingBufferPlus.Core
             // Opportunistic (R6): take only whatever is already idle right now via a
             // non-blocking TryRead loop - never wait for busy items to be returned. The engine is
             // a single serial consumer (ADR001), so blocking here to wait for capacity to free up
-            // would stall every other command (Fault, another Switch, ReplaceOne, Tick) for as
+            // would stall every other command (Backlog, another Switch, ReplaceOne, Tick) for as
             // long as that wait takes. A partial reduction is fine - MoveToCapacityAsync advances
             // _currentCapacity by whatever was actually removed either way.
             while (removed.Count < quantity && _availableItems.Reader.TryRead(out var item))
@@ -1598,7 +1662,7 @@ namespace RingBufferPlus.Core
 
         #endregion
 
-        private enum EngineCommandKind { Warmup, Switch, Fault, ReplaceOne, Tick, FactoryBatchCompleted }
+        private enum EngineCommandKind { Warmup, Switch, ReplaceOne, Tick, FactoryBatchCompleted, Backlog }
 
         private sealed record EngineCommand
         {
@@ -1617,7 +1681,7 @@ namespace RingBufferPlus.Core
             public static EngineCommand Switch(ScaleSwitch target, TaskCompletionSource<bool> accepted, TaskCompletionSource<bool> completion) =>
                 new() { Kind = EngineCommandKind.Switch, Target = target, Accepted = accepted, Completion = completion };
 
-            public static EngineCommand Fault() => new() { Kind = EngineCommandKind.Fault };
+            public static EngineCommand Backlog() => new() { Kind = EngineCommandKind.Backlog };
 
             public static EngineCommand ReplaceOne() => new() { Kind = EngineCommandKind.ReplaceOne };
 

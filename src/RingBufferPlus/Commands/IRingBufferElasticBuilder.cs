@@ -104,11 +104,18 @@ namespace RingBufferPlus
         IRingBufferElasticBuilder<T> LockWhenScaling(bool value = true);
 
         /// <summary>
-        /// Enables autoscale (scale up) when an acquire fault occurs, and permanently removes manual switching
+        /// Enables autoscale (scale up) in reaction to real-time acquire demand, and permanently removes manual switching
         /// from the built service's type (see <see cref="IRingBufferManualScaleService{T}"/>) — the two are mutually exclusive.
         /// </summary>
         /// <remarks>
-        /// The scale-up process is executed when the failure threshold defined by <paramref name="numberOfFaults"/> is reached.
+        /// <para>
+        /// Since v6.0.0 (ADR001V03), the scale-up process is triggered by the backlog-reactive signal: it
+        /// reacts to real-time waiting-caller depth (how many concurrent <c>AcquireAsync</c> callers are
+        /// genuinely waiting for an idle item right now), not to a count of past acquire faults/timeouts.
+        /// <paramref name="numberOfFaults"/> is currently unused - it is kept on this method's signature only
+        /// pending the public-surface redesign (ADR007V03); it has no effect on when or how a scale-up
+        /// triggers today.
+        /// </para>
         /// A scale-up (or scale-down) that only partially completes can land the buffer strictly between two
         /// named capacities - scale-down evaluation still applies from there, not only from the exact initial
         /// or maximum capacity. There is no scale-down from minimum capacity: minimum capacity is the floor.
@@ -148,14 +155,14 @@ namespace RingBufferPlus
         /// needed items keeps them, and a scale-down that only finds some items idle removes just those.
         /// </para>
         /// <para>
-        /// The fault counter is forgotten (reset to zero) as soon as <paramref name="numberOfFaults"/> is reached,
-        /// even while already at maximum capacity - so a later scale-down always requires a fresh full batch of
-        /// faults to trigger a scale-up again, never a stale leftover from before. A scale-up attempt that does
-        /// not fully complete (a factory failure, or only a partial result) does not consume this budget: the very
-        /// next fault retries immediately, instead of requiring an entirely new batch while already struggling.
+        /// The backlog-reactive signal carries no counter to forget: it is re-evaluated fresh every time a
+        /// caller starts waiting and every time a scale-up batch completes, from the buffer's actual
+        /// real-time state (waiting callers vs. idle items) rather than from accumulated history - so there
+        /// is nothing that needs resetting between an earlier scale-up and a later one.
         /// </para>
         /// </remarks>
-        /// <param name="numberOfFaults">Number of faults to trigger the scale-up. Default is 1 (after first fault).</param>
+        /// <param name="numberOfFaults">Unused since v6.0.0 (ADR001V03) - see the remarks above. Kept on the
+        /// signature pending the public-surface redesign (ADR007V03). Default is 1.</param>
         /// <returns>An instance of <see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         IRingBufferAutoScaleBuilder<T> AutoScaleAcquireFault(byte numberOfFaults = 1);
 

@@ -659,8 +659,10 @@ namespace RingBufferPlus.Tests
         public async Task AutoScaleAcquireFault_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
         {
             // Arrange: init capacity 4, min 2 (init != min, to avoid the separate, already-known R4
-            // defect where the scale-up target formula picks a no-op when init == min), autoscale on
-            // the first fault, factory throws only while "throwing" is true.
+            // defect where the scale-up target formula picks a no-op when init == min), the
+            // backlog-reactive signal active (AutoScaleAcquireFault gates it now, ADR001V03 -
+            // replaces the old fault-count trigger this test originally targeted), factory throws
+            // only while "throwing" is true.
             var throwing = false;
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultTriggeredScaleThrows", null);
             var service = builder
@@ -671,7 +673,8 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            // Exhaust the pool so the next acquire times out and posts a Fault command.
+            // Exhaust the pool so the next caller starts waiting and triggers the backlog-reactive
+            // signal immediately.
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
             var held3 = await service.AcquireAsync();
@@ -683,27 +686,37 @@ namespace RingBufferPlus.Tests
             Assert.Same(faultedTask, faultedCompleted);
             Assert.False((await faultedTask).Successful);
 
-            // Give the engine a moment to process the Fault-triggered scale-up (posted fire-and-forget).
+            // Give the engine a moment to process the backlog-triggered scale-up (posted fire-and-forget).
             await Task.Delay(300);
 
             // Assert: capacity did not move (the scale-up's factory call failed), but the engine is
-            // still alive - before the fix, this permanently killed the engine and disabled autoscale.
+            // still alive - before the original fix (now applying to the backlog path instead of
+            // the retired fault-count path), this permanently killed the engine and disabled
+            // autoscale.
             Assert.True(service.IsInitCapacity);
 
-            // Recover the factory and force another fault: autoscale must still work.
+            // Recover the factory: autoscale must still work. Backlog-reactive requests exactly
+            // the net gap (ADR001V03: proportional, not a coarse jump to MaxCapacity), so with one
+            // caller waiting at a time this grows capacity by 1 per successful batch - keep
+            // triggering waits (each either times out, or succeeds and immediately consumes the
+            // just-created item, keeping the pool empty for the next one) until MaxCapacity.
             throwing = false;
-            var faulted2Task = service.AcquireAsync().AsTask();
-            var faulted2Completed = await Task.WhenAny(faulted2Task, Task.Delay(TimeSpan.FromSeconds(3)));
-            Assert.Same(faulted2Task, faulted2Completed);
-            Assert.False((await faulted2Task).Successful);
-
-            var deadline = DateTime.UtcNow.AddSeconds(3);
+            var growthProbes = new List<RingBufferValue<int>>();
+            var deadline = DateTime.UtcNow.AddSeconds(5);
             while (!service.IsMaxCapacity && DateTime.UtcNow < deadline)
             {
-                await Task.Delay(20);
+                var probe = await service.AcquireAsync();
+                if (probe.Successful)
+                {
+                    growthProbes.Add(probe);
+                }
             }
             Assert.True(service.IsMaxCapacity);
 
+            foreach (var probe in growthProbes)
+            {
+                await probe.DisposeAsync();
+            }
             await held1.DisposeAsync();
             await held2.DisposeAsync();
             await held3.DisposeAsync();
@@ -1197,63 +1210,24 @@ namespace RingBufferPlus.Tests
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
 
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
+            // Pool is empty - this caller starts waiting and triggers the backlog-reactive signal
+            // immediately (ADR001V03; replaces the old fault-count trigger the R4 bug originally
+            // guarded against). Whether this specific acquire ends up succeeding or timing out is
+            // not the point - the new target formula (CurrentCapacity + gap, capped at
+            // MaxCapacity) has no comparison against Capacity/MinCapacity at all, so the R4 bug
+            // class cannot recur here, but the broader "init == min must not block scale-up"
+            // property is still worth keeping.
+            _ = await service.AcquireAsync();
 
             var deadline = DateTime.UtcNow.AddSeconds(3);
             while (service.IsInitCapacity && DateTime.UtcNow < deadline)
             {
                 await Task.Delay(20);
             }
-            Assert.False(service.IsInitCapacity, "Expected the acquire fault to trigger a scale-up away from the initial (== minimum) capacity.");
+            Assert.False(service.IsInitCapacity, "Expected the waiting caller to trigger a scale-up away from the initial (== minimum) capacity.");
 
             await held1.DisposeAsync();
             await held2.DisposeAsync();
-            await service.DisposeAsync();
-        }
-
-        // ---------------------------------------------------------------------
-        // 1.16 - The documented autoscale fault threshold ("Default is 1 (after first fault)") must
-        // match the implementation. Before this fix, the comparison used `>` instead of `>=`, so the
-        // default numberOfFaults=1 actually required a second fault before scaling up - see TODO/
-        // relatorio-viabilidade-ringbufferplus-v5.md, finding U-07 / P2 Decision C.
-        // ---------------------------------------------------------------------
-
-        [Fact]
-        [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_WithDefaultThreshold_ScalesUpAfterExactlyOneFault()
-        {
-            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractAutoScaleThresholdOffByOne", null);
-            var service = builder
-                .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(4, 2, 6, 1, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault() // default numberOfFaults = 1
-                .AcquireTimeout(TimeSpan.FromMilliseconds(200))
-                .Build();
-            await service.WarmupAsync();
-
-            var held = new List<RingBufferValue<int>>();
-            for (var i = 0; i < 4; i++)
-            {
-                held.Add(await service.AcquireAsync());
-            }
-
-            // Exactly one fault - the documented "Default is 1 (after first fault)" must trigger
-            // scale-up right here, not require a second one.
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
-
-            var deadline = DateTime.UtcNow.AddSeconds(3);
-            while (service.IsInitCapacity && DateTime.UtcNow < deadline)
-            {
-                await Task.Delay(20);
-            }
-            Assert.False(service.IsInitCapacity, "Expected a single acquire fault (the default numberOfFaults=1) to trigger scale-up immediately, not require a second fault.");
-
-            foreach (var value in held)
-            {
-                await value.DisposeAsync();
-            }
             await service.DisposeAsync();
         }
 
@@ -1354,18 +1328,16 @@ namespace RingBufferPlus.Tests
                 held.Add(await service.AcquireAsync());
             }
 
-            // Pool is empty - this acquire times out and enqueues the autoscale Fault, which will
-            // scale 3 -> 10 (ScaleDownMax ends up 10-3+2=9, so a fully idle pool afterwards, with
-            // all 10 items idle, is eligible for an immediate scale-down back down to 3).
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
-
-            // Release the originally held items now, so once the scale-up finishes every item
-            // (originals + newly created) is idle - the scale-down-eligible condition.
-            foreach (var value in held)
-            {
-                await value.DisposeAsync();
-            }
+            // Pool is empty (all 3 items in `held`) - 7 concurrent waiters trigger the backlog-
+            // reactive signal (ADR001V03), growing capacity 3 -> 10, possibly via more than one
+            // successive batch (it reacts proportionally to the net gap, not a coarse jump to
+            // MaxCapacity like the old fault-count trigger this test originally used).
+            // AutoScaleAcquireFault must stay enabled here (not SwitchToAsync/manual mode) because
+            // EvaluateScaleDown's own scale-down path is itself gated on it. `held` is deliberately
+            // NOT released yet - releasing it before the waiters are served would let some of them
+            // grab those items directly, shrinking the net gap EvaluateBacklogReactive computes and
+            // making capacity land short of MaxCapacity.
+            var waiterTasks = Enumerable.Range(0, 7).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
             var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
             while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
@@ -1374,6 +1346,22 @@ namespace RingBufferPlus.Tests
             }
             Assert.True(service.IsMaxCapacity, "Expected the fault-triggered scale-up to reach max capacity.");
             var scaleUpCompletedAt = DateTime.UtcNow;
+
+            // Every waiter must settle (served or timed out), and any served one disposed, before
+            // releasing `held` below - otherwise a leaked never-disposed item would keep the pool
+            // from ever becoming genuinely fully idle, the scale-down-eligible condition.
+            var waiterResults = await Task.WhenAll(waiterTasks);
+            foreach (var result in waiterResults)
+            {
+                if (result.Successful)
+                {
+                    await result.DisposeAsync();
+                }
+            }
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
 
             // Must not have already evaluated (and acted on) a scale-down within a short window of
             // the scale-up completing - that would mean stale/bursty samples, not a fresh window.
@@ -1389,101 +1377,6 @@ namespace RingBufferPlus.Tests
             Assert.False(service.IsMaxCapacity, "Expected the scale-down to still happen once a fresh sample window actually elapsed.");
             Assert.True(DateTime.UtcNow - scaleUpCompletedAt >= TimeSpan.FromMilliseconds(600), "Expected the scale-down to take roughly a full fresh sample window, not fire near-instantly off a burst of stale ticks.");
 
-            await service.DisposeAsync();
-        }
-
-        // ---------------------------------------------------------------------
-        // 1.19 - The autoscale fault counter must reset once its threshold is reached even while
-        // pinned at MaxCapacity (F7, P3), so it does not pile up unboundedly and cause a single
-        // fault after a later scale-down to immediately re-trigger a scale back to MaxCapacity
-        // instead of requiring a fresh batch of NumberFault faults. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, F7/R7.
-        // ---------------------------------------------------------------------
-
-        [Fact]
-        [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_FaultsWhilePinnedAtMaxCapacity_DoNotCauseFlappingAfterScaleDown()
-        {
-            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultCounterFlapping", null);
-            var service = builder
-                .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(3, 2, 8, 5, TimeSpan.FromMilliseconds(500))
-                .AutoScaleAcquireFault(3)
-                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
-                .Build();
-            await service.WarmupAsync();
-
-            // Phase 1: 3 faults (NumberFault=3) with an empty pool scale 3 -> 8 (max).
-            var held = new List<RingBufferValue<int>>();
-            for (var i = 0; i < 3; i++)
-            {
-                held.Add(await service.AcquireAsync());
-            }
-            for (var i = 0; i < 3; i++)
-            {
-                var faulted = await service.AcquireAsync();
-                Assert.False(faulted.Successful);
-            }
-            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
-            {
-                await Task.Delay(20);
-            }
-            Assert.True(service.IsMaxCapacity, "Expected the initial batch of 3 faults to scale up to max capacity.");
-
-            // Phase 2: while pinned at max, acquire everything (3 originals + 5 new = 8) and
-            // generate 2 full extra batches of faults (6 faults) - nothing to scale up to, but a
-            // correct implementation must still forget these batches instead of letting the
-            // counter pile up unboundedly.
-            for (var i = 0; i < 5; i++)
-            {
-                held.Add(await service.AcquireAsync());
-            }
-            Assert.Equal(8, held.Count);
-            for (var i = 0; i < 6; i++)
-            {
-                var faulted = await service.AcquireAsync();
-                Assert.False(faulted.Successful);
-            }
-
-            // Phase 3: release everything and let the natural idle-triggered scale-down bring
-            // capacity back down from max.
-            foreach (var value in held)
-            {
-                await value.DisposeAsync();
-            }
-            held.Clear();
-            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (service.IsMaxCapacity && DateTime.UtcNow < scaleDownDeadline)
-            {
-                await Task.Delay(20);
-            }
-            Assert.False(service.IsMaxCapacity, "Expected the idle pool to scale back down from max capacity.");
-
-            // Phase 4: exactly 2 fresh faults - one short of the fresh NumberFault=3 threshold.
-            // With the counter correctly forgotten in phase 2, this must NOT be enough to
-            // re-trigger a scale back to max. Under the bug (never reset while pinned at max),
-            // the stale leftover count from phase 2 plus these 2 fresh faults crosses the
-            // threshold again, causing flapping.
-            // Not asserting success/failure on these individual acquires: under the bug, a
-            // premature scale-up may race with this very loop and hand back a freshly created
-            // item - the final capacity check below is the authoritative signal either way.
-            var currentCapacity = service.CurrentCapacity;
-            for (var i = 0; i < currentCapacity + 2; i++)
-            {
-                var attempt = await service.AcquireAsync();
-                if (attempt.Successful)
-                {
-                    held.Add(attempt);
-                }
-            }
-            await Task.Delay(500);
-            Assert.False(service.IsMaxCapacity, "Expected 2 fresh faults (one short of the NumberFault=3 threshold) to NOT re-trigger a scale back to max capacity - the fault counter must have been forgotten after the earlier batches at max capacity, not accumulated unboundedly.");
-
-            foreach (var value in held)
-            {
-                await value.DisposeAsync();
-            }
             await service.DisposeAsync();
         }
 
@@ -1717,10 +1610,12 @@ namespace RingBufferPlus.Tests
                 held.Add(await service.AcquireAsync());
             }
 
-            // Pool is empty - this acquire times out and enqueues the autoscale Fault, scaling
-            // 2 -> 6 (MaxCapacity).
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
+            // Pool is empty - 4 concurrent waiters trigger the backlog-reactive signal
+            // (ADR001V03), growing capacity 2 -> 6 (MaxCapacity), possibly via more than one
+            // successive batch. AutoScaleAcquireFault must stay enabled (not SwitchToAsync/manual
+            // mode) because EvaluateScaleDown's own scale-down path - what R18 is actually about -
+            // is itself gated on it.
+            var waiterTasks = Enumerable.Range(0, 4).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
             var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
             while (!service.IsMaxCapacity && DateTime.UtcNow < scaleUpDeadline)
@@ -1728,6 +1623,18 @@ namespace RingBufferPlus.Tests
                 await Task.Delay(20);
             }
             Assert.True(service.IsMaxCapacity, "Expected the fault-triggered scale-up to reach max capacity.");
+
+            // Every waiter must settle (served or timed out), and any served one disposed, before
+            // releasing `held` below - otherwise a leaked never-disposed item would keep the pool
+            // from ever becoming genuinely fully idle.
+            var waiterResults = await Task.WhenAll(waiterTasks);
+            foreach (var result in waiterResults)
+            {
+                if (result.Successful)
+                {
+                    await result.DisposeAsync();
+                }
+            }
 
             // Release everything so the pool becomes fully idle - before the R18 fix, this could
             // never scale down from here, no matter how idle, because initialCapacity == 2 made
@@ -2258,42 +2165,38 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task AutoScaleAcquireFault_PartialScaleUpLandsOffTier_StillEventuallyScalesDown()
         {
+            // Backlog-reactive (ADR001V03) is self-driving: an unserved waiting caller keeps
+            // re-triggering EvaluateBacklogReactive (via the FactoryBatchCompleted follow-up call)
+            // until it is either served or times out - it does not "give up partway" the way a
+            // single fixed-quantity SwitchToAsync/fault-triggered batch used to. A batch composed
+            // to fail on exactly half its attempts (the old design) therefore does not reliably
+            // land at a fixed off-tier capacity anymore. Nor is the landing value fully
+            // deterministic even with a bounded number of waiters: _waitingCount is decremented in
+            // a served caller's own continuation (AcquireCoreAsync's finally block), which can run
+            // slightly after a follow-up evaluation already re-reads it as "still waiting",
+            // occasionally dispatching one extra small batch before the count catches up (see
+            // EvaluateBacklogReactive's own remarks - a known, accepted approximation, never risks
+            // exceeding MaxCapacity). MaxCapacity is set generously far from Capacity here so this
+            // still reliably lands off-tier (strictly below MaxCapacity) rather than asserting an
+            // exact value.
             var callCount = 0;
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractOffTierScaleDown", null);
             var service = builder
                 .Factory(_ =>
                 {
                     var n = Interlocked.Increment(ref callCount);
-                    if (n <= 4)
+                    if (n == 5)
                     {
-                        // Warmup fill (Capacity=4) - always succeeds.
-                        return Task.FromResult(1);
-                    }
-                    var scaleUpAttempt = n - 4;
-                    if (scaleUpAttempt % 2 == 1)
-                    {
-                        // Odd attempts fail, even attempts succeed - never 2 consecutive
-                        // failures, so maxConsecutiveFactoryFailures: 1 tolerates every one of
-                        // them and the batch runs to completion. 3 of the 6 requested items
-                        // succeed, landing capacity at 4 + 3 = 7, strictly between Capacity(4)
-                        // and MaxCapacity(10).
+                        // The very first scale-up attempt fails genuinely once (tolerated via
+                        // maxConsecutiveFactoryFailures: 1); every other call - warmup and every
+                        // later scale-up attempt - succeeds.
                         throw new InvalidOperationException("Simulated transient factory failure.");
                     }
                     return Task.FromResult(1);
                 }, TimeSpan.FromSeconds(5), maxConsecutiveFactoryFailures: 1)
-                // maxConcurrentFactoryCalls: 1 (ADR001V03) is required for the fail/succeed
-                // pattern above to actually hold: with the default of 4, several factory calls
-                // run genuinely concurrently, so two "odd" (failing) calls can have their
-                // consecutiveFailures bookkeeping race each other without an intervening success
-                // resetting it first - occasionally tripping give-up one call early (observed:
-                // created 2/6, not the expected 3/6). Pinning concurrency to 1 forces callCount
-                // assignment into strict gate-acquisition order, so the alternating pattern by
-                // construction never produces two consecutive failures - same fix already applied
-                // to SwitchToAsync_WithDefaultFailureTolerance_StillAbandonsTheBatchOnTheFirstFailure
-                // for the same reason.
-                .ElasticCapacity(4, 2, 10, 3, TimeSpan.FromMilliseconds(600), maxConcurrentFactoryCalls: 1)
+                .ElasticCapacity(4, 2, 20, 3, TimeSpan.FromMilliseconds(600))
                 .AutoScaleAcquireFault(1)
-                .AcquireTimeout(TimeSpan.FromMilliseconds(150))
+                .AcquireTimeout(TimeSpan.FromSeconds(1))
                 .Build();
             await service.WarmupAsync();
 
@@ -2303,31 +2206,58 @@ namespace RingBufferPlus.Tests
                 held.Add(await service.AcquireAsync());
             }
 
-            // Pool is empty - this acquire times out and enqueues the autoscale Fault, which
-            // attempts to scale 4 -> 10 but only partially succeeds (3 of 6), landing at 7.
-            var faulted = await service.AcquireAsync();
-            Assert.False(faulted.Successful);
+            // Pool is empty - 2 concurrent waiters trigger the backlog-reactive signal
+            // (ADR001V03). AutoScaleAcquireFault must stay enabled (not SwitchToAsync/manual mode)
+            // because this test's own off-tier scale-down check depends on EvaluateScaleDown's
+            // scale-down path, which is itself gated on it.
+            var waiterTasks = Enumerable.Range(0, 2).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
+            // Capacity must both move away from its initial value (a genuine failure happened and
+            // backlog reacted) and settle (stop changing for a short, quiet window) before reading
+            // it as "landed" - otherwise a still-in-flight extra round (see the class remarks
+            // above) could be read as final when it is not.
             var landedOffTierDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (service.CurrentCapacity != 7 && DateTime.UtcNow < landedOffTierDeadline)
+            int landedCapacity;
+            while (true)
             {
-                await Task.Delay(20);
+                landedCapacity = service.CurrentCapacity;
+                await Task.Delay(150);
+                if (landedCapacity > 4 && landedCapacity == service.CurrentCapacity)
+                {
+                    break;
+                }
+                Assert.True(DateTime.UtcNow < landedOffTierDeadline, $"Expected capacity to move away from initial (4) and settle within the deadline. Last observed: {service.CurrentCapacity}.");
             }
-            Assert.Equal(7, service.CurrentCapacity);
+            Assert.True(landedCapacity > 4 && landedCapacity < 20, $"Expected an off-tier landing strictly between Capacity(4) and MaxCapacity(20). Actual: {landedCapacity}.");
+            // Ties the off-tier landing to the injected failure itself, not just to "capacity grew
+            // somehow": n == 5 throws exactly once ever (callCount only increases), so every
+            // factory invocation beyond the items actually landed in the pool is that one lost
+            // attempt. A factory that never failed would have callCount == landedCapacity exactly,
+            // which this rules out.
+            Assert.Equal(landedCapacity + 1, Volatile.Read(ref callCount));
 
-            // Release everything so the pool becomes fully idle - the scale-down-eligible
-            // condition.
+            // Every waiter must settle (served or timed out), and any served one disposed, before
+            // releasing `held` below - otherwise a leaked never-disposed item would keep the pool
+            // from ever becoming genuinely fully idle, the scale-down-eligible condition.
+            var waiterResults = await Task.WhenAll(waiterTasks);
+            foreach (var result in waiterResults)
+            {
+                if (result.Successful)
+                {
+                    await result.DisposeAsync();
+                }
+            }
             foreach (var value in held)
             {
                 await value.DisposeAsync();
             }
 
             var scaleDownDeadline = DateTime.UtcNow.AddSeconds(5);
-            while (service.CurrentCapacity == 7 && DateTime.UtcNow < scaleDownDeadline)
+            while (service.CurrentCapacity == landedCapacity && DateTime.UtcNow < scaleDownDeadline)
             {
                 await Task.Delay(20);
             }
-            Assert.True(service.CurrentCapacity < 7, "Expected the off-tier capacity (7) to still be eligible for scale-down once idle, instead of being stuck there forever.");
+            Assert.True(service.CurrentCapacity < landedCapacity, $"Expected the off-tier capacity ({landedCapacity}) to still be eligible for scale-down once idle, instead of being stuck there forever. Actual: {service.CurrentCapacity}");
 
             await service.DisposeAsync();
         }

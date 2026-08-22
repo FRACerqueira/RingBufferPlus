@@ -31,7 +31,7 @@ namespace RingBufferPlus
         /// <param name="timeout">Per-item timeout for the factory call; also the deadline for the overall
         /// operation as <c>quantity * timeout</c> when creating several items at once (the initial warmup
         /// fill, or an autoscale-triggered scale-up) - so it bounds how long other engine operations (like
-        /// reacting to the next acquire fault) wait behind it. Default is 15 seconds - inherited unchanged
+        /// reacting to the next waiting caller) wait behind it. Default is 15 seconds - inherited unchanged
         /// from a previous release, not calibrated against any particular factory. Set it deliberately
         /// based on how long your own factory call actually takes (e.g. opening a database connection or
         /// a broker channel), not the default.</param>
