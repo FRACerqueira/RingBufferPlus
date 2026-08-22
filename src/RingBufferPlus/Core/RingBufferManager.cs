@@ -76,6 +76,20 @@ namespace RingBufferPlus.Core
         private volatile bool _scaling;
         private int _faultCount;
 
+        // Fábrica (ADR001V03): a simple growing backoff after consecutive genuine factory
+        // failures - self-protection against hammering a broken factory, not a circuit-breaker
+        // state machine. Persisted on the manager (not scoped to one CreateItemsAsync/
+        // CreateSingleReplacementAsync call) so a factory that stays broken across several
+        // separate creation attempts (repeated floor-guard cycles, repeated backlog-reactive
+        // requests, etc.) is throttled progressively over time, not just within a single batch -
+        // that cross-call repetition, not a single batch's own bounded concurrency, is the
+        // hammering scenario this exists to soften. Reset to zero by any genuine success;
+        // incremented by any genuine (non-cancellation) failure. Not exposed as builder
+        // configuration - "simple", per the ADR, means a small fixed policy, not a new tunable.
+        private int _factoryFailureStreak;
+        private static readonly TimeSpan FactoryBackoffBase = TimeSpan.FromMilliseconds(100);
+        private static readonly TimeSpan FactoryBackoffMax = TimeSpan.FromSeconds(5);
+
         #endregion
 
         #region configuration (set by RingBufferBuilder via object initializer)
@@ -816,6 +830,20 @@ namespace RingBufferPlus.Core
             }
         }
 
+        // Fábrica (ADR001V03): waits out the current backoff window (if any) before a factory
+        // attempt starts. A zero streak (the common, healthy case) returns immediately - no delay,
+        // no allocation. Exponential, capped at FactoryBackoffMax so a long-broken factory does not
+        // grow the wait unboundedly: 1st failure -> FactoryBackoffBase, 2nd -> x2, 3rd -> x4, ...
+        private async Task ApplyFactoryBackoffAsync(CancellationToken token)
+        {
+            var streak = Volatile.Read(ref _factoryFailureStreak);
+            if (streak <= 0) return;
+
+            var multiplier = Math.Pow(2, streak - 1);
+            var ticks = Math.Min(FactoryBackoffBase.Ticks * multiplier, FactoryBackoffMax.Ticks);
+            await Task.Delay(TimeSpan.FromTicks((long)ticks), token).ConfigureAwait(false);
+        }
+
         private async Task<(int Created, bool HadGenuineFailure)> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
         {
             // Fábrica (ADR001V03): bounded concurrent creation, not one attempt at a time - up to
@@ -837,7 +865,22 @@ namespace RingBufferPlus.Core
             // account for MaxConcurrentFactoryCalls - a looser bound that scales with sequential
             // worst case is always safe (never fires prematurely); it does not need to be the
             // tightest possible one.
-            if (hasTimeout) overall.CancelAfter(TimeSpan.FromTicks(FactoryTimeout.Ticks * quantity));
+            //
+            // Armed lazily (once, by whichever attempt clears backoff first) rather than up front:
+            // `overall`'s own wall-clock timer runs regardless of what token a wait is bound to, so
+            // arming it up front would still let time spent waiting out an elevated backoff streak
+            // (ApplyFactoryBackoffAsync below, deliberately not bound to `overall`) eat into this
+            // deadline before Factory is ever called even once - the same self-inflicted failure
+            // the paragraph above already guards against, just via the wall clock instead of the
+            // token (advisor review).
+            var deadlineArmed = 0;
+            void ArmDeadline()
+            {
+                if (hasTimeout && Interlocked.CompareExchange(ref deadlineArmed, 1, 0) == 0)
+                {
+                    overall.CancelAfter(TimeSpan.FromTicks(FactoryTimeout.Ticks * quantity));
+                }
+            }
             using var gate = new SemaphoreSlim(MaxConcurrentFactoryCalls, MaxConcurrentFactoryCalls);
 
             // One attempt per requested item (R14) - a single item's timeout/exception no longer
@@ -849,6 +892,18 @@ namespace RingBufferPlus.Core
             // original sequential behavior whenever MaxConcurrentFactoryCalls is 1.
             async Task AttemptAsync()
             {
+                lock (stateLock) { if (giveUp) return; }
+                // Backoff happens before acquiring a concurrency slot, not while holding one - a
+                // backed-off attempt should not tie up a permit other, not-yet-throttled attempts
+                // could otherwise use. Bounded by `token` (shutdown), deliberately NOT `overall`
+                // (the batch's own quantity * FactoryTimeout deadline): a long-elevated streak
+                // (backoff capped at FactoryBackoffMax, e.g. 5s) could otherwise consume the whole
+                // deadline before Factory is ever called even once, self-inflicting exactly the
+                // "routine scale-up structurally impossible" failure the deadline formula above
+                // exists to prevent - a healthy-but-currently-backed-off factory must still always
+                // get a real attempt, not silently never reach one.
+                await ApplyFactoryBackoffAsync(token).ConfigureAwait(false);
+                ArmDeadline();
                 lock (stateLock) { if (giveUp) return; }
                 await gate.WaitAsync(overall.Token).ConfigureAwait(false);
                 try
@@ -866,6 +921,7 @@ namespace RingBufferPlus.Core
                         var item = await Factory(factoryTimeout.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                         created.Add(item);
                         lock (stateLock) { consecutiveFailures = 0; }
+                        Interlocked.Exchange(ref _factoryFailureStreak, 0);
                     }
                     catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested && !overall.IsCancellationRequested)
                     {
@@ -876,6 +932,7 @@ namespace RingBufferPlus.Core
                             lastFailure = timeout;
                             if (++consecutiveFailures > MaxConsecutiveFactoryFailures) giveUp = true;
                         }
+                        Interlocked.Increment(ref _factoryFailureStreak);
                     }
                     catch (Exception ex) when (!overall.IsCancellationRequested)
                     {
@@ -885,6 +942,7 @@ namespace RingBufferPlus.Core
                             lastFailure = ex;
                             if (++consecutiveFailures > MaxConsecutiveFactoryFailures) giveUp = true;
                         }
+                        Interlocked.Increment(ref _factoryFailureStreak);
                     }
                 }
                 finally
@@ -1011,6 +1069,16 @@ namespace RingBufferPlus.Core
 
         private async Task CreateSingleReplacementAsync()
         {
+            // Fábrica (ADR001V03): same shared, cross-call backoff as CreateItemsAsync - a factory
+            // that keeps failing every time it is asked for a replacement is throttled, not
+            // hammered on every single Invalidate()/heartbeat-triggered cycle. This currently runs
+            // inline on the engine thread (ProcessCommandAsync's ReplaceOne case), so - until
+            // Fábrica's execution is decoupled from it (a later increment of this same ADR) - a
+            // long backoff here also delays every other command behind it in the queue. Accepted
+            // for now because the alternative (no backoff at all) is exactly the hammering this
+            // mechanism exists to prevent; decoupling is what actually resolves the tension.
+            await ApplyFactoryBackoffAsync(_lifetime.Token).ConfigureAwait(false);
+
             using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
             factoryTimeout.CancelAfter(FactoryTimeout);
             var replaced = false;
@@ -1023,6 +1091,7 @@ namespace RingBufferPlus.Core
                 var item = await Factory(factoryTimeout.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                 await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
                 replaced = true;
+                Interlocked.Exchange(ref _factoryFailureStreak, 0);
             }
             // Same distinction as CreateItemsAsync (R15): a normal DisposeAsync racing this
             // replacement cancels the same _lifetime token the per-item timeout is linked from -
@@ -1039,6 +1108,7 @@ namespace RingBufferPlus.Core
             catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested)
             {
                 LogError(new TimeoutException("Timeout factory (replacement)"));
+                Interlocked.Increment(ref _factoryFailureStreak);
             }
             catch (Exception ex)
             {
@@ -1047,6 +1117,7 @@ namespace RingBufferPlus.Core
                 // also now catches a factory-thrown OperationCanceledException that matched neither
                 // guard above (R25) - logging the real exception instead of a fabricated one.
                 LogError(ex);
+                Interlocked.Increment(ref _factoryFailureStreak);
             }
             finally
             {

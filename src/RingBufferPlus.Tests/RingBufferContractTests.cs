@@ -1895,6 +1895,160 @@ namespace RingBufferPlus.Tests
             await service.DisposeAsync();
         }
 
+        // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03: Fábrica's "simple growing backoff after consecutive [genuine]
+        // failures" - persisted across separate creation attempts (repeated
+        // Invalidate()-triggered replacements here), not scoped to one batch. Exponential,
+        // starting at ~100ms, doubling per consecutive genuine failure, reset by any success -
+        // see the class remarks on ApplyFactoryBackoffAsync/_factoryFailureStreak in
+        // RingBufferManager. Each replacement is triggered one at a time (a fresh
+        // Invalidate()+Dispose() cycle on a still-idle item), waiting for the previous one to be
+        // fully processed by the single-consumer engine before triggering the next - the engine's
+        // own sequential processing is what guarantees the streak is updated before the next
+        // attempt's backoff reads it, no extra synchronization needed.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Factory_BackoffGrows_WithConsecutiveGenuineFailures_AndResetsOnSuccess()
+        {
+            var replacementTimestamps = new List<DateTime>();
+            var warmupDone = false;
+            var shouldFail = true;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFactoryBackoffGrows", null);
+            var service = builder
+                .Factory(_ =>
+                {
+                    // Only replacement attempts (post-warmup) exercise the fail/backoff behavior -
+                    // warmup itself must always succeed cleanly.
+                    if (!Volatile.Read(ref warmupDone))
+                    {
+                        return Task.FromResult(0);
+                    }
+                    lock (replacementTimestamps) replacementTimestamps.Add(DateTime.UtcNow);
+                    if (Volatile.Read(ref shouldFail))
+                    {
+                        throw new InvalidOperationException("factory down");
+                    }
+                    return Task.FromResult(1);
+                })
+                .FixedCapacity(8)
+                .Build();
+            await service.WarmupAsync();
+            warmupDone = true;
+
+            async Task<TimeSpan> TriggerOneReplacementAsync()
+            {
+                int before;
+                lock (replacementTimestamps) before = replacementTimestamps.Count;
+                var trigger = DateTime.UtcNow;
+
+                var acquired = await service.AcquireAsync();
+                acquired.Invalidate();
+                await acquired.DisposeAsync();
+
+                var deadline = DateTime.UtcNow.AddSeconds(3);
+                int after;
+                while (true)
+                {
+                    lock (replacementTimestamps) after = replacementTimestamps.Count;
+                    if (after > before || DateTime.UtcNow >= deadline) break;
+                    await Task.Delay(5);
+                }
+                Assert.True(after > before, "Expected the replacement's factory call to happen within the deadline.");
+                DateTime lastCall;
+                lock (replacementTimestamps) lastCall = replacementTimestamps[^1];
+                return lastCall - trigger;
+            }
+
+            // streak 0 going in (no prior failure) -> ~no backoff; this attempt fails -> streak 1.
+            var delay1 = await TriggerOneReplacementAsync();
+            // streak 1 going in -> ~100ms backoff; fails -> streak 2.
+            var delay2 = await TriggerOneReplacementAsync();
+            // streak 2 going in -> ~200ms backoff; fails -> streak 3.
+            var delay3 = await TriggerOneReplacementAsync();
+
+            Assert.True(delay1 < TimeSpan.FromMilliseconds(250), $"Expected ~no backoff on the very first attempt; took {delay1}.");
+            Assert.True(delay2 > delay1, $"Expected backoff to kick in after the first failure: delay1={delay1}, delay2={delay2}.");
+            Assert.True(delay2 < TimeSpan.FromMilliseconds(700), $"Expected roughly ~100ms backoff after 1 failure, not something far larger; took {delay2}.");
+            Assert.True(delay3 > delay2, $"Expected backoff to keep growing: delay2={delay2}, delay3={delay3}.");
+            Assert.True(delay3 < TimeSpan.FromMilliseconds(1200), $"Expected roughly ~200ms backoff after 2 failures, not something far larger; took {delay3}.");
+
+            // A success resets the streak: let this next attempt succeed (whatever backoff it
+            // still pays for streak 3 going in), then the one right after it must be back to
+            // ~no backoff, not continuing to grow from streak 3.
+            shouldFail = false;
+            _ = await TriggerOneReplacementAsync();
+            shouldFail = true;
+            var delayAfterReset = await TriggerOneReplacementAsync();
+
+            Assert.True(delayAfterReset < TimeSpan.FromMilliseconds(250), $"Expected the streak to have reset after a success; took {delayAfterReset} (would be ~400ms+ if it had not).");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03 (advisor review): the backoff wait must never be counted against a
+        // scale-up's own quantity * FactoryTimeout deadline (`overall` in CreateItemsAsync) - an
+        // elevated streak's backoff (capped at 5s) could otherwise exceed a short deadline and
+        // cancel the attempt before Factory is ever called even once, self-inflicting exactly the
+        // "routine scale-up structurally impossible" failure that deadline formula exists to
+        // prevent, on an otherwise perfectly healthy factory. min=2/init=2/max=3 keeps every
+        // scale-up in this test needing exactly 1 item, so its deadline is exactly one
+        // FactoryTimeout throughout - deliberately shorter than the streak-3 backoff (~400ms)
+        // built up beforehand.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleUp_WithElevatedBackoffStreak_StillGetsARealAttempt_WithinItsOwnTightDeadline()
+        {
+            var scalingUp = false;
+            var factoryShouldFail = true;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBackoffDoesNotEatScaleUpDeadline", null);
+            var service = builder
+                .Factory(_ =>
+                {
+                    if (!Volatile.Read(ref scalingUp))
+                    {
+                        return Task.FromResult(0); // warmup always succeeds
+                    }
+                    if (Volatile.Read(ref factoryShouldFail))
+                    {
+                        throw new InvalidOperationException("factory down");
+                    }
+                    return Task.FromResult(1);
+                }, TimeSpan.FromMilliseconds(300))
+                .ElasticCapacity(2, 2, 3, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+            scalingUp = true;
+
+            // Build a failure streak of 3 via 3 failed 1-item scale-up attempts (capacity never
+            // moves off 2, since a totally-failed batch does not decrement it) - each is a
+            // separate CreateItemsAsync call, so the streak persists across them. A total failure
+            // (quantity 1, 0 created) throws rather than returning false - the same established
+            // contract as SwitchToAsync_WhenFactoryThrowsDuringScaleUp_PropagatesRealException_AndEngineSurvives.
+            for (var i = 0; i < 3; i++)
+            {
+                var ex = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity));
+                Assert.IsType<InvalidOperationException>(ex);
+                Assert.True(service.IsInitCapacity);
+            }
+
+            // Streak is now 3 (this next attempt's backoff: ~400ms). The factory itself is now
+            // healthy; this scale-up's own deadline (quantity 1 * FactoryTimeout 300ms = 300ms) is
+            // deliberately shorter than that backoff.
+            factoryShouldFail = false;
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            Assert.True(moved, "Expected the scale-up to still get a real attempt despite an elevated backoff streak longer than its own deadline.");
+            Assert.True(service.IsMaxCapacity);
+
+            await service.DisposeAsync();
+        }
+
         [Fact]
         [Trait("Category", "Contract")]
         public async Task SwitchToAsync_WithFailureToleranceOptedIn_StillAttemptsTheRemainingItems()
