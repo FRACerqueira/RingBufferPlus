@@ -24,7 +24,10 @@ namespace RingBufferPlus.Benchmarks
     //     + safety buffer as a "fair level", adjusted by a linear-regression trend projected
     //     `Horizon` ticks ahead, clamped to [min, max], with a deadband so the target does not
     //     move for changes smaller than the buffer's own noise tolerance (added after this
-    //     simulation showed the raw formula thrashes under flat-but-noisy demand).
+    //     simulation showed the raw formula thrashes under flat-but-noisy demand), and an
+    //     optional window reset while a reactive escalation is in flight (added after this
+    //     simulation showed a burst already served by the reactive path otherwise lingers in
+    //     the window for close to a full WindowSize, delaying the slow layer's descent).
     //
     // Run with: dotnet run -c Release -- --algo-comparison
     public static class AutoScaleAlgorithmComparison
@@ -58,13 +61,21 @@ namespace RingBufferPlus.Benchmarks
 
             foreach (var (name, demand, changeTick, focus) in scenarios)
             {
-                var (medCap, medConverge, medOsc) = SimulateMedian(demand, changeTick);
-                var (pctCap, pctConverge, pctOsc) = SimulatePercentile(demand, changeTick, useDeadband: false);
-                var (pctDbCap, pctDbConverge, pctDbOsc) = SimulatePercentile(demand, changeTick, useDeadband: true);
+                // Convergence tolerance is relative to each scenario's own post-change steady
+                // demand, not a fixed threshold - SpikeAndRecover's baseline (6) and StepDown's
+                // (4) don't share a single meaningful "converged" capacity value.
+                var steadyDemand = demand[^1];
+                var tolerance = steadyDemand + 3;
+
+                var (medCap, medConverge, medOsc) = SimulateMedian(demand, changeTick, tolerance);
+                var (pctCap, pctConverge, pctOsc) = SimulatePercentile(demand, changeTick, tolerance, useDeadband: false, resetOnReactive: false);
+                var (pctDbCap, pctDbConverge, pctDbOsc) = SimulatePercentile(demand, changeTick, tolerance, useDeadband: true, resetOnReactive: false);
+                var (pctRstCap, pctRstConverge, pctRstOsc) = SimulatePercentile(demand, changeTick, tolerance, useDeadband: true, resetOnReactive: true);
 
                 Report(name, "Median (shipping today)", demand, medCap, medConverge, medOsc);
                 Report(name, "Percentile+Regression", demand, pctCap, pctConverge, pctOsc);
                 Report(name, "Percentile+Regr.+Deadband", demand, pctDbCap, pctDbConverge, pctDbOsc);
+                Report(name, "...+WindowResetOnReactive", demand, pctRstCap, pctRstConverge, pctRstOsc);
                 Console.WriteLine($"  -> focus: {focus}");
             }
         }
@@ -106,7 +117,7 @@ namespace RingBufferPlus.Benchmarks
             return d;
         }
 
-        private static (int[] Capacity, int ConvergeTicks, int Oscillations) SimulateMedian(int[] demand, int changeTick)
+        private static (int[] Capacity, int ConvergeTicks, int Oscillations) SimulateMedian(int[] demand, int changeTick, int tolerance)
         {
             var cap = new int[demand.Length];
             var capacityPrev = Init;
@@ -139,7 +150,7 @@ namespace RingBufferPlus.Benchmarks
                 cap[t] = capacityFinal;
                 capacityPrev = capacityFinal;
 
-                if (changeTick >= 0 && t >= changeTick && convergeTicks == -1 && capacityFinal <= Min + 2)
+                if (changeTick >= 0 && t >= changeTick && convergeTicks == -1 && capacityFinal <= tolerance)
                 {
                     convergeTicks = t - changeTick;
                 }
@@ -148,45 +159,70 @@ namespace RingBufferPlus.Benchmarks
             return (cap, convergeTicks, CountOscillations(cap));
         }
 
-        private static (int[] Capacity, int ConvergeTicks, int Oscillations) SimulatePercentile(int[] demand, int changeTick, bool useDeadband)
+        private static (int[] Capacity, int ConvergeTicks, int Oscillations) SimulatePercentile(int[] demand, int changeTick, int tolerance, bool useDeadband, bool resetOnReactive)
         {
             var cap = new int[demand.Length];
             var capacityPrev = Init;
             var window = new List<int>();
             var convergeTicks = -1;
+            var wasActive = false;
 
             for (var t = 0; t < demand.Length; t++)
             {
+                // "Active" spans the whole plateau where demand is keeping pace with capacity
+                // (not just the single tick a reactive jump fires), mirroring the real engine:
+                // a scale operation stays "in flight" for as long as the buffer is servicing an
+                // elevated demand level, not just the instant it started.
+                var active = resetOnReactive && demand[t] >= capacityPrev;
+
+                if (resetOnReactive && wasActive && !active)
+                {
+                    // Transitioning out of an active episode: purge whatever the window held,
+                    // stale or not, exactly like the real `develop` reset-on-scale behavior.
+                    window.Clear();
+                }
+                wasActive = active;
+
                 var reactiveFloor = demand[t] > capacityPrev ? Math.Min(demand[t], Max) : 0;
-
-                window.Add(demand[t]);
-                if (window.Count > WindowSize) window.RemoveAt(0);
-
-                var monitorTarget = window.Count >= 2
-                    ? PercentileRegressionDecision.EvaluateTarget(window, PercentileP, SafetyBuffer, Horizon, Min, Max)
-                    : capacityPrev;
-
-                var candidate = Math.Max(reactiveFloor, monitorTarget);
+                var reactiveTriggered = reactiveFloor > capacityPrev;
 
                 int capacityFinal;
-                if (reactiveFloor > capacityPrev)
+                if (active)
                 {
-                    // Safety-critical reactive escalation always applies immediately, never dampened.
-                    capacityFinal = candidate;
-                }
-                else if (useDeadband)
-                {
-                    capacityFinal = Math.Abs(candidate - capacityPrev) >= Deadband ? candidate : capacityPrev;
+                    // Paused: never consult the (frozen/stale) window while an episode is in
+                    // flight - only reactive escalation may still push capacity up further.
+                    capacityFinal = Math.Max(reactiveFloor, capacityPrev);
                 }
                 else
                 {
-                    capacityFinal = candidate;
+                    window.Add(demand[t]);
+                    if (window.Count > WindowSize) window.RemoveAt(0);
+
+                    var monitorTarget = window.Count >= 2
+                        ? PercentileRegressionDecision.EvaluateTarget(window, PercentileP, SafetyBuffer, Horizon, Min, Max)
+                        : capacityPrev;
+
+                    var candidate = Math.Max(reactiveFloor, monitorTarget);
+
+                    if (reactiveTriggered)
+                    {
+                        // Safety-critical reactive escalation always applies immediately, never dampened.
+                        capacityFinal = candidate;
+                    }
+                    else if (useDeadband)
+                    {
+                        capacityFinal = Math.Abs(candidate - capacityPrev) >= Deadband ? candidate : capacityPrev;
+                    }
+                    else
+                    {
+                        capacityFinal = candidate;
+                    }
                 }
 
                 cap[t] = capacityFinal;
                 capacityPrev = capacityFinal;
 
-                if (changeTick >= 0 && t >= changeTick && convergeTicks == -1 && capacityFinal <= Min + 2)
+                if (changeTick >= 0 && t >= changeTick && convergeTicks == -1 && capacityFinal <= tolerance)
                 {
                     convergeTicks = t - changeTick;
                 }
