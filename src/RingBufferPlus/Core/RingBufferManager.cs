@@ -76,6 +76,24 @@ namespace RingBufferPlus.Core
         private volatile bool _scaling;
         private int _faultCount;
 
+        // Fábrica (ADR001V03): the currently in-flight background scale-up batch (DispatchScaleUp),
+        // if any - only ever written by the engine thread (single consumer), and only ever one at
+        // a time (Switch/Fault both reject a new dispatch while _scaling is true). DisposeAsync
+        // reads this only after _engineTask has already been awaited to completion (so no further
+        // write can race it) and awaits it too, so a batch still in flight at shutdown still gets
+        // to record its telemetry and resolve its caller before DisposeAsync returns - see the
+        // ScaleUp_*RacedByDisposeAsync observability tests.
+        //
+        // This field can be overwritten by a new dispatch before the OLD batch's Task.Run lambda
+        // has fully returned (the engine clears _scaling - unblocking a new dispatch - as soon as
+        // it processes that batch's own FactoryBatchCompleted command, which the lambda posts as
+        // its very last statement before returning) - only the newest batch's task is ever tracked,
+        // not a list of all of them. This is safe: by the time a batch's completion command has
+        // been posted (the trigger for _scaling to clear and a new dispatch to become possible),
+        // that batch has nothing observable left to do - TryWrite is its last real action, so an
+        // overwritten reference is never "still doing work" that DisposeAsync then fails to wait for.
+        private Task? _factoryBatchTask;
+
         // Fábrica (ADR001V03): a simple growing backoff after consecutive genuine factory
         // failures - self-protection against hammering a broken factory, not a circuit-breaker
         // state machine. Persisted on the manager (not scoped to one CreateItemsAsync/
@@ -391,6 +409,25 @@ namespace RingBufferPlus.Core
                     LogError(ex);
                 }
 
+                // The engine loop has now fully stopped (awaited above as part of `pending`), so
+                // _factoryBatchTask can no longer be reassigned by a new DispatchScaleUp call - safe
+                // to read here. A Fábrica batch still in flight at shutdown must still be waited on:
+                // without this, its telemetry (activity/meter, recorded inside the batch itself -
+                // see DispatchScaleUp) could be recorded after this method has already returned, or
+                // its caller's Completion never resolved at all.
+                var factoryBatchTask = _factoryBatchTask;
+                if (factoryBatchTask is not null)
+                {
+                    try
+                    {
+                        await factoryBatchTask.ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError(ex);
+                    }
+                }
+
                 // _heartbeatTask has already completed (awaited above), so RunHeartbeatAsync's own
                 // loop can no longer add to this bag - safe to snapshot now (Round 4, Estabilidade).
                 // Without this wait, DisposeAsync could return while a resource an orphaned
@@ -611,13 +648,25 @@ namespace RingBufferPlus.Core
 
                 case EngineCommandKind.Switch:
                     var target = ResolveTarget(cmd.Target!.Value);
-                    if (target == CurrentCapacity)
+                    // _scaling here means "a Fábrica batch dispatched by a previous Switch/Fault is
+                    // still in flight" (ADR001V03): with that batch now running in the background
+                    // instead of blocking this loop, a second overlapping dispatch could each read a
+                    // stale CurrentCapacity and independently add their own `created` on top of it,
+                    // overshooting MaxCapacity. Rejecting here keeps "at most one batch at a time"
+                    // and preserves the existing at-most-one-winner contract for concurrent callers
+                    // requesting the same target (advisor review).
+                    if (target == CurrentCapacity || _scaling)
                     {
                         cmd.Accepted?.TrySetResult(false);
                         cmd.Completion?.TrySetResult(false);
                         break;
                     }
                     cmd.Accepted?.TrySetResult(true);
+                    if (target > CurrentCapacity)
+                    {
+                        DispatchScaleUp(target, scaleTrigger: "manual", cmd.Completion);
+                        break;
+                    }
                     try
                     {
                         var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "manual").ConfigureAwait(false);
@@ -638,6 +687,15 @@ namespace RingBufferPlus.Core
                     {
                         break;
                     }
+                    if (_scaling)
+                    {
+                        // A scale-up dispatched by a previous Switch/Fault is still in flight - do not
+                        // start a second overlapping batch (same reasoning as the Switch case above).
+                        // _faultCount is deliberately left as-is: this fault is deferred, not consumed -
+                        // the next Fault/Tick after the in-flight batch completes re-evaluates from a
+                        // fresh, still-elevated count instead of losing it.
+                        break;
+                    }
                     if (CurrentCapacity == MaxCapacity)
                     {
                         // F7: nothing to scale to right now, but forget this batch of faults anyway -
@@ -651,24 +709,11 @@ namespace RingBufferPlus.Core
                     // check against MinCapacity picks Capacity even when Capacity == MinCapacity
                     // (a legal configuration), making this a no-op (target == current) forever.
                     var next = CurrentCapacity < Capacity ? Capacity : MaxCapacity;
-                    try
-                    {
-                        var moved = await MoveToCapacityAsync(next, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
-                        // R7: only forget this batch of faults once the scale-up actually completed -
-                        // a failed/partial attempt must not burn the whole budget, so the very next
-                        // fault retries instead of requiring an entire fresh batch while already
-                        // struggling.
-                        if (moved)
-                        {
-                            _faultCount = 0;
-                        }
-                    }
-                    catch (Exception ex)
-                    {
-                        // No caller is waiting on a Fault-triggered scale-up; logging is the only
-                        // outcome needed, and the engine loop must keep running regardless.
-                        LogError(ex);
-                    }
+                    // R7's "only forget this batch of faults once the scale-up actually completed" is
+                    // now applied in the FactoryBatchCompleted case below (scaleTrigger == "auto" and
+                    // ok), once the dispatched batch's real outcome is known - it can no longer be
+                    // decided here, since the batch has not run yet at dispatch time.
+                    DispatchScaleUp(next, scaleTrigger: "auto", completion: null);
                     break;
 
                 case EngineCommandKind.ReplaceOne:
@@ -676,9 +721,151 @@ namespace RingBufferPlus.Core
                     break;
 
                 case EngineCommandKind.Tick:
+                    if (_scaling)
+                    {
+                        // Defensive re-check (RunSampleTickAsync's own check happens at write-time,
+                        // before this command was even enqueued - a narrow window between that check
+                        // and this command being dequeued could otherwise let a scale-down run here
+                        // while a scale-up batch is still in flight, see the Switch case above for why
+                        // that risks an overshoot). This also skips ProcessTickAsync's own
+                        // _samples.Add for this tick, not just the scale-down decision - but that
+                        // has no observable effect: the FactoryBatchCompleted case unconditionally
+                        // clears _samples once the in-flight batch finishes (F6, same as
+                        // MoveToCapacityAsync's own finally block already did), so any sample
+                        // collected during the batch's whole in-flight window - however long that
+                        // now is, no longer just one synchronous call - would be discarded anyway.
+                        break;
+                    }
                     await ProcessTickAsync().ConfigureAwait(false);
                     break;
+
+                case EngineCommandKind.FactoryBatchCompleted:
+                    // Telemetry (activity/meter) was already finalized inside DispatchScaleUp's own
+                    // background task, unconditionally - see its comment for why. This case only
+                    // applies the sole-owner state changes: capacity, _scaling, _faultCount, and the
+                    // caller's completion.
+                    //
+                    // Clear in-flight status BEFORE resolving the caller's completion (advisor
+                    // review): a sequential caller that awaits completion (LockWhenScaling) must never
+                    // observe _scaling still true once its own await returns, or its very next
+                    // SwitchToAsync could be spuriously rejected by the check above.
+                    _scaling = false;
+                    if (cmd.Created > 0)
+                    {
+                        // Applied against the live CurrentCapacity at completion time, not the value
+                        // captured at dispatch - with batches serialized (one in flight at a time)
+                        // nothing else can have moved capacity in between, but writing it this way
+                        // keeps the arithmetic correct even if a future change ever allows otherwise.
+                        Volatile.Write(ref _currentCapacity, CurrentCapacity + cmd.Created);
+                    }
+                    var scaledUp = cmd.Created == cmd.Quantity;
+                    _samples.Clear();
+                    if (cmd.ScaleTrigger == "auto" && scaledUp)
+                    {
+                        // R7: only forget this batch of faults once the scale-up actually completed -
+                        // see the Fault case's own comment for why a failed/partial attempt must not
+                        // burn the whole budget.
+                        _faultCount = 0;
+                    }
+                    if (cmd.Completion is not null)
+                    {
+                        if (cmd.Failure is not null)
+                        {
+                            cmd.Completion.TrySetException(cmd.Failure);
+                        }
+                        else
+                        {
+                            cmd.Completion.TrySetResult(scaledUp);
+                        }
+                    }
+                    else if (cmd.Failure is not null)
+                    {
+                        // No caller is waiting on a Fault-triggered scale-up; logging is the only
+                        // outcome needed, same as before this batch was dispatched in the background.
+                        LogError(cmd.Failure);
+                    }
+                    break;
             }
+        }
+
+        // Fábrica (ADR001V03): dispatches a scale-up's bounded-concurrent factory batch onto the
+        // thread pool instead of awaiting it inline, so the engine's single consumer thread stays
+        // free to process other commands (a floor-guard replenishment, a heartbeat-driven
+        // ReplaceOne, ...) while the batch is in flight. _currentCapacity is still mutated only on
+        // the engine thread - later, when the batch's own FactoryBatchCompleted command is processed
+        // - preserving the Orquestrador's sole-owner guarantee. Used only by Switch (manual) and
+        // Fault (auto) scale-up requests; Warmup and Tick's scale-down still call
+        // MoveToCapacityAsync directly, unchanged.
+        private void DispatchScaleUp(int target, string scaleTrigger, TaskCompletionSource<bool>? completion)
+        {
+            var current = CurrentCapacity;
+            var quantity = target - current;
+            _scaling = true;
+
+            var activity = _activitySource.StartActivity("RingBufferPlus.Scale");
+            activity?.SetTag("buffer.name", Name);
+            activity?.SetTag("direction", "up");
+            activity?.SetTag("trigger", scaleTrigger);
+            var sw = Stopwatch.StartNew();
+            LogMessage($"Starting ScaleUp {quantity}.");
+
+            _factoryBatchTask = Task.Run(async () =>
+            {
+                int created;
+                bool hadGenuineFailure;
+                Exception? threw = null;
+                try
+                {
+                    (created, hadGenuineFailure) = await CreateItemsAsync(quantity, hasTimeout: true, _lifetime.Token).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // O7-residual (Round 6, Resiliência): CreateItemsAsync's own throw path (zero
+                    // items created, every attempt failed for a real reason) skips the tuple return
+                    // entirely - always a genuine failure at that point (CreateItemsAsync only ever
+                    // throws its own lastFailure, kept free of ordinary cancellation, R15).
+                    created = 0;
+                    hadGenuineFailure = true;
+                    threw = ex;
+                }
+                sw.Stop();
+                LogMessage("End ScaleUp.");
+
+                // Telemetry (activity/meter) is finalized here, unconditionally, rather than
+                // deferred to the FactoryBatchCompleted command below: it is independent,
+                // thread-safe instrumentation, not sole-owner state, and must still be reported
+                // even if the manager is disposed (channel closed, or DisposeAsync simply reaches
+                // its own listener-disposal point) before this batch finishes - see the
+                // ScaleUp_*RacedByDisposeAsync observability tests, and DisposeAsync's own await on
+                // _factoryBatchTask, which is what bounds that race.
+                var scaledUp = created == quantity;
+                var cancelledByShutdown = !scaledUp && _lifetime.IsCancellationRequested && !hadGenuineFailure;
+                var statusOk = scaledUp || cancelledByShutdown;
+                activity?.SetStatus(statusOk ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+                activity?.SetTag("cancelled", cancelledByShutdown);
+                activity?.Dispose();
+                _scaleOperations.Add(1,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("direction", "up"),
+                    new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("success", scaledUp),
+                    new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
+                _scaleDuration.Record(sw.Elapsed.TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("direction", "up"),
+                    new KeyValuePair<string, object?>("success", scaledUp),
+                    new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
+
+                var posted = _commands.Writer.TryWrite(EngineCommand.FactoryBatchCompleted(quantity, created, threw, completion, scaleTrigger));
+                if (!posted)
+                {
+                    // The manager was disposed while this batch was in flight - the engine loop is
+                    // gone, so nothing will ever apply the capacity mutation or clear _scaling.
+                    // Resolve the caller (if any) directly instead of leaving it hanging forever;
+                    // capacity itself is moot at this point (the buffer is shutting down).
+                    completion?.TrySetResult(false);
+                }
+            });
         }
 
         private async Task ProcessTickAsync()
@@ -1411,7 +1598,7 @@ namespace RingBufferPlus.Core
 
         #endregion
 
-        private enum EngineCommandKind { Warmup, Switch, Fault, ReplaceOne, Tick }
+        private enum EngineCommandKind { Warmup, Switch, Fault, ReplaceOne, Tick, FactoryBatchCompleted }
 
         private sealed record EngineCommand
         {
@@ -1419,6 +1606,10 @@ namespace RingBufferPlus.Core
             public ScaleSwitch? Target { get; init; }
             public TaskCompletionSource<bool>? Accepted { get; init; }
             public TaskCompletionSource<bool>? Completion { get; init; }
+            public int Quantity { get; init; }
+            public int Created { get; init; }
+            public Exception? Failure { get; init; }
+            public string? ScaleTrigger { get; init; }
 
             public static EngineCommand Warmup(TaskCompletionSource<bool> completion) =>
                 new() { Kind = EngineCommandKind.Warmup, Completion = completion };
@@ -1431,6 +1622,18 @@ namespace RingBufferPlus.Core
             public static EngineCommand ReplaceOne() => new() { Kind = EngineCommandKind.ReplaceOne };
 
             public static EngineCommand Tick() => new() { Kind = EngineCommandKind.Tick };
+
+            public static EngineCommand FactoryBatchCompleted(
+                int quantity, int created, Exception? failure, TaskCompletionSource<bool>? completion, string scaleTrigger) =>
+                new()
+                {
+                    Kind = EngineCommandKind.FactoryBatchCompleted,
+                    Quantity = quantity,
+                    Created = created,
+                    Failure = failure,
+                    Completion = completion,
+                    ScaleTrigger = scaleTrigger,
+                };
         }
     }
 }

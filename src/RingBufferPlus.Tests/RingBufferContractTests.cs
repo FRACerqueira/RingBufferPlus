@@ -1896,6 +1896,59 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03: Fábrica's batch now runs on the thread pool instead of blocking the
+        // engine's single consumer thread (Orquestrador) inline - a second command must be
+        // dequeued and handled immediately, not queued up behind the whole in-flight batch. A
+        // second overlapping scale-up request is still correctly rejected (one batch at a time,
+        // to avoid a MaxCapacity overshoot - see the Switch case's own comment), but the rejection
+        // itself must be prompt, proving the engine loop was free to look at it right away.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_ScaleUp_DoesNotBlockTheEngineLoop_WhileTheBatchIsInFlight()
+        {
+            var scalingUp = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpDoesNotBlockEngine", null);
+            var service = builder
+                .Factory(async _ =>
+                {
+                    // Only the scale-up (not the warmup fill) takes the long path - warmup must
+                    // always complete quickly and cleanly.
+                    if (Volatile.Read(ref scalingUp))
+                    {
+                        await Task.Delay(TimeSpan.FromSeconds(2));
+                    }
+                    return 0;
+                })
+                .ElasticCapacity(2, 2, 4, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
+                .Build();
+            await service.WarmupAsync();
+            scalingUp = true;
+
+            // Dispatches a scale-up whose single factory call takes ~2s. No LockWhenScaling here:
+            // SwitchToAsync only awaits Accepted, returning as soon as the batch is dispatched -
+            // not when it finishes.
+            var firstAccepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            Assert.True(firstAccepted);
+
+            // Act: immediately issue a second Switch request while the first batch is still
+            // running in the background. Before this decoupling, the engine's single consumer
+            // thread would still be blocked awaiting the first batch inline, so this call would
+            // not even be looked at until the ~2s factory delay elapsed. With Fábrica decoupled,
+            // the engine is free to dequeue and reject it immediately (_scaling is true).
+            var sw = Stopwatch.StartNew();
+            var secondAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            sw.Stop();
+
+            Assert.False(secondAccepted);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1),
+                $"Expected the engine to reject the second request promptly instead of blocking behind the in-flight batch; took {sw.Elapsed}.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
         // v6.0.0 / ADR001V03: Fábrica's "simple growing backoff after consecutive [genuine]
         // failures" - persisted across separate creation attempts (repeated
         // Invalidate()-triggered replacements here), not scoped to one batch. Exponential,
