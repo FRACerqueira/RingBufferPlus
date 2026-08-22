@@ -46,7 +46,13 @@ namespace RingBufferPlus
         /// tolerated failure is itself a <paramref name="timeout"/> rather than a fast exception, raising
         /// this value multiplies <paramref name="timeout"/>'s own worst-case blocking effect: the batch
         /// can now stay blocked for roughly <c>(maxConsecutiveFactoryFailures + 1) * timeout</c> before
-        /// giving up on a given item, not just <paramref name="timeout"/>.</param>
+        /// giving up on a given item, not just <paramref name="timeout"/>. Since v6.0.0 (ADR001V03), a
+        /// batch's factory calls run with bounded concurrency (up to <c>maxConcurrentFactoryCalls</c>,
+        /// default <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/>), not one at a time -
+        /// giving up only stops items still queued behind that concurrency window, not ones already in
+        /// flight when the streak is exceeded, so with both defaults a fully broken factory can still
+        /// receive up to <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/> concurrent attempts
+        /// before giving up, not just 1.</param>
         /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         IRingBufferAutoScaleBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 

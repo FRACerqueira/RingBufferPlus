@@ -92,6 +92,16 @@ namespace RingBufferPlus.Core
 
         public byte MaxConsecutiveFactoryFailures { get; init; }
 
+        /// <summary>
+        /// Maximum number of concurrent factory calls when creating several items at once (ADR001V03,
+        /// Fábrica role). Bounds a large batch (warmup, scale-up, or floor-guard replenishment) from
+        /// flooding a struggling-but-technically-accepting downstream with simultaneous creation
+        /// attempts - the thundering-herd mitigation. Defaults to <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/>
+        /// so a direct object-initializer construction that omits it (e.g. in tests) never
+        /// silently deadlocks CreateItemsAsync's gate at a zero-permit semaphore.
+        /// </summary>
+        public int MaxConcurrentFactoryCalls { get; init; } = RingBufferDefault.MaxConcurrentFactoryCalls;
+
         public TimeSpan PulseHeartBeat { get; init; }
 
         public TimeSpan SamplesBase { get; init; }
@@ -808,27 +818,42 @@ namespace RingBufferPlus.Core
 
         private async Task<(int Created, bool HadGenuineFailure)> CreateItemsAsync(int quantity, bool hasTimeout, CancellationToken token)
         {
-            var created = new List<T>(quantity);
+            // Fábrica (ADR001V03): bounded concurrent creation, not one attempt at a time - up to
+            // MaxConcurrentFactoryCalls Factory calls can be in flight simultaneously, mitigating a
+            // large batch (warmup, scale-up, floor-guard replenishment) flooding a
+            // struggling-but-technically-accepting downstream with simultaneous connection attempts.
+            var created = new ConcurrentBag<T>();
+            var stateLock = new object();
             Exception? lastFailure = null;
             var consecutiveFailures = 0;
+            var giveUp = false;
+
             using var overall = CancellationTokenSource.CreateLinkedTokenSource(token);
             // The deadline scales with the work actually requested (each item already has its own
             // FactoryTimeout-bounded attempt), not with the sampling cadence (SamplesBase) - a
             // fixed, sampling-derived deadline could be smaller than quantity * FactoryTimeout for
             // any delta/FactoryTimeout combination, making a routine scale-up structurally
-            // impossible regardless of the factory's actual health.
+            // impossible regardless of the factory's actual health. Deliberately not tightened to
+            // account for MaxConcurrentFactoryCalls - a looser bound that scales with sequential
+            // worst case is always safe (never fires prematurely); it does not need to be the
+            // tightest possible one.
             if (hasTimeout) overall.CancelAfter(TimeSpan.FromTicks(FactoryTimeout.Ticks * quantity));
-            try
+            using var gate = new SemaphoreSlim(MaxConcurrentFactoryCalls, MaxConcurrentFactoryCalls);
+
+            // One attempt per requested item (R14) - a single item's timeout/exception no longer
+            // abandons the whole batch by default. MaxConsecutiveFactoryFailures (default 0) still
+            // gives up on the remaining not-yet-started items once a real streak of failures
+            // happens, resetting on any success. Under real concurrency "consecutive" no longer has
+            // an exact, ordered meaning (this is a single shared counter, not per-lane) - the same
+            // "simple, not a circuit-breaker" approximation the ADR calls for, and identical to the
+            // original sequential behavior whenever MaxConcurrentFactoryCalls is 1.
+            async Task AttemptAsync()
             {
-                // One attempt per requested item (R14) - a single item's timeout/exception no
-                // longer abandons the whole batch by default. Bounding by attempt count (not just
-                // created.Count < quantity) is what keeps a systematically broken factory failing
-                // fast instead of retrying the same slot for the entire overall deadline:
-                // MaxConsecutiveFactoryFailures (default 0) still gives up on the remaining items
-                // once a real streak of failures happens, resetting on any success so isolated
-                // hiccups in an otherwise healthy batch don't count towards it.
-                for (var attempt = 0; attempt < quantity; attempt++)
+                lock (stateLock) { if (giveUp) return; }
+                await gate.WaitAsync(overall.Token).ConfigureAwait(false);
+                try
                 {
+                    lock (stateLock) { if (giveUp) return; }
                     using var factoryTimeout = CancellationTokenSource.CreateLinkedTokenSource(overall.Token);
                     factoryTimeout.CancelAfter(FactoryTimeout);
                     try
@@ -840,22 +865,42 @@ namespace RingBufferPlus.Core
                         // running orphaned.
                         var item = await Factory(factoryTimeout.Token).WaitAsync(factoryTimeout.Token).ConfigureAwait(false);
                         created.Add(item);
-                        consecutiveFailures = 0;
+                        lock (stateLock) { consecutiveFailures = 0; }
                     }
                     catch (OperationCanceledException) when (factoryTimeout.IsCancellationRequested && !overall.IsCancellationRequested)
                     {
                         var timeout = new TimeoutException("Timeout factory");
                         LogError(timeout);
-                        lastFailure = timeout;
-                        if (++consecutiveFailures > MaxConsecutiveFactoryFailures) break;
+                        lock (stateLock)
+                        {
+                            lastFailure = timeout;
+                            if (++consecutiveFailures > MaxConsecutiveFactoryFailures) giveUp = true;
+                        }
                     }
                     catch (Exception ex) when (!overall.IsCancellationRequested)
                     {
                         LogError(ex);
-                        lastFailure = ex;
-                        if (++consecutiveFailures > MaxConsecutiveFactoryFailures) break;
+                        lock (stateLock)
+                        {
+                            lastFailure = ex;
+                            if (++consecutiveFailures > MaxConsecutiveFactoryFailures) giveUp = true;
+                        }
                     }
                 }
+                finally
+                {
+                    gate.Release();
+                }
+            }
+
+            try
+            {
+                var attempts = new Task[quantity];
+                for (var i = 0; i < quantity; i++)
+                {
+                    attempts[i] = AttemptAsync();
+                }
+                await Task.WhenAll(attempts).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -878,7 +923,7 @@ namespace RingBufferPlus.Core
             {
                 await _availableItems.Writer.WriteAsync(item, CancellationToken.None).ConfigureAwait(false);
             }
-            if (created.Count == 0 && lastFailure is not null)
+            if (created.IsEmpty && lastFailure is not null)
             {
                 // Nothing at all was gained and every attempt failed for a real reason (not
                 // just running out of the overall deadline) - surface that real failure

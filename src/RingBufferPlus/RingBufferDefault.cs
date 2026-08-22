@@ -38,6 +38,14 @@ namespace RingBufferPlus
         public readonly static TimeSpan SamplesBaseTime = TimeSpan.FromSeconds(30);
 
         /// <summary>
+        /// The default maximum number of concurrent factory calls when creating several items at
+        /// once (the initial warmup fill, or a scale-up). See ADR001V03: bounds a large batch from
+        /// flooding a struggling-but-technically-accepting downstream with simultaneous creation
+        /// attempts (e.g. database/broker connections).
+        /// </summary>
+        public readonly static int MaxConcurrentFactoryCalls = 4;
+
+        /// <summary>
         /// Internal placeholder capacity used before <c>FixedCapacity</c>/<c>ElasticCapacity</c> is called on a
         /// builder. Not a reachable default: every path to <c>Build</c>/<c>BuildWarmupAsync</c> requires calling
         /// one of those methods first, which always overwrites this value - a built service never actually

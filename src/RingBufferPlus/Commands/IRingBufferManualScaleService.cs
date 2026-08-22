@@ -9,7 +9,7 @@ namespace RingBufferPlus
     /// Represents a RingBufferPlus service that can be manually switched between capacities.
     /// </summary>
     /// <remarks>
-    /// This contract is only available when the buffer was built with <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?)"/>
+    /// This contract is only available when the buffer was built with <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>
     /// and without <see cref="IRingBufferElasticBuilder{T}.AutoScaleAcquireFault(byte)"/>. When autoscale-on-fault is enabled,
     /// or the buffer has a fixed capacity, manual switching is not exposed at the type level (see ADR007).
     /// </remarks>

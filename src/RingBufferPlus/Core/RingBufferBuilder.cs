@@ -37,6 +37,7 @@ namespace RingBufferPlus.Core
         private TimeSpan _pulseHeartBeat;
         private TimeSpan _acquireTimeout;
         private byte _maxConsecutiveFactoryFailures;
+        private int _maxConcurrentFactoryCalls;
 
         private Action<ILogger?, Exception>? _errorHandler;
         private Action<RingBufferValue<T>>? _bufferHeartBeat;
@@ -57,6 +58,7 @@ namespace RingBufferPlus.Core
             _samplebasetime = RingBufferDefault.SamplesBaseTime;
             _sampleUnit = RingBufferDefault.SampleUnit;
             _acquireTimeout = RingBufferDefault.AcquireTimeout;
+            _maxConcurrentFactoryCalls = RingBufferDefault.MaxConcurrentFactoryCalls;
         }
 
         #endregion
@@ -104,13 +106,14 @@ namespace RingBufferPlus.Core
             return this;
         }
 
-        IRingBufferElasticBuilder<T> IRingBufferBuilder<T>.ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples, TimeSpan? baseTimer)
+        IRingBufferElasticBuilder<T> IRingBufferBuilder<T>.ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples, TimeSpan? baseTimer, int? maxConcurrentFactoryCalls)
         {
             _initcapacity = initialCapacity;
             _minCapacity = minCapacity;
             _maxCapacity = maxCapacity;
             _sampleUnit = numberSamples ?? RingBufferDefault.SampleUnit;
             _samplebasetime = baseTimer ?? RingBufferDefault.SamplesBaseTime;
+            _maxConcurrentFactoryCalls = maxConcurrentFactoryCalls ?? RingBufferDefault.MaxConcurrentFactoryCalls;
             _elastic = true;
             return this;
         }
@@ -199,6 +202,7 @@ namespace RingBufferPlus.Core
                 MaxCapacity = _elastic ? _maxCapacity : _initcapacity,
                 FactoryTimeout = _factoryTimeout,
                 MaxConsecutiveFactoryFailures = _maxConsecutiveFactoryFailures,
+                MaxConcurrentFactoryCalls = _maxConcurrentFactoryCalls,
                 PulseHeartBeat = _pulseHeartBeat,
                 SamplesBase = _samplebasetime,
                 SamplesCount = _sampleUnit,
@@ -270,6 +274,12 @@ namespace RingBufferPlus.Core
                 if (_samplebasetime.TotalMilliseconds / _sampleUnit < 100)
                 {
                     var err = new InvalidOperationException("baseTimer / numberSamples in command ElasticCapacity must be greater or equal 100ms");
+                    LogError(err);
+                    throw err;
+                }
+                if (_maxConcurrentFactoryCalls < 1)
+                {
+                    var err = new InvalidOperationException("maxConcurrentFactoryCalls in command ElasticCapacity must be greater or equal 1");
                     LogError(err);
                     throw err;
                 }

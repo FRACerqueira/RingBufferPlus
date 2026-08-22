@@ -889,8 +889,14 @@ namespace RingBufferPlus.Tests
 
         private sealed class ThrowingOnDisposeProbe : IDisposable
         {
-            private readonly bool _throwOnDispose;
+            private volatile bool _throwOnDispose;
             public ThrowingOnDisposeProbe(bool throwOnDispose) => _throwOnDispose = throwOnDispose;
+            // Settable post-construction so a test can pick, by identity, which specific acquired
+            // instance throws - v6.0.0's bounded-concurrent Fábrica (ADR001V03) creates a batch's
+            // items concurrently, so "the Nth factory call" no longer reliably corresponds to "the
+            // Nth item that ends up acquired"; tests that need one specific *acquired* item to
+            // throw must flip this after acquiring, not bake it into the factory by call order.
+            public bool ThrowOnDispose { set => _throwOnDispose = value; }
             public bool Disposed { get; private set; }
             public void Dispose()
             {
@@ -1749,6 +1755,13 @@ namespace RingBufferPlus.Tests
         // on the very first per-item timeout/exception, with no way to opt into anything else, even
         // though the overall deadline (quantity * FactoryTimeout) had plenty of room left to try the
         // rest. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, R14.
+        //
+        // v6.0.0 (ADR001V03) made Fábrica bounded-concurrent (MaxConcurrentFactoryCalls, default 4):
+        // "give up on the remaining not-yet-attempted items" now only bites items that are still
+        // queued behind the concurrency window - anything already launched within it keeps running
+        // regardless. maxConcurrentFactoryCalls: 1 below pins this test back to the original
+        // one-at-a-time shape so it isolates the tolerance behavior from the concurrency behavior;
+        // the sibling test right after this one covers the bounded-concurrency case explicitly.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1767,7 +1780,7 @@ namespace RingBufferPlus.Tests
                     }
                     return call;
                 }, TimeSpan.FromMilliseconds(500)) // maxConsecutiveFactoryFailures defaults to 0.
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1778,6 +1791,106 @@ namespace RingBufferPlus.Tests
             // before the failure (call 3) is kept - calls 5 and 6 are never even attempted.
             Assert.False(moved);
             Assert.Equal(3, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03: the bounded-concurrency counterpart to the test above. With
+        // maxConcurrentFactoryCalls: 2 and 8 items requested, give-up only ever stops a later wave
+        // (still queued behind the concurrency window) from starting - it cannot un-start an
+        // attempt already in flight. This is deliberately a bound, not an exact count: give-up
+        // itself (a shared flag, set by whichever concurrent attempt fails) can race a sibling
+        // attempt's own success and release of its concurrency-window slot, so at most one or two
+        // stragglers beyond the wave that was already running may also start before the flag is
+        // visible to them - the same "simple, not a circuit-breaker" looseness ADR001V03 accepts
+        // for this mechanism under real concurrency. What must hold regardless of that race is the
+        // actual guarantee: nowhere near the full batch of 8 is ever attempted.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WithBoundedConcurrency_GivesUpWellBeforeAttemptingTheFullBatch()
+        {
+            var totalCalls = 0;
+            var claimed = 0;
+            var scalingUp = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBoundedConcurrencyFailFast", null);
+            var service = builder
+                .Factory(async _ =>
+                {
+                    // Only the scale-up (not the warmup fill) exercises the claim-and-fail logic
+                    // below - both share this factory, but warmup must always succeed cleanly.
+                    if (!Volatile.Read(ref scalingUp))
+                    {
+                        return 0;
+                    }
+                    Interlocked.Increment(ref totalCalls);
+                    // Both first-wave attempts must genuinely be in flight together before either
+                    // resolves - a real factory call takes real time; this yield is what makes that
+                    // true here instead of leaving it to incidental scheduling.
+                    await Task.Delay(50);
+                    if (Interlocked.CompareExchange(ref claimed, 1, 0) == 0)
+                    {
+                        throw new InvalidOperationException("factory down");
+                    }
+                    return 1;
+                })
+                .ElasticCapacity(2, 2, 10, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 2)
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+            scalingUp = true;
+
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            Assert.False(moved);
+            // The first wave (2 concurrent attempts) always runs; at most a small, bounded number
+            // of stragglers beyond it can also start before give-up is visible to them (see the
+            // comment above) - but nowhere near the full 8 requested items are ever attempted.
+            Assert.True(totalCalls <= 4, $"Expected give-up to stop well short of the full batch of 8, but {totalCalls} items were attempted.");
+            Assert.True(service.CurrentCapacity < 10, $"Expected a partial gain, not the full requested capacity (10); got {service.CurrentCapacity}.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // v6.0.0 / ADR001V03: the core Fábrica acceptance criterion - a batch large enough to need
+        // more than maxConcurrentFactoryCalls items actually achieves real concurrent fan-out (not
+        // just "doesn't block the whole engine"), and never exceeds the configured bound.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleUp_AchievesRealConcurrentFanOut_NeverExceedingMaxConcurrentFactoryCalls()
+        {
+            var inFlight = 0;
+            var maxObserved = 0;
+            var maxObservedLock = new object();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBoundedConcurrencyFanOut", null);
+            var service = builder
+                .Factory(async _ =>
+                {
+                    var now = Interlocked.Increment(ref inFlight);
+                    lock (maxObservedLock)
+                    {
+                        if (now > maxObserved) maxObserved = now;
+                    }
+                    await Task.Delay(100);
+                    Interlocked.Decrement(ref inFlight);
+                    return 1;
+                })
+                .ElasticCapacity(2, 2, 10, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 3)
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            // 8 more items are needed (2 -> 10), well beyond the concurrency bound of 3.
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+
+            Assert.True(moved);
+            Assert.Equal(10, service.CurrentCapacity);
+            Assert.Equal(3, maxObserved);
 
             await service.DisposeAsync();
         }
@@ -2422,20 +2535,20 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task Invalidate_WhenItemsDisposeThrows_StillQueuesAReplacement()
         {
-            var callIndex = 0;
+            // v6.0.0's bounded-concurrent Fábrica (ADR001V03) creates warmup's 2 items concurrently
+            // by default, so which physical factory call becomes "the one that gets acquired first"
+            // is no longer deterministic - throwing-on-dispose is picked by identity, on the actual
+            // acquired instance, instead of baked into the factory by call order.
             IRingBufferBuilder<ThrowingOnDisposeProbe> builder = new RingBufferBuilder<ThrowingOnDisposeProbe>("ContractInvalidateThrowingDispose", null);
             var service = await builder
-                .Factory(_ =>
-                {
-                    var n = Interlocked.Increment(ref callIndex);
-                    return Task.FromResult(new ThrowingOnDisposeProbe(throwOnDispose: n == 1));
-                })
+                .Factory(_ => Task.FromResult(new ThrowingOnDisposeProbe(throwOnDispose: false)))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(300))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
             var acquired = await service.AcquireAsync();
             Assert.True(acquired.Successful);
+            acquired.Current.ThrowOnDispose = true;
             acquired.Invalidate();
             await Assert.ThrowsAsync<InvalidOperationException>(() => acquired.DisposeAsync().AsTask());
 
