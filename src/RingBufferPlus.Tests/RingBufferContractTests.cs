@@ -1892,7 +1892,13 @@ namespace RingBufferPlus.Tests
                     }
                     return Task.FromResult(1);
                 })
-                .FixedCapacity(8)
+                // Elastic, not fixed: a fixed capacity makes MinCapacity == Capacity, so every one
+                // of this test's own deliberate failures would also breach the floor guard
+                // (ADR001V03) - its own background retry would then call Factory concurrently with
+                // this test's next deliberate trigger, corrupting the very timestamps this test
+                // reads to measure backoff. MinCapacity=2 (the minimum legal value) gives enough
+                // headroom that the 3 consecutive failures below never come close to it.
+                .ElasticCapacity(8, 2, 16)
                 .Build();
             await service.WarmupAsync();
             warmupDone = true;
@@ -2915,6 +2921,124 @@ namespace RingBufferPlus.Tests
             {
                 await Task.Delay(20);
             }
+            Assert.Equal(1, service.CurrentCapacity);
+            // The floor guard (ADR001V03, added after this test) does retry this in the background
+            // once CurrentCapacity(1) < MinCapacity(2) - but replacementShouldThrow never flips
+            // back to false in this test, so every retry keeps failing and capacity never recovers.
+            // See Invalidate_WhenTheReplacementFactoryFailsThenRecovers_FloorGuardRestoresMinCapacity
+            // below for the self-healing case this test does not cover.
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.41b - Floor guard (ADR001V03): the gap the test above documents (a failed replacement
+        // shrinks CurrentCapacity below MinCapacity with nothing that retries it) is now closed -
+        // the Orquestrador keeps retrying, at the pace of Fábrica's own existing consecutive-failure
+        // backoff, until the floor is restored or the buffer is disposed. This is the
+        // highest-priority signal of all (floor guard > backlog-reactive > manual pin > Monitor).
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenTheReplacementFactoryFailsThenRecovers_FloorGuardRestoresMinCapacity()
+        {
+            var replacementShouldThrow = false;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardSelfHeals", null);
+            var service = await builder
+                .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.Equal(2, service.CurrentCapacity);
+
+            var acquired = await service.AcquireAsync();
+            Assert.True(acquired.Successful);
+            replacementShouldThrow = true;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync
+
+            // Stage 1: wait until the replacement has actually failed and the floor breach is
+            // observable, so recovery below cannot be confused with "it never actually broke".
+            var breachDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity == 2 && DateTime.UtcNow < breachDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(1, service.CurrentCapacity);
+
+            // Stage 2: the factory recovers, but no caller does anything - no AcquireAsync, no
+            // WarmupAsync, no SwitchToAsync. Only the floor guard's own background retries (this
+            // test's entire point) can restore MinCapacity from here.
+            replacementShouldThrow = false;
+
+            var healDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.CurrentCapacity < 2 && DateTime.UtcNow < healDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(2, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // 1.41c - Floor guard (ADR001V03): the grace window ("the public 'below minimum' property
+        // only becomes true if replenishment fails to restore MinCapacity within one FactoryTimeout
+        // cycle") is a distinct claim from the self-healing test above - it needs a factory that
+        // never recovers, so the window actually has a chance to elapse instead of the breach
+        // resolving first. There is no public property yet (ADR007V03), so this asserts the
+        // substitute this pass wires instead: an OnError report once the window elapses.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenTheReplacementFactoryStaysBroken_ReportsBelowMinimum_AfterOneFactoryTimeoutCycle()
+        {
+            var replacementShouldThrow = false;
+            var errors = new List<Exception>();
+            var factoryTimeout = TimeSpan.FromMilliseconds(150);
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardGraceWindow", null);
+            var service = await builder
+                .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1), factoryTimeout)
+                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.Equal(2, service.CurrentCapacity);
+
+            var acquired = await service.AcquireAsync();
+            replacementShouldThrow = true;
+            var trigger = DateTime.UtcNow;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync
+
+            // The factory never recovers here, so the guard's own retries keep failing forever -
+            // giving the grace window (one FactoryTimeout cycle) a real chance to elapse.
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (errors)
+                {
+                    if (errors.Any(e => e is InvalidOperationException ioe && ioe.Message.Contains("below minimum capacity"))) break;
+                }
+                await Task.Delay(20);
+            }
+            DateTime reportedAt;
+            lock (errors)
+            {
+                Assert.Contains(errors, e => e is InvalidOperationException ioe && ioe.Message.Contains("below minimum capacity"));
+                reportedAt = DateTime.UtcNow;
+            }
+            // Not instant: reported meaningfully later than the trigger, not on the very first
+            // evaluation (which would mean the grace window was never actually applied). A
+            // generous margin below the real 150ms window avoids flakiness from backoff/scheduling
+            // jitter while still ruling out "reported on the first check".
+            Assert.True(reportedAt - trigger >= TimeSpan.FromMilliseconds(100), $"Expected the report to wait out roughly one FactoryTimeout cycle ({factoryTimeout}), not fire near-instantly. Actual delay: {reportedAt - trigger}.");
+
+            // Still genuinely below the floor while this is reported - the factory never recovered.
             Assert.Equal(1, service.CurrentCapacity);
 
             await service.DisposeAsync();

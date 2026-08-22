@@ -81,6 +81,13 @@ namespace RingBufferPlus.Core
         // the engine thread in EvaluateBacklogReactive.
         private int _waitingCount;
 
+        // Floor guard (ADR001V03): the instant CurrentCapacity < MinCapacity was first detected,
+        // engine-thread-only state (like _currentCapacity itself). Set once on first detection and
+        // left untouched across retries - only cleared once the breach actually resolves - so the
+        // grace window (FactoryTimeout, reused per the ADR) measures time since the breach started,
+        // not since the most recent retry attempt.
+        private DateTime? _floorBreachDetectedAt;
+
         // Fábrica (ADR001V03): the currently in-flight background scale-up batch (DispatchScaleUp),
         // if any - only ever written by the engine thread (single consumer), and only ever one at
         // a time (Switch rejects, and EvaluateBacklogReactive skips, a new dispatch while _scaling
@@ -730,6 +737,10 @@ namespace RingBufferPlus.Core
 
                 case EngineCommandKind.ReplaceOne:
                     await CreateSingleReplacementAsync().ConfigureAwait(false);
+                    // Floor guard (ADR001V03): this is the one live gap it closes - a failed
+                    // replacement's own finally block (CreateSingleReplacementAsync) can shrink
+                    // CurrentCapacity below MinCapacity with nothing that currently retries it.
+                    EvaluateFloorGuard();
                     break;
 
                 case EngineCommandKind.Backlog:
@@ -793,6 +804,16 @@ namespace RingBufferPlus.Core
                         // outcome needed, same as before this batch was dispatched in the background.
                         LogError(cmd.Failure);
                     }
+                    // Floor guard first (ADR001V03's own signal priority: floor guard >
+                    // backlog-reactive > manual pin > Monitor) - a batch that only partially
+                    // created its target (or a floor-guard batch that failed outright) can still
+                    // leave CurrentCapacity below MinCapacity, and only one batch may be in flight
+                    // at a time, so this is also where a still-unresolved breach gets its next
+                    // retry. Dispatching here sets _scaling back to true, which makes the
+                    // EvaluateBacklogReactive call below a no-op for this round - the floor
+                    // legitimately wins the single in-flight-batch slot over ordinary backlog
+                    // demand, not an oversight.
+                    EvaluateFloorGuard();
                     // Re-evaluate backlog right away, regardless of what triggered this batch: any
                     // callers that started waiting while this one was in flight (and so had their own
                     // Backlog command skipped below, since only one batch may be in flight at a time)
@@ -802,6 +823,41 @@ namespace RingBufferPlus.Core
                     EvaluateBacklogReactive();
                     break;
             }
+        }
+
+        // Floor guard (ADR001V03): the highest-priority signal of all (floor guard >
+        // backlog-reactive > manual pin > Monitor). Protects the pool's minimum contractual floor
+        // - CurrentCapacity actually dropping below MinCapacity - which today can only happen via
+        // CreateSingleReplacementAsync's own finally block (a failed heartbeat- or
+        // Invalidate()-triggered replacement), see its own comment. Warmup cannot silently leave
+        // this gap: WarmupCoreAsync already throws "did not reach initial capacity" on any
+        // shortfall, so the caller learns synchronously and no background guard is needed there.
+        //
+        // Undebounced by design (per the ADR): every evaluation that finds a breach dispatches
+        // immediately, pacing coming only from Fábrica's own existing consecutive-failure backoff
+        // (CreateItemsAsync), not from anything added here. There is no public "genuinely below
+        // minimum" property yet - that surface is deferred to ADR007V03, same as
+        // AutoScaleAcquireFault's numberOfFaults - so until it exists, a grace window that has
+        // elapsed (FactoryTimeout, reused per the ADR, no new configuration surface) is reported
+        // via LogError, the closest honest substitute available today.
+        private void EvaluateFloorGuard()
+        {
+            var deficit = FloorGuardDecision.EvaluateBreach(CurrentCapacity, MinCapacity);
+            if (deficit is null)
+            {
+                _floorBreachDetectedAt = null;
+                return;
+            }
+            _floorBreachDetectedAt ??= DateTime.UtcNow;
+            if (FloorGuardDecision.HasGraceWindowElapsed(_floorBreachDetectedAt.Value, DateTime.UtcNow, FactoryTimeout))
+            {
+                LogError(new InvalidOperationException($"RingBuffer below minimum capacity for longer than one FactoryTimeout cycle: current={CurrentCapacity}, minimum={MinCapacity}."));
+            }
+            if (_scaling)
+            {
+                return;
+            }
+            DispatchScaleUp(MinCapacity, scaleTrigger: "floor", completion: null);
         }
 
         // Backlog-reactive signal (ADR001V03): reacts to real, currently-waiting callers instead
@@ -857,9 +913,9 @@ namespace RingBufferPlus.Core
         // free to process other commands (a floor-guard replenishment, a heartbeat-driven
         // ReplaceOne, ...) while the batch is in flight. _currentCapacity is still mutated only on
         // the engine thread - later, when the batch's own FactoryBatchCompleted command is processed
-        // - preserving the Orquestrador's sole-owner guarantee. Used only by Switch (manual) and
-        // EvaluateBacklogReactive (backlog) scale-up requests; Warmup and Tick's scale-down still
-        // call MoveToCapacityAsync directly, unchanged.
+        // - preserving the Orquestrador's sole-owner guarantee. Used only by Switch (manual),
+        // EvaluateBacklogReactive (backlog), and EvaluateFloorGuard (floor) scale-up requests;
+        // Warmup and Tick's scale-down still call MoveToCapacityAsync directly, unchanged.
         private void DispatchScaleUp(int target, string scaleTrigger, TaskCompletionSource<bool>? completion)
         {
             var current = CurrentCapacity;

@@ -275,6 +275,56 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task ReplaceOne_WhenReplacementFactoryFailsThenRecovers_RecordsScaleOperation_WithFloorTrigger()
+        {
+            // Floor guard (ADR001V03): MinCapacity == Capacity here (like the fixed-capacity
+            // scenario in RingBufferContractTests) so a single failed replacement immediately
+            // breaches the floor, and the guard's own background retry - not any caller action -
+            // is what restores it once the factory recovers.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var shouldFail = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = builder
+                .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .Build();
+            await service.WarmupAsync();
+
+            var acquired = await service.AcquireAsync();
+            shouldFail = true;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync
+
+            var breachDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity == 2 && DateTime.UtcNow < breachDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(1, service.CurrentCapacity);
+
+            shouldFail = false;
+            var healDeadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.CurrentCapacity < 2 && DateTime.UtcNow < healDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(2, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "floor") && Equals(r.Tags["success"], true));
+
+            Assert.Contains(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up") && Equals(a.GetTagItem("trigger"), "floor"));
+        }
+
+        [Fact]
         public async Task SwitchToAsync_RecordsScaleOperation_WithManualTrigger()
         {
             var bufferName = UniqueBufferName();
