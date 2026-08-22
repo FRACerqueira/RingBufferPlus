@@ -2158,6 +2158,107 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Monitor (ADR001V03/ADR003V03): the deadband call-site wiring (not part of
+        // AutoScaleMonitor.EvaluateTarget itself, which AutoScaleMonitorTests.cs already covers in
+        // isolation) is what stops the Monitor from re-evaluating its own noise into perpetual
+        // motion. Under demand that never changes, capacity should settle once and then stop -
+        // the same oscillation-freedom property the validated simulation measured (48 reversals in
+        // 300 ticks without a deadband, 1 with it).
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Monitor_UnderSteadyDemand_ConvergesAndStopsChanging_NoOscillation()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMonitorNoOscillation", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(8, 2, 20, 4, TimeSpan.FromMilliseconds(800))
+                .AutoScaleAcquireFault(1)
+                .BuildWarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 4; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            // Let the Monitor converge from the initial steady demand (4 in use out of 8) first,
+            // then sample capacity repeatedly over a further steady window - demand never changes
+            // throughout, so once converged it must not keep drifting tick after tick.
+            await Task.Delay(2000);
+            var samples = new List<int>();
+            for (var i = 0; i < 10; i++)
+            {
+                samples.Add(service.CurrentCapacity);
+                await Task.Delay(200);
+            }
+
+            // Direction-reversal count, not just "few distinct values" (which a genuine 5,8,5,8,...
+            // thrash would still pass) - mirrors the validated simulation's own CountOscillations.
+            var reversals = 0;
+            var lastDirection = 0;
+            for (var i = 1; i < samples.Count; i++)
+            {
+                var delta = samples[i] - samples[i - 1];
+                if (delta == 0)
+                {
+                    continue;
+                }
+                var direction = delta > 0 ? 1 : -1;
+                if (lastDirection != 0 && direction != lastDirection)
+                {
+                    reversals++;
+                }
+                lastDirection = direction;
+            }
+            Assert.True(reversals == 0, $"Expected capacity to have settled under steady demand, not keep reversing direction. Observed sequence: {string.Join(",", samples)}.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // Monitor (ADR001V03/ADR003V03): same reachability-cap bug class as the old median
+        // algorithm's R18/R19 (Rodada 4), reproduced in a new shape. MonitorDeadband defaults to 3;
+        // a buffer whose Capacity-to-MinCapacity span is smaller than that (here, 4 to 2 - span 2)
+        // would otherwise never be able to scale down to its own floor via the Monitor, however
+        // idle it becomes, because |target(2) - CurrentCapacity(4)| = 2 < deadband(3) blocks it
+        // forever. The fix caps the deadband to the maximum delta actually reachable in the
+        // direction being asked for, mirroring AutoScaleDecision's own Math.Min(threshold,
+        // currentCapacity - 1) cap for exactly the same reason.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Monitor_WhenSpanIsSmallerThanTheDeadband_StillReachesMinCapacityWhenIdle()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMonitorDeadbandReachability", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(4, 2, 8, 4, TimeSpan.FromMilliseconds(800))
+                .AutoScaleAcquireFault(1)
+                .BuildWarmupAsync();
+
+            Assert.Equal(4, service.CurrentCapacity);
+
+            // Fully idle the whole time - no held items, no waiters. If MonitorDeadband(3) is not
+            // capped to this buffer's own scale-down span (4 - 2 = 2), CurrentCapacity is
+            // mathematically stuck at 4 forever regardless of how long this waits.
+            var deadline = DateTime.UtcNow.AddSeconds(6);
+            while (service.CurrentCapacity > 2 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.Equal(2, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
         // 1.26 - A fault-triggered scale-up that only partially succeeds (R14's tolerated
         // failures) can land off-tier, strictly between Capacity and MaxCapacity. Idleness there
         // must still eventually trigger a scale-down (R16, Rodada 3) instead of getting stuck at

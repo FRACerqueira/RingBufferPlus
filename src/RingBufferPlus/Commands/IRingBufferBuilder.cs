@@ -104,9 +104,12 @@ namespace RingBufferPlus
         /// via <see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch)"/>.
         /// </summary>
         /// <remarks>
-        /// <paramref name="baseTimer"/>/<paramref name="numberSamples"/> configure the scale-<b>down</b> sampling
-        /// cadence only (used by autoscale-on-fault's evaluation) - they do not bound a scale-up or scale-down
-        /// operation's own deadline. A scale-up's deadline is <c>quantity * FactoryTimeout</c> (see
+        /// <paramref name="baseTimer"/>/<paramref name="numberSamples"/> configure the Monitor's sampling
+        /// cadence and sliding-window size (ADR003V03) - used by autoscale-on-fault's slow-layer evaluation,
+        /// which since v6.0.0 can dispatch either a scale-up or a scale-down (see
+        /// <see cref="IRingBufferAutoScaleBuilder{T}.MonitorTuning(double, double, double, int)"/> for the
+        /// rest of that algorithm's parameters). They do not bound a scale-up or scale-down operation's own
+        /// deadline. A scale-up's deadline is <c>quantity * FactoryTimeout</c> (see
         /// <see cref="IRingBufferBuilder{T}.Factory(Func{CancellationToken, Task{T}}, TimeSpan?, byte)"/>); a
         /// scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever
         /// capacity was actually gained or removed is kept.
@@ -114,7 +117,16 @@ namespace RingBufferPlus
         /// <param name="initialCapacity">Initial/startup capacity. Value must be greater than or equal to <paramref name="minCapacity"/> and less than or equal to <paramref name="maxCapacity"/>.</param>
         /// <param name="minCapacity">The minimal buffer capacity. Value must be greater than or equal to 2.</param>
         /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
-        /// <param name="numberSamples">Number of samples collected. Default is 100 (one sample per 300ms).</param>
+        /// <param name="numberSamples">Number of samples in the Monitor's sliding window. Default is 100 (one
+        /// sample per 300ms). The window is only cleared when an actual scale operation fires (gated by
+        /// <see cref="IRingBufferAutoScaleBuilder{T}.MonitorTuning(double, double, double, int)"/>'s
+        /// <c>deadband</c>) - during a genuinely steady period (demand stable, every computed target landing
+        /// inside the deadband), nothing clears it, so it fills to <paramref name="numberSamples"/> and slides.
+        /// At the defaults (<paramref name="baseTimer"/> 30s / <paramref name="numberSamples"/> 100 = one
+        /// sample every 300ms), that is roughly a 30-second adaptation horizon for a demand drop that arrives
+        /// during such a steady period - lower <paramref name="numberSamples"/> (or shorten
+        /// <paramref name="baseTimer"/>) for a faster reaction, at the cost of a noisier percentile/trend
+        /// estimate from fewer/closer-together samples.</param>
         /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples. Default value is 30 seconds (one sample per 300ms).</param>
         /// <param name="maxConcurrentFactoryCalls">Maximum number of concurrent factory calls when
         /// creating several items at once (the initial warmup fill, or a scale-up). Bounds a large

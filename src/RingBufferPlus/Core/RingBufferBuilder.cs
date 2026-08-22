@@ -39,6 +39,11 @@ namespace RingBufferPlus.Core
         private byte _maxConsecutiveFactoryFailures;
         private int _maxConcurrentFactoryCalls;
 
+        private double _monitorPercentileP;
+        private double _monitorSafetyBuffer;
+        private double _monitorHorizon;
+        private int _monitorDeadband;
+
         private Action<ILogger?, Exception>? _errorHandler;
         private Action<RingBufferValue<T>>? _bufferHeartBeat;
         private Func<CancellationToken, Task<T>>? _factory;
@@ -59,6 +64,10 @@ namespace RingBufferPlus.Core
             _sampleUnit = RingBufferDefault.SampleUnit;
             _acquireTimeout = RingBufferDefault.AcquireTimeout;
             _maxConcurrentFactoryCalls = RingBufferDefault.MaxConcurrentFactoryCalls;
+            _monitorPercentileP = RingBufferDefault.MonitorPercentileP;
+            _monitorSafetyBuffer = RingBufferDefault.MonitorSafetyBuffer;
+            _monitorHorizon = RingBufferDefault.MonitorHorizon;
+            _monitorDeadband = RingBufferDefault.MonitorDeadband;
         }
 
         #endregion
@@ -87,6 +96,14 @@ namespace RingBufferPlus.Core
         private void SetOnError(Action<ILogger?, Exception> errorHandler) => _errorHandler = errorHandler;
 
         private void SetLockWhenScaling(bool value) => _lockWhenScaling = value;
+
+        private void SetMonitorTuning(double percentileP, double safetyBuffer, double horizon, int deadband)
+        {
+            _monitorPercentileP = percentileP;
+            _monitorSafetyBuffer = safetyBuffer;
+            _monitorHorizon = horizon;
+            _monitorDeadband = deadband;
+        }
 
         #endregion
 
@@ -176,6 +193,7 @@ namespace RingBufferPlus.Core
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
         IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.MonitorTuning(double percentileP, double safetyBuffer, double horizon, int deadband) { SetMonitorTuning(percentileP, safetyBuffer, horizon, deadband); return this; }
 
         IRingBufferService<T> IRingBufferAutoScaleBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
 
@@ -208,6 +226,10 @@ namespace RingBufferPlus.Core
                 SamplesCount = _sampleUnit,
                 AutoScaleFault = _autoScaleFault,
                 NumberFault = _numberFault,
+                MonitorPercentileP = _monitorPercentileP,
+                MonitorSafetyBuffer = _monitorSafetyBuffer,
+                MonitorHorizon = _monitorHorizon,
+                MonitorDeadband = _monitorDeadband,
                 AcquireTimeout = _acquireTimeout,
                 LockWhenScaling = _lockWhenScaling,
                 ManualSwitchAllowed = _elastic && !_autoScaleFault,
@@ -280,6 +302,30 @@ namespace RingBufferPlus.Core
                 if (_maxConcurrentFactoryCalls < 1)
                 {
                     var err = new InvalidOperationException("maxConcurrentFactoryCalls in command ElasticCapacity must be greater or equal 1");
+                    LogError(err);
+                    throw err;
+                }
+                if (_monitorPercentileP <= 0 || _monitorPercentileP > 1)
+                {
+                    var err = new InvalidOperationException("percentileP in command MonitorTuning must be greater than 0 and less than or equal to 1");
+                    LogError(err);
+                    throw err;
+                }
+                if (_monitorSafetyBuffer < 0)
+                {
+                    var err = new InvalidOperationException("safetyBuffer in command MonitorTuning must be greater or equal 0");
+                    LogError(err);
+                    throw err;
+                }
+                if (_monitorHorizon < 0)
+                {
+                    var err = new InvalidOperationException("horizon in command MonitorTuning must be greater or equal 0");
+                    LogError(err);
+                    throw err;
+                }
+                if (_monitorDeadband < 0)
+                {
+                    var err = new InvalidOperationException("deadband in command MonitorTuning must be greater or equal 0");
                     LogError(err);
                     throw err;
                 }

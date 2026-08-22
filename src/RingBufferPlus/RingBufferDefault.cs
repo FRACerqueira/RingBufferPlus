@@ -53,5 +53,30 @@ namespace RingBufferPlus
         /// </summary>
         public readonly static int Capacity = 2;
 
+        /// <summary>
+        /// The default percentile used by the Monitor's predictive autoscale algorithm (ADR003V03)
+        /// as the demand "fair level" - p95.
+        /// </summary>
+        public readonly static double MonitorPercentileP = 0.95;
+
+        /// <summary>
+        /// The default fractional headroom the Monitor adds on top of the percentile "fair level"
+        /// (ADR003V03) - 10%.
+        /// </summary>
+        public readonly static double MonitorSafetyBuffer = 0.10;
+
+        /// <summary>
+        /// The default number of sampling ticks the Monitor's linear-regression demand trend is
+        /// projected ahead (ADR003V03).
+        /// </summary>
+        public readonly static double MonitorHorizon = 5;
+
+        /// <summary>
+        /// The default deadband: the Monitor's computed target must differ from the current
+        /// capacity by at least this many items before a scale operation is dispatched (ADR003V03)
+        /// - without it, the algorithm was measured to oscillate heavily under flat-but-noisy demand.
+        /// </summary>
+        public readonly static int MonitorDeadband = 3;
+
     }
 }

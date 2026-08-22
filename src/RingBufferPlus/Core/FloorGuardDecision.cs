@@ -23,13 +23,11 @@ namespace RingBufferPlus.Core
     // resulting replenishment quantity is zero at exact equality), but strict "less than" avoids
     // the pointless signaling entirely and is the cleaner choice.
     //
-    // NOT YET WIRED into RingBufferManager's engine loop. This is the Orquestrador's floor-guard
-    // decision core, ported/designed in isolation, the same staged approach AutoScaleMonitor.cs
-    // (ADR003V03) and, before it, AutoScaleDecision.cs used: validate the pure decision logic on
-    // its own first, wire it in once the surrounding signal-priority model (this same ADR) exists.
-    // Wiring requires the Orquestrador to actually dispatch a non-blocking replenishment request to
-    // Fábrica and to track a breach's detected-at instant across engine ticks - both belong to that
-    // later integration, not to this pure unit.
+    // Wired into RingBufferManager's engine loop via EvaluateFloorGuard (called after ReplaceOne
+    // and, like EvaluateBacklogReactive, as a FactoryBatchCompleted follow-up). Ported/designed in
+    // isolation first, the same staged approach AutoScaleMonitor.cs (ADR003V03) and, before it, the
+    // now-retired AutoScaleDecision.cs used: validate the pure decision logic on its own, wire it
+    // in once the surrounding signal-priority model (this same ADR) exists.
     internal static class FloorGuardDecision
     {
         /// <summary>

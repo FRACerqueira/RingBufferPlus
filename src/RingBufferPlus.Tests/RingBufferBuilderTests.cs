@@ -291,6 +291,58 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // ADR003V03: MonitorTuning's four parameters back the Monitor's predictive autoscale
+        // algorithm - out-of-range values would otherwise surface as an unhandled exception deep
+        // inside AutoScaleMonitor.EvaluateTarget (e.g. an out-of-[0,1] percentile indexing past the
+        // sorted samples array) instead of a clear build-time validation error.
+        // ---------------------------------------------------------------------
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-0.1)]
+        [InlineData(1.1)]
+        public void ValidateBuild_ShouldThrowException_WhenPercentilePIsOutOfRange(double percentileP)
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(percentileP: percentileP);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenSafetyBufferIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(safetyBuffer: -0.01);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenHorizonIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(horizon: -1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenDeadbandIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(deadband: -1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void MonitorTuning_WithValidValues_BuildsSuccessfully()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(0.90, 0.20, 3, 1);
+
+            var service = builder.Build();
+
+            Assert.NotNull(service);
+        }
+
+        // ---------------------------------------------------------------------
         // ADR007 V02 (2026-08-20): LockWhenScaling was removed from the autoscale
         // builder - it was a documented no-op that had already misled a real caller
         // (see TODO/relatorio-viabilidade-ringbufferplus-v5.md, findings U-06/U-10).

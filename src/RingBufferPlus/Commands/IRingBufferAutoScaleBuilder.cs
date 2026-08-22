@@ -95,6 +95,30 @@ namespace RingBufferPlus
         IRingBufferAutoScaleBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
 
         /// <summary>
+        /// Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window
+        /// percentile as a demand "fair level", inflated by a safety buffer, adjusted by a
+        /// linear-regression trend projected a configurable horizon ahead, clamped to
+        /// [MinCapacity, MaxCapacity]. This is the lowest-priority of the four signals in
+        /// ADR001V03's model (floor guard &gt; backlog-reactive &gt; manual pin &gt; Monitor) - it
+        /// only acts on ticks where demand is not currently keeping pace with capacity; the window
+        /// used for those ticks is <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>'s
+        /// own <c>numberSamples</c>, unchanged by this method.
+        /// </summary>
+        /// <param name="percentileP">The percentile used as the fair level, in the range (0, 1]. Default is 0.95 (p95).</param>
+        /// <param name="safetyBuffer">Fractional headroom added on top of the percentile. Must be greater than or equal to 0. Default is 0.10 (10%).</param>
+        /// <param name="horizon">How many sampling ticks ahead the demand trend is projected. Must be greater than or equal to 0. Default is 5.</param>
+        /// <param name="deadband">The minimum difference (in items) between the computed target and the
+        /// current capacity before a scale operation is dispatched - without it, the algorithm was
+        /// measured to oscillate heavily under flat-but-noisy demand. Must be greater than or equal
+        /// to 0. Default is 3. Also governs how long a demand change can go unnoticed during a
+        /// steady period, since only a dispatched scale operation clears the sliding window - see
+        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>'s
+        /// own <c>numberSamples</c> parameter for what that means at the shipped defaults.</param>
+        /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
+        /// <exception cref="InvalidOperationException">An argument is outside its valid range - validated at <c>Build</c>/<c>BuildWarmupAsync</c> time.</exception>
+        IRingBufferAutoScaleBuilder<T> MonitorTuning(double percentileP = 0.95, double safetyBuffer = 0.10, double horizon = 5, int deadband = 3);
+
+        /// <summary>
         /// Validates and generates RingBufferPlus in service mode.
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/> to observe while waiting for the task to complete.</param>

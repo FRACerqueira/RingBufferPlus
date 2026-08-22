@@ -52,7 +52,38 @@ namespace RingBufferPlus.Core
         private readonly Channel<LogMessageBackground> _logQueue = Channel.CreateUnbounded<LogMessageBackground>();
         private Lazy<Task> _warmup;
         private readonly Task _engineTask;
+
+        // Monitor's sliding demand window (ADR001V03/ADR003V03) - bounded to SamplesCount, engine-
+        // thread-only (only ProcessTickAsync and the scale-completion cleanup paths touch it).
         private readonly List<int> _samples = [];
+
+        // Monitor (ADR001V03/ADR003V03): whether the LAST TICK THAT ACTUALLY RAN observed demand
+        // keeping pace with or exceeding capacity ("active"). Verified empirically (a temporary
+        // per-tick counter, run across the full test suite): this is true far less often than the
+        // validated simulation's own "active" predicate, because Tick is skipped entirely while
+        // _scaling is true (see the Tick case's own comment) - and any real backlog large enough to
+        // make demand >= capacity almost always already has a Fábrica batch in flight by the time
+        // Tick would otherwise run, from EvaluateBacklogReactive's own immediate (non-Tick-cadenced)
+        // dispatch. The only realistic path where a Tick actually observes active=true is a buffer
+        // pinned at MaxCapacity with genuine backlog (EvaluateBacklogReactive early-returns there
+        // without dispatching, so _scaling never blocks Tick) - narrow, and moot for scaling up
+        // (already at Max), but still meaningful for the window once that backlog eventually clears
+        // and a scale-down needs a clean read.
+        //
+        // MoveToCapacityAsync's and FactoryBatchCompleted's own finally blocks already
+        // unconditionally clear _samples after any scale operation completes (F6, pre-existing
+        // before this Monitor work) - but only a scale operation clears it, and whether one fires
+        // at all is gated by MonitorDeadband. During a genuinely STEADY period - demand stable,
+        // capacity already matching it, every computed target landing inside the deadband - no
+        // scale operation ever fires, so nothing clears the window: it fills to SamplesCount one
+        // sample per tick and then slides, same as the algorithm's own design intends for ordinary
+        // operation. If demand THEN drops during that steady period, the new low samples must
+        // outvote a full window of stale higher ones before the percentile/trend reflects reality -
+        // see numberSamples' own XML doc for what that means at the shipped default. This field and
+        // the pre-existing per-scale-op clears only shorten that lag when an actual burst/backlog
+        // episode (not a quiet steady period) precedes the drop. Engine-thread-only, like
+        // _currentCapacity itself - only ProcessTickAsync reads or writes it.
+        private bool _monitorActive;
 
         private readonly Meter _meter = new("RingBufferPlus");
         private readonly ActivitySource _activitySource = new("RingBufferPlus");
@@ -156,6 +187,20 @@ namespace RingBufferPlus.Core
         public bool AutoScaleFault { get; init; }
 
         public byte NumberFault { get; init; }
+
+        /// <summary>
+        /// The Monitor's predictive autoscale algorithm parameters (ADR003V03). Defaulted here
+        /// (not just on the builder) so a direct object-initializer construction that omits them
+        /// (e.g. in tests) still runs the algorithm with the ADR's own defaults, the same reasoning
+        /// as <see cref="MaxConcurrentFactoryCalls"/>'s own default.
+        /// </summary>
+        public double MonitorPercentileP { get; init; } = RingBufferDefault.MonitorPercentileP;
+
+        public double MonitorSafetyBuffer { get; init; } = RingBufferDefault.MonitorSafetyBuffer;
+
+        public double MonitorHorizon { get; init; } = RingBufferDefault.MonitorHorizon;
+
+        public int MonitorDeadband { get; init; } = RingBufferDefault.MonitorDeadband;
 
         public TimeSpan AcquireTimeout { get; init; }
 
@@ -752,13 +797,13 @@ namespace RingBufferPlus.Core
                     {
                         // Defensive re-check (RunSampleTickAsync's own check happens at write-time,
                         // before this command was even enqueued - a narrow window between that check
-                        // and this command being dequeued could otherwise let a scale-down run here
-                        // while a scale-up batch is still in flight, see the Switch case above for why
-                        // that risks an overshoot). This also skips ProcessTickAsync's own
-                        // _samples.Add for this tick, not just the scale-down decision - but that
-                        // has no observable effect: the FactoryBatchCompleted case unconditionally
-                        // clears _samples once the in-flight batch finishes (F6, same as
-                        // MoveToCapacityAsync's own finally block already did), so any sample
+                        // and this command being dequeued could otherwise let the Monitor's own
+                        // scale-up or scale-down run here while another batch is still in flight, see
+                        // the Switch case above for why that risks an overshoot). This also skips
+                        // ProcessTickAsync's own _samples.Add for this tick, not just the scale
+                        // decision - but that has no observable effect: the FactoryBatchCompleted
+                        // case unconditionally clears _samples once the in-flight batch finishes (F6,
+                        // same as MoveToCapacityAsync's own finally block already did), so any sample
                         // collected during the batch's whole in-flight window - however long that
                         // now is, no longer just one synchronous call - would be discarded anyway.
                         break;
@@ -988,26 +1033,85 @@ namespace RingBufferPlus.Core
             });
         }
 
+        // Monitor (ADR001V03's lowest-priority signal; ADR003V03's algorithm): a sliding-window
+        // percentile + safety buffer "fair level", adjusted by a linear-regression trend projected
+        // a configurable horizon ahead, clamped to [MinCapacity, MaxCapacity] - replaces the old
+        // median-of-idle-samples algorithm (AutoScaleDecision), which was scale-down only.
+        //
+        // Demand is (in-use items) + (currently-waiting callers) - CurrentCapacity minus idle, plus
+        // _waitingCount - never idle alone, which is clamped at zero and therefore blind to unmet
+        // demand (see AutoScaleMonitor's own remarks on why an idle-derived proxy would silently
+        // flatten the regression trend under sustained saturation).
+        //
+        // While demand keeps pace with or exceeds capacity ("active"), the window is paused
+        // entirely and cleared the instant that episode ends - see _monitorActive's own remarks for
+        // why this specific check is only reachable in a narrow case (pinned at MaxCapacity with
+        // backlog), not the general "reactive episode" the validated simulation modeled, and why a
+        // genuinely steady period (no scale op at all, deadband absorbing every small drift) still
+        // lets the window grow to SamplesCount before demand next moves - a real, accepted
+        // trade-off of the shipped defaults, not something this field or the pre-existing
+        // per-scale-op clears (MoveToCapacityAsync/FactoryBatchCompleted) prevent.
+        //
+        // Otherwise, this tick's demand joins the sliding window (bounded to SamplesCount,
+        // evaluated every tick once at least 2 samples exist - not collected into one fixed batch
+        // like the old median algorithm was) and the resulting target is compared against
+        // CurrentCapacity: a change smaller than MonitorDeadband is ignored (measured to cut
+        // oscillation under flat-but-noisy demand from 48 reversals in 300 ticks to 1); a larger
+        // increase dispatches a background scale-up (DispatchScaleUp, same as backlog/floor/
+        // manual); a larger decrease scales down inline, same as before.
         private async Task ProcessTickAsync()
         {
-            _samples.Add(_availableItems.Reader.Count);
-            if (_samples.Count < SamplesCount)
+            var idle = _availableItems.Reader.Count;
+            var demand = CurrentCapacity - idle + Volatile.Read(ref _waitingCount);
+            var active = demand >= CurrentCapacity;
+            if (_monitorActive && !active)
+            {
+                _samples.Clear();
+            }
+            _monitorActive = active;
+            if (active)
             {
                 return;
             }
-            var median = AutoScaleDecision.Median(_samples);
-            _samples.Clear();
-            var target = AutoScaleDecision.EvaluateScaleDown(median, CurrentCapacity, MinCapacity, Capacity, AutoScaleFault);
-            if (target.HasValue)
+
+            _samples.Add(demand);
+            if (_samples.Count > SamplesCount)
             {
-                // No try/catch here (Round 7, shutdown-vs-genuine-failure sweep): EvaluateScaleDown
-                // only ever returns a target strictly below CurrentCapacity, so this call is always
-                // a scale-down - and a scale-down can never throw (RemoveItemsAsync never observes
-                // a token and never throws, R6; per-item dispose failures are already swallowed by
-                // DisposeItemsDefensivelyAsync, F19). The catch this replaced was unreachable -
-                // confirmed both structurally and empirically (a temporary throw-marker probe ran
-                // the full suite without ever hitting it) before removing it.
-                await MoveToCapacityAsync(target.Value, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                _samples.RemoveAt(0);
+            }
+            if (_samples.Count < 2)
+            {
+                return;
+            }
+
+            var target = AutoScaleMonitor.EvaluateTarget(_samples, MonitorPercentileP, MonitorSafetyBuffer, MonitorHorizon, MinCapacity, MaxCapacity);
+            if (target == CurrentCapacity)
+            {
+                return;
+            }
+            // Reachability cap (same principle as the old median algorithm's R18/R19 threshold
+            // cap, applied here to this algorithm's own deadband instead): MonitorDeadband must
+            // never exceed the maximum delta actually reachable in the direction target is asking
+            // for, or a small Capacity/MinCapacity/MaxCapacity span (e.g. ElasticCapacity(4, 2, 8),
+            // span 2 < the default deadband of 3) would make that boundary mathematically
+            // unreachable via this gate forever, however idle or saturated the buffer becomes.
+            var maxReachableDelta = target > CurrentCapacity ? MaxCapacity - CurrentCapacity : CurrentCapacity - MinCapacity;
+            var effectiveDeadband = Math.Min(MonitorDeadband, maxReachableDelta);
+            if (Math.Abs(target - CurrentCapacity) < effectiveDeadband)
+            {
+                return;
+            }
+            if (target > CurrentCapacity)
+            {
+                DispatchScaleUp(target, scaleTrigger: "auto", completion: null);
+            }
+            else
+            {
+                // No try/catch here (Round 7, shutdown-vs-genuine-failure sweep, preserved from the
+                // old median algorithm): a scale-down can never throw (RemoveItemsAsync never
+                // observes a token and never throws, R6; per-item dispose failures are already
+                // swallowed by DisposeItemsDefensivelyAsync, F19).
+                await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
             }
         }
 

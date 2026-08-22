@@ -275,6 +275,69 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task RisingDemandTrend_TriggersPredictiveMonitorScaleUp_BeforeAnyCallerEverWaits_WithAutoTrigger()
+        {
+            // The Monitor (ADR001V03/ADR003V03) is the only signal that can scale up BEFORE demand
+            // actually exceeds capacity: its linear-regression trend, projected a horizon ahead, can
+            // push the target above CurrentCapacity from a rising-but-still-below-capacity demand
+            // series alone. This is structurally impossible for backlog-reactive (which only exists
+            // because a caller could not get an item immediately) or the old median algorithm
+            // (scale-down only) - proving it requires a demand ramp that never lets idle hit zero,
+            // so no caller ever actually waits.
+            var bufferName = UniqueBufferName();
+            using var cts = new CancellationTokenSource();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var manager = new RingBufferManager<int>(cts.Token)
+            {
+                Name = bufferName,
+                Capacity = 10,
+                MinCapacity = 2,
+                MaxCapacity = 30,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromSeconds(30),
+                SamplesBase = TimeSpan.FromMilliseconds(1000),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromSeconds(2),
+                AutoScaleFault = true,
+                Factory = _ => Task.FromResult(1)
+            };
+            await manager.WarmupAsync();
+
+            var held = new List<RingBufferValue<int>>();
+            var rampDeadline = DateTime.UtcNow.AddSeconds(6);
+            for (var i = 0; i < 8 && DateTime.UtcNow < rampDeadline; i++)
+            {
+                var acquired = await manager.AcquireAsync();
+                Assert.True(acquired.Successful, "Expected every ramp acquisition to succeed immediately - the ramp must never make a caller wait, or this would just be backlog-reactive again.");
+                held.Add(acquired);
+                await Task.Delay(150);
+            }
+
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(6);
+            while (manager.CurrentCapacity == 10 && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.True(manager.CurrentCapacity > 10, $"Expected the Monitor's rising-trend projection to scale up predictively. Actual: {manager.CurrentCapacity}.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await manager.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags["direction"], "up") && Equals(r.Tags["trigger"], "auto"));
+
+            Assert.Contains(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up") && Equals(a.GetTagItem("trigger"), "auto"));
+        }
+
+        [Fact]
         public async Task ReplaceOne_WhenReplacementFactoryFailsThenRecovers_RecordsScaleOperation_WithFloorTrigger()
         {
             // Floor guard (ADR001V03): MinCapacity == Capacity here (like the fixed-capacity

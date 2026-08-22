@@ -15,11 +15,12 @@ namespace RingBufferPlus.Benchmarks
     // comparison isolates the slow/corrective decision layer specifically - not the reactive
     // fast path, which both the current design and the v6 proposal already treat the same way.
     //
-    //   - MedianDecision: the REAL algorithm shipping today (ported from the internal
-    //     RingBufferPlus.Core.AutoScaleDecision - kept as a local copy here because this
-    //     project does not have InternalsVisibleTo access; AutoScaleDecisionTests.cs in
-    //     RingBufferPlus.Tests is the authoritative test coverage for the original, keep this
-    //     copy's logic in sync with it manually if AutoScaleDecision ever changes).
+    //   - MedianDecision: the algorithm v5.x shipped (ADR003V03 replaced it in v6.0.0 - this is a
+    //     historical copy, kept for comparison purposes only; the original internal
+    //     RingBufferPlus.Core.AutoScaleDecision and its dedicated AutoScaleDecisionTests.cs were
+    //     both deleted once ADR003V03's replacement was wired in, since nothing calls it anymore -
+    //     this local copy is now the only place this algorithm's logic still exists at all, so
+    //     there is nothing left to keep it "in sync with").
     //   - PercentileRegressionDecision: the v6 design proposal - sliding-window percentile
     //     + safety buffer as a "fair level", adjusted by a linear-regression trend projected
     //     `Horizon` ticks ahead, clamped to [min, max], with a deadband so the target does not
@@ -72,7 +73,7 @@ namespace RingBufferPlus.Benchmarks
                 var (pctDbCap, pctDbConverge, pctDbOsc) = SimulatePercentile(demand, changeTick, tolerance, useDeadband: true, resetOnReactive: false);
                 var (pctRstCap, pctRstConverge, pctRstOsc) = SimulatePercentile(demand, changeTick, tolerance, useDeadband: true, resetOnReactive: true);
 
-                Report(name, "Median (shipping today)", demand, medCap, medConverge, medOsc);
+                Report(name, "Median (v5.x, retired)", demand, medCap, medConverge, medOsc);
                 Report(name, "Percentile+Regression", demand, pctCap, pctConverge, pctOsc);
                 Report(name, "Percentile+Regr.+Deadband", demand, pctDbCap, pctDbConverge, pctDbOsc);
                 Report(name, "...+WindowResetOnReactive", demand, pctRstCap, pctRstConverge, pctRstOsc);
