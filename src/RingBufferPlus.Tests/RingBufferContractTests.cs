@@ -2281,7 +2281,17 @@ namespace RingBufferPlus.Tests
                     }
                     return Task.FromResult(1);
                 }, TimeSpan.FromSeconds(5), maxConsecutiveFactoryFailures: 1)
-                .ElasticCapacity(4, 2, 10, 3, TimeSpan.FromMilliseconds(600))
+                // maxConcurrentFactoryCalls: 1 (ADR001V03) is required for the fail/succeed
+                // pattern above to actually hold: with the default of 4, several factory calls
+                // run genuinely concurrently, so two "odd" (failing) calls can have their
+                // consecutiveFailures bookkeeping race each other without an intervening success
+                // resetting it first - occasionally tripping give-up one call early (observed:
+                // created 2/6, not the expected 3/6). Pinning concurrency to 1 forces callCount
+                // assignment into strict gate-acquisition order, so the alternating pattern by
+                // construction never produces two consecutive failures - same fix already applied
+                // to SwitchToAsync_WithDefaultFailureTolerance_StillAbandonsTheBatchOnTheFirstFailure
+                // for the same reason.
+                .ElasticCapacity(4, 2, 10, 3, TimeSpan.FromMilliseconds(600), maxConcurrentFactoryCalls: 1)
                 .AutoScaleAcquireFault(1)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
