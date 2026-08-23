@@ -51,7 +51,7 @@ flowchart TB
 |---|---|
 | Public builder/service interfaces | `src/RingBufferPlus/Commands/` |
 | Engine + builder implementation | `src/RingBufferPlus/Core/` |
-| DI integration (`AddRingBuffer`, `WarmupRingBufferAsync`) | `src/RingBufferPlus/HostingExtensions.cs` |
+| DI integration (`AddRingBuffer`, registers an `IHostedService` for automatic warmup) | `src/RingBufferPlus/HostingExtensions.cs` |
 | Behavioral contract tests (the acceptance gate for any engine change) | `src/RingBufferPlus.Tests/RingBufferContractTests.cs` |
 | Autoscale algorithm unit tests | `src/RingBufferPlus.Tests/AutoScaleDecisionTests.cs` |
 | Observability (metrics/tracing) tests | `src/RingBufferPlus.Tests/RingBufferObservabilityTests.cs` |

@@ -14,6 +14,7 @@ A complete, coordinated product overhaul authorized by [ADR006 V02](doc/adr/ADR0
 
 - **`BackgroundLogger` removed entirely** (`IRingBufferBuilder<T>`/`IRingBufferFixedBuilder<T>`/`IRingBufferElasticBuilder<T>`): logging is now always synchronous, inline, on whichever thread triggered it - no dedicated background pump, no internal queue. It duplicated a problem the `ILogger` ecosystem already solves generically (async-capable providers), and was itself a repeat source of real bugs (a message-ordering/drop bug, and a throwing `OnError` permanently faulting the pump and silently dropping every later message) - see [ADR007 V03](doc/adr/ADR007V03-redesign-of-the-public-fluent-api-surface.md).
 - **`OnError` simplified**: from `Action<ILogger?, Exception>` to `Action<Exception>` - the logger is already configured separately via `Logger(ILogger?)`, so it is no longer also handed to the error callback.
+- **`WarmupRingBufferAsync` removed**: `AddRingBuffer<T>` now also registers an `IHostedService` for the given `buffername`, which calls `WarmupAsync` automatically during the host's own startup (`StartAsync`, using that call's own token) - warmup is no longer a separate opt-in step. This fixes both root-level bugs the old extension had (an ignored token on one path, a dead null-check) by construction, via the idiomatic hosting contract, rather than patching the old signature. There is no way to opt out of automatic warmup via `AddRingBuffer<T>` itself; build the buffer directly via `RingBuffer<T>.New(...)` instead if you need that.
 
 ### Fixed
 

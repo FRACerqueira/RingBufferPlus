@@ -64,8 +64,8 @@ Every `RingBufferManager<T>` owns exactly one background loop that is the sole w
 ## Thread-safety and dependency injection
 
 - A single `IRingBufferService<T>` instance is safe to call `AcquireAsync`/`SwitchToAsync` from any number of threads/tasks concurrently — that is the entire point of the pool.
-- Register it as a **singleton**. Building a new instance per request/scope re-runs the factory for every item and defeats the purpose of pooling — see the [dependency injection guide](usage-dependency-injection.md) for `AddRingBuffer`/`WarmupRingBufferAsync`.
-- Do not create two `RingBuffer<T>.New(...)` instances with the same `name` and the same `T` in the same process unless you specifically intend two independent pools — the name is for your own diagnostics/logging correlation, not for lookup or deduplication (lookup by name only exists inside `WarmupRingBufferAsync`, and only among registered `IRingBufferService<T>` singletons for that `T`).
+- Register it as a **singleton**. Building a new instance per request/scope re-runs the factory for every item and defeats the purpose of pooling — see the [dependency injection guide](usage-dependency-injection.md) for `AddRingBuffer` (which also registers the `IHostedService` that warms it up automatically at host start).
+- Do not create two `RingBuffer<T>.New(...)` instances with the same `name` and the same `T` in the same process unless you specifically intend two independent pools — the name is for your own diagnostics/logging correlation, not for lookup or deduplication (lookup by name only exists inside the hosted service `AddRingBuffer` registers, and only among registered `IRingBufferService<T>` singletons for that `T`).
 
 ## When not to use RingBufferPlus
 

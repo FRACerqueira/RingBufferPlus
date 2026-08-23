@@ -18,8 +18,15 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class HostingExtensions
     {
         /// <summary>
-        /// Add RingBuffer in ServiceCollection.
+        /// Add RingBuffer in ServiceCollection, warming it up automatically once the host starts.
         /// </summary>
+        /// <remarks>
+        /// Since v6.0.0 (ADR007V03), warmup is no longer a separate opt-in step - an <see cref="IHostedService"/>
+        /// is registered alongside the pool and calls <see cref="IRingBufferService{T}.WarmupAsync(CancellationToken)"/>
+        /// automatically in its own <c>StartAsync</c>, using that call's own token. This replaces the previous
+        /// <c>WarmupRingBufferAsync</c> extension (removed) and its two root-cause bugs: the caller-supplied
+        /// token it silently ignored in one path, and a null-check that could never actually fire.
+        /// </remarks>
         /// <typeparam name="T">Type of buffer.</typeparam>
         /// <param name="serviceCollection">The <see cref="IServiceCollection"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
@@ -35,44 +42,27 @@ namespace Microsoft.Extensions.DependencyInjection
                 var loggerFactory = service.GetService<ILoggerFactory>();
                 return userfunc.Invoke(new RingBufferBuilder<T>(buffername, loggerFactory), service);
             });
+            serviceCollection.AddHostedService(service => new RingBufferWarmupHostedService<T>(service, buffername));
             return serviceCollection;
         }
+    }
 
-        /// <summary>
-        /// Warms up with full capacity ready or reaching timeout.
-        /// </summary>
-        /// <remarks>
-        /// It is recommended to use this method in the initialization of the application.
-        /// <para>If you do not use this command, the first access to buffer services (<see cref="IRingBufferService{T}"/>) will trigger warmup instead (not recommended).</para>
-        /// </remarks>
-        /// <typeparam name="T">Type of buffer.</typeparam>
-        /// <param name="appbluild">The <see cref="IHost"/>.</param>
-        /// <param name="buffername">The unique name to RingBuffer.</param>
-        /// <param name="token">The <see cref="CancellationToken"/>. Default value is <see cref="IHostApplicationLifetime.ApplicationStopping"/>.</param>
-        /// <exception cref="ArgumentNullException">Buffer name is null, or no buffer with that name and <typeparamref name="T"/> was registered. An empty string is accepted as a name.</exception>
-        /// <exception cref="InvalidOperationException">The RingBuffer did not reach initial capacity - propagated from the inner <see cref="IRingBufferService{T}.WarmupAsync(CancellationToken)"/> call.</exception>
-        public static async Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, CancellationToken? token = null)
+    // Replaces WarmupRingBufferAsync (ADR007V03): registered once per AddRingBuffer<T> call, so a
+    // host with several buffers of the same T gets one of these per buffername, each warming up
+    // only its own buffer. StartAsync's own token is used directly - no ignored-token bug, and no
+    // dead null-check to get wrong, unlike the extension this replaces.
+    internal sealed class RingBufferWarmupHostedService<T>(IServiceProvider services, string buffername) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(buffername);
-
-            var rb = appbluild.Services.GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name == buffername);
+            var rb = services.GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name == buffername);
             if (rb is null)
             {
-                throw new ArgumentNullException(nameof(buffername), $"RingBuffer({buffername}) not found");
+                throw new InvalidOperationException($"RingBuffer({buffername}) not found");
             }
-
-            CancellationToken effectiveToken;
-            if (token is not null)
-            {
-                effectiveToken = token.Value;
-            }
-            else
-            {
-                var applifetime = appbluild.Services.GetService<IHostApplicationLifetime>();
-                effectiveToken = applifetime?.ApplicationStopping ?? CancellationToken.None;
-            }
-
-            await rb.WarmupAsync(effectiveToken);
+            return rb.WarmupAsync(cancellationToken);
         }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

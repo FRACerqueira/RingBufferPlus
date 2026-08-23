@@ -4,7 +4,7 @@
 </br>
 
 
-#### Add RingBuffer in ServiceCollection.
+#### Add RingBuffer in ServiceCollection, warming it up automatically once the host starts.
 
 ```csharp
 public static IServiceCollection AddRingBuffer<T>(this IServiceCollection serviceCollection, 
@@ -28,6 +28,10 @@ IServiceCollection.
 | exception | condition |
 | --- | --- |
 | ArgumentNullException | Buffer name is null. An empty string is accepted. |
+
+### Remarks
+
+Since v6.0.0 (ADR007V03), warmup is no longer a separate opt-in step - an IHostedService is registered alongside the pool and calls [`WarmupAsync`](../../RingBufferPlus/IRingBufferService-1/WarmupAsync.md) automatically in its own `StartAsync`, using that call's own token. This replaces the previous `WarmupRingBufferAsync` extension (removed) and its two root-cause bugs: the caller-supplied token it silently ignored in one path, and a null-check that could never actually fire.
 
 ### See Also
 

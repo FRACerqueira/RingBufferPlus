@@ -19,8 +19,6 @@
 
 using System.Diagnostics;
 using System.Reflection;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Moq;
 using RingBufferPlus.Core;
@@ -387,51 +385,6 @@ namespace RingBufferPlus.Tests
             // not silently no-op (there is no longer a separate scale queue to leak - the whole
             // engine loop is gone - but the public contract must still reject post-disposal work).
             await Assert.ThrowsAsync<ObjectDisposedException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
-        }
-
-        // ---------------------------------------------------------------------
-        // 1.6 - WarmupRingBufferAsync honors its token and throws when the buffer is missing
-        // ---------------------------------------------------------------------
-
-        [Fact]
-        [Trait("Category", "Contract")]
-        public async Task WarmupRingBufferAsync_HonorsTheProvidedToken()
-        {
-            // Arrange
-            var ringBufferServiceMock = new Mock<IRingBufferService<int>>();
-            ringBufferServiceMock.Setup(x => x.Name).Returns("testBuffer");
-            ringBufferServiceMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
-
-            var services = new ServiceCollection();
-            services.AddSingleton(ringBufferServiceMock.Object);
-            var serviceProvider = services.BuildServiceProvider();
-
-            var hostMock = new Mock<IHost>();
-            hostMock.Setup(x => x.Services).Returns(serviceProvider);
-
-            using var explicitToken = new CancellationTokenSource();
-
-            // Act
-            await hostMock.Object.WarmupRingBufferAsync<int>("testBuffer", explicitToken.Token);
-
-            // Assert: the explicitly provided token, not ApplicationStopping/None, must reach WarmupAsync.
-            ringBufferServiceMock.Verify(x => x.WarmupAsync(explicitToken.Token), Times.Once);
-        }
-
-        [Fact]
-        [Trait("Category", "Contract")]
-        public async Task WarmupRingBufferAsync_ThrowsWhenBufferIsNotRegistered()
-        {
-            // Arrange: no IRingBufferService<int> registered at all.
-            var services = new ServiceCollection();
-            var serviceProvider = services.BuildServiceProvider();
-
-            var hostMock = new Mock<IHost>();
-            hostMock.Setup(x => x.Services).Returns(serviceProvider);
-
-            // Act + Assert
-            await Assert.ThrowsAsync<ArgumentNullException>(() =>
-                hostMock.Object.WarmupRingBufferAsync<int>("missingBuffer"));
         }
 
         // ---------------------------------------------------------------------
