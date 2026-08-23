@@ -64,9 +64,11 @@ namespace RingBufferPlusBasicSample
             Console.WriteLine("Ring Buffer disposed.");
         }
 
-        private static void MyHeartBeat(RingBufferValue<int> value)
+        private static bool MyHeartBeat(int value)
         {
             //do anything with value ex: health check
+            //return false to discard it instead (a replacement is created in its place)
+            return true;
         }
 
         private static IHostBuilder CreateHostBuilder(string[] args) =>

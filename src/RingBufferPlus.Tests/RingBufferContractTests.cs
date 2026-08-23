@@ -241,7 +241,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeSafety", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .HeartBeat(_ => { })
+                .HeartBeat(_ => true)
                 .FixedCapacity(4)
                 .Build();
             await service.WarmupAsync();
@@ -278,7 +278,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringWarmup", null);
             var service = builder
                 .Factory(async _ => { await Task.Delay(50); return 1; })
-                .HeartBeat(_ => { })
+                .HeartBeat(_ => true)
                 .FixedCapacity(4)
                 .Build();
 
@@ -756,6 +756,7 @@ namespace RingBufferPlus.Tests
                         // indefinitely (e.g. a dead socket read with no timeout).
                         release.Wait();
                     }
+                    return true;
                 }, TimeSpan.FromMilliseconds(50))
                 .FixedCapacity(2)
                 .Build();
@@ -810,7 +811,7 @@ namespace RingBufferPlus.Tests
                 IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringHeartbeat", null);
                 var service = builder
                     .Factory(_ => Task.FromResult(1))
-                    .HeartBeat(_ => { }, TimeSpan.FromMilliseconds(15))
+                    .HeartBeat(_ => true, TimeSpan.FromMilliseconds(15))
                     .FixedCapacity(2)
                     .Build();
                 await service.WarmupAsync();
@@ -1406,7 +1407,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractHeartbeatDoesNotFault", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .HeartBeat(_ => { }, TimeSpan.FromMilliseconds(100))
+                .HeartBeat(_ => true, TimeSpan.FromMilliseconds(100))
                 .ElasticCapacity(2, 2, 4, 5, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(100))
                 .Build();
@@ -1461,17 +1462,18 @@ namespace RingBufferPlus.Tests
                 .Factory(_ => Task.FromResult(new DisposableProbe()))
                 .HeartBeat(value =>
                 {
-                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
-                        && !ReferenceEquals(firstProbe, value.Current))
+                    if (Interlocked.CompareExchange(ref firstProbe, value, null) is not null
+                        && !ReferenceEquals(firstProbe, value))
                     {
-                        return;
+                        return true;
                     }
                     callbackStarted.Set();
                     // Block well past the pulse budget - simulates a callback that cannot be
                     // cancelled and keeps running (and touching the resource) after the manager
                     // has already given up waiting on it.
                     releaseCallback.Wait(TimeSpan.FromSeconds(5));
-                    value.Current.Touch();
+                    value.Touch();
+                    return true;
                 }, pulse: TimeSpan.FromMilliseconds(100))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -1514,16 +1516,17 @@ namespace RingBufferPlus.Tests
                 .Factory(_ => Task.FromResult(new DisposableProbe()))
                 .HeartBeat(value =>
                 {
-                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
-                        && !ReferenceEquals(firstProbe, value.Current))
+                    if (Interlocked.CompareExchange(ref firstProbe, value, null) is not null
+                        && !ReferenceEquals(firstProbe, value))
                     {
-                        return;
+                        return true;
                     }
                     callbackStarted.Set();
                     // A pulse budget of 5s means DisposeAsync() below - fired well inside that
                     // budget - is an ordinary shutdown, not a pulse-budget timeout.
                     releaseCallback.Wait(TimeSpan.FromSeconds(5));
-                    value.Current.Touch();
+                    value.Touch();
+                    return true;
                 }, pulse: TimeSpan.FromSeconds(5))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -2067,10 +2070,10 @@ namespace RingBufferPlus.Tests
                     return 1;
                 }, TimeSpan.FromSeconds(5))
                 .OnError(ex => errors.Add(ex))
-                .HeartBeat(value =>
+                .HeartBeat(_ =>
                 {
-                    value.Invalidate();
                     invalidated.Set();
+                    return false;
                 }, pulse: TimeSpan.FromMilliseconds(100))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -2351,7 +2354,7 @@ namespace RingBufferPlus.Tests
                 var service = await builder
                     .Factory(_ => Task.FromResult(1))
                     .OnError(ex => errors.Add(ex))
-                    .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
+                    .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(1))
                     .FixedCapacity(2)
                     .BuildWarmupAsync();
 
@@ -2388,7 +2391,7 @@ namespace RingBufferPlus.Tests
                 var service = await builder
                     .Factory(_ => Task.FromResult(1))
                     .OnError(ex => errors.Add(ex))
-                    .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
+                    .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(1))
                     .FixedCapacity(2)
                     .BuildWarmupAsync();
 
@@ -2425,13 +2428,14 @@ namespace RingBufferPlus.Tests
                 .Factory(_ => Task.FromResult(new DisposableProbe()))
                 .HeartBeat(value =>
                 {
-                    if (Interlocked.CompareExchange(ref firstProbe, value.Current, null) is not null
-                        && !ReferenceEquals(firstProbe, value.Current))
+                    if (Interlocked.CompareExchange(ref firstProbe, value, null) is not null
+                        && !ReferenceEquals(firstProbe, value))
                     {
-                        return;
+                        return true;
                     }
                     callbackStarted.Set();
                     releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                    return true;
                 }, pulse: TimeSpan.FromMilliseconds(500))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -2524,6 +2528,7 @@ namespace RingBufferPlus.Tests
                     // DisposeAsync's own PulseHeartBeat-bounded grace period for the deferred
                     // dispose, forcing the grace-period-timeout LogMessage this test is about.
                     releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                    return true;
                 }, pulse: TimeSpan.FromMilliseconds(300))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -2564,6 +2569,7 @@ namespace RingBufferPlus.Tests
                     // and enqueues a deferred-dispose entry - but still fast enough that each
                     // entry finishes well before the next one is added.
                     Thread.Sleep(180);
+                    return true;
                 }, pulse: TimeSpan.FromMilliseconds(100))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
@@ -2612,6 +2618,7 @@ namespace RingBufferPlus.Tests
                 {
                     callbackStarted.Set();
                     releaseCallback.Wait(TimeSpan.FromSeconds(10));
+                    return true;
                 }, pulse: TimeSpan.FromMilliseconds(200))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(300))
                 .FixedCapacity(2)
@@ -2700,7 +2707,7 @@ namespace RingBufferPlus.Tests
                 .Factory(_ => Task.FromResult(new HangingThenThrowingDisposeProbe(releaseHang)))
                 .Logger(new CapturingLogger())
                 .OnError(ex => { lock (errors) errors.Add(ex); })
-                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
@@ -2814,7 +2821,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractDrainLoopHangingDispose", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(new HangingDisposeProbe(releaseHang)))
-                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
@@ -2838,7 +2845,7 @@ namespace RingBufferPlus.Tests
             var service = builder
                 .Factory(_ => Task.FromResult(new HangingDisposeProbe(releaseHang)))
                 .ElasticCapacity(4, 2, 4, 1, TimeSpan.FromSeconds(5))
-                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -2941,7 +2948,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<HangingSyncDisposeProbe> builder = new RingBufferBuilder<HangingSyncDisposeProbe>("ContractDrainLoopHangingSyncDispose", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(new HangingSyncDisposeProbe(releaseHang)))
-                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
@@ -2969,7 +2976,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<HangingSyncDisposeProbe> builder = new RingBufferBuilder<HangingSyncDisposeProbe>("ContractDrainLoopBatchHangingSyncDispose", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(new HangingSyncDisposeProbe(releaseHang)))
-                .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .FixedCapacity(4)
                 .BuildWarmupAsync();
 
@@ -3442,6 +3449,67 @@ namespace RingBufferPlus.Tests
 
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.Zero));
             await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(-1)));
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // HeartBeat redesign (ADR007V03): the callback now receives the raw T and returns a bool
+        // instead of the whole RingBufferValue<T> - false discards the item (a replacement is
+        // created in its place, through the same path Invalidate() uses), true keeps it.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeat_WhenCallbackReturnsFalse_DiscardsAndReplacesTheItem()
+        {
+            var seenValues = new System.Collections.Concurrent.ConcurrentBag<int>();
+            var callCount = 0;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractHeartBeatFalseDiscards", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(Interlocked.Increment(ref callCount)))
+                .HeartBeat(value =>
+                {
+                    seenValues.Add(value);
+                    return false; // always unhealthy - every tick must get a freshly-created item
+                }, pulse: TimeSpan.FromMilliseconds(50))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (seenValues.Count < 3 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+
+            Assert.True(seenValues.Count >= 3, $"Expected at least 3 heartbeat ticks, got {seenValues.Count}.");
+            // Every discarded item is replaced, never returned to the pool - the same physical item
+            // (identified here by its factory-assigned value) must never be inspected twice.
+            Assert.Equal(seenValues.Count, seenValues.Distinct().Count());
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeat_WhenCallbackReturnsTrue_ReturnsTheSameItemToThePool()
+        {
+            var callCount = 0;
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractHeartBeatTrueKeeps", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(Interlocked.Increment(ref callCount)))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(50))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            // With nothing else competing for either item, several pulses (50ms each) must keep
+            // inspecting the same 2 original items if `true` genuinely keeps them - any replacement
+            // would show up as an extra Factory call beyond the initial 2-item warmup fill.
+            await Task.Delay(300);
+
+            Assert.Equal(2, Volatile.Read(ref callCount));
 
             await service.DisposeAsync();
         }

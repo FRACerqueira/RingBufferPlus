@@ -4,25 +4,27 @@
 </br>
 
 
-#### Sets the HeartBeat in the ring buffer.
+#### Sets the HeartBeat in the ring buffer: periodically inspects a live item's health.
 
 ```csharp
-public IRingBufferFixedBuilder HeartBeat(Action<RingBufferValue<T>> value, 
-    TimeSpan? pulse = default)
+public IRingBufferFixedBuilder HeartBeat(Func<T, bool> value, TimeSpan? pulse = default)
 ```
 
 | parameter | description |
 | --- | --- |
-| value | The [`RingBufferValue`](../RingBufferValue-1.md). |
+| value | Receives the live item; return `false` if it is unhealthy (discard and replace) or `true` if it is still fine to keep. A callback that blocks past *pulse* is treated as a timeout regardless of what it eventually returns. |
 | pulse | The Heart Beat Interval. Also reused as the grace period bounding a single pooled item's `Dispose()`/`DisposeAsync()` call during shutdown or scale-down, whether or not `HeartBeat` itself is configured. Default value is 10 seconds. |
 
 ### Return Value
 
 [`IRingBufferFixedBuilder`](../IRingBufferFixedBuilder-1.md).
 
+### Remarks
+
+At each *pulse*, an item is acquired from the buffer and handed to *value* for inspection - the framework owns acquiring and returning it, not your callback (ADR007V03): there is no disposable object handed to you to misuse. Returning `false` discards the item and creates a replacement in its place, through the same path [`Invalidate`](../RingBufferValue-1/Invalidate.md) uses for any other caller; returning `true` returns it to the pool normally.
+
 ### See Also
 
-* class [RingBufferValue&lt;T&gt;](../RingBufferValue-1.md)
 * interface [IRingBufferFixedBuilder&lt;T&gt;](../IRingBufferFixedBuilder-1.md)
 * namespace [RingBufferPlus](../../RingBufferPlus.md)
 

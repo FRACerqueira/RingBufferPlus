@@ -119,7 +119,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void HeartBeat_ShouldSetHeartBeat()
         {
-            Action<RingBufferValue<int>> heartBeat = value => { };
+            Func<int, bool> heartBeat = value => true;
 
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))

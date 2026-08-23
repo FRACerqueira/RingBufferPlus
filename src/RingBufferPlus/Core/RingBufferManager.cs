@@ -237,7 +237,7 @@ namespace RingBufferPlus.Core
 
         public Action<Exception>? ErrorHandler { get; init; }
 
-        public Action<RingBufferValue<T>>? BufferHeartBeat { get; init; }
+        public Func<T, bool>? BufferHeartBeat { get; init; }
 
         public required Func<CancellationToken, Task<T>> Factory { get; init; }
 
@@ -1619,10 +1619,29 @@ namespace RingBufferPlus.Core
                     }
                     using var pulseTimeout = CancellationTokenSource.CreateLinkedTokenSource(_lifetime.Token);
                     pulseTimeout.CancelAfter(PulseHeartBeat);
-                    var heartbeatWork = Task.Run(() => BufferHeartBeat?.Invoke(acquired));
+                    // ADR007V03: the callback now receives the raw T and returns a bool instead of
+                    // the whole RingBufferValue<T> (removing the "do not dispose this yourself" trap
+                    // by construction - there's no disposable object to misuse anymore). false is
+                    // routed through the exact same Invalidate()/DisposeAsync() path any consumer's
+                    // own Invalidate() call already goes through - one mechanism, not two. Defaults
+                    // to healthy (true) if BufferHeartBeat is somehow null here, which should not
+                    // happen given the startup gate above.
+                    var heartbeatWork = Task.Run(() => BufferHeartBeat is null || BufferHeartBeat(acquired.Current));
                     try
                     {
-                        await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
+                        // Deliberate design choice, not an oversight: if the item is unhealthy
+                        // (false) and its own Dispose()/DisposeAsync() then hangs, TurnbackAsync's
+                        // Invalidate branch awaits that unbounded (unlike the timeout path below,
+                        // which is itself bounded by PulseHeartBeat via the deferred-dispose
+                        // machinery) - this pump stalls until it returns. The engine itself stays
+                        // free either way: ReplaceOne is posted to the command channel before that
+                        // await, inside TurnbackAsync, so capacity is corrected regardless of how
+                        // long this specific await takes.
+                        var healthy = await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
+                        if (!healthy)
+                        {
+                            acquired.Invalidate();
+                        }
                         await acquired.DisposeAsync().ConfigureAwait(false);
                     }
                     catch (OperationCanceledException) when (!heartbeatWork.IsCompleted)

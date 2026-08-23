@@ -22,7 +22,7 @@ public interface IRingBufferElasticBuilder<T>
 | [Build](IRingBufferElasticBuilder-1/Build.md)(…) | Validates and generates RingBufferPlus in service mode. |
 | [BuildWarmupAsync](IRingBufferElasticBuilder-1/BuildWarmupAsync.md)(…) | Validates and generates RingBufferPlus and warms up with full capacity ready. |
 | [Factory](IRingBufferElasticBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
-| [HeartBeat](IRingBufferElasticBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
+| [HeartBeat](IRingBufferElasticBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer: periodically inspects a live item's health. |
 | [LockWhenScaling](IRingBufferElasticBuilder-1/LockWhenScaling.md)(…) | Sets whether [`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md) awaits the scale operation's completion before returning, instead of returning as soon as it is scheduled. |
 | [Logger](IRingBufferElasticBuilder-1/Logger.md)(…) | Sets the logger. |
 | [MonitorTuning](IRingBufferElasticBuilder-1/MonitorTuning.md)(…) | Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window percentile as a demand "fair level", inflated by a safety buffer, adjusted by a linear-regression trend projected a configurable horizon ahead, clamped to [MinCapacity, MaxCapacity]. This is the lowest-priority of the four signals in ADR001V03's model (floor guard &gt; backlog-reactive &gt; manual pin &gt; Monitor) - it only acts on ticks where demand is not currently keeping pace with capacity; the window used for those ticks is [`ElasticCapacity`](./IRingBufferBuilder-1/ElasticCapacity.md)'s own `numberSamples`, unchanged by this method. |

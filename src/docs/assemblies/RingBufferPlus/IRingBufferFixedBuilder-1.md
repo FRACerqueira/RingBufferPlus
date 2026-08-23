@@ -22,7 +22,7 @@ public interface IRingBufferFixedBuilder<T>
 | [Build](IRingBufferFixedBuilder-1/Build.md)(…) | Validates and generates RingBufferPlus in service mode. |
 | [BuildWarmupAsync](IRingBufferFixedBuilder-1/BuildWarmupAsync.md)(…) | Validates and generates RingBufferPlus and warms up with full capacity ready. |
 | [Factory](IRingBufferFixedBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
-| [HeartBeat](IRingBufferFixedBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
+| [HeartBeat](IRingBufferFixedBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer: periodically inspects a live item's health. |
 | [Logger](IRingBufferFixedBuilder-1/Logger.md)(…) | Sets the logger. |
 | [OnError](IRingBufferFixedBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline whenever this buffer logs an error internally. |
 

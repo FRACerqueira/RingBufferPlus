@@ -58,14 +58,25 @@ namespace RingBufferPlus
         IRingBufferElasticBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 
         /// <summary>
-        /// Sets the HeartBeat in the ring buffer.
+        /// Sets the HeartBeat in the ring buffer: periodically inspects a live item's health.
         /// </summary>
-        /// <param name="value">The <see cref="RingBufferValue{T}"/>.</param>
+        /// <remarks>
+        /// At each <paramref name="pulse"/>, an item is acquired from the buffer and handed to
+        /// <paramref name="value"/> for inspection - the framework owns acquiring and returning it,
+        /// not your callback (ADR007V03): there is no disposable object handed to you to misuse.
+        /// Returning <see langword="false"/> discards the item and creates a replacement in its
+        /// place, through the same path <see cref="RingBufferValue{T}.Invalidate"/> uses for any
+        /// other caller; returning <see langword="true"/> returns it to the pool normally.
+        /// </remarks>
+        /// <param name="value">Receives the live item; return <see langword="false"/> if it is
+        /// unhealthy (discard and replace) or <see langword="true"/> if it is still fine to keep.
+        /// A callback that blocks past <paramref name="pulse"/> is treated as a timeout regardless
+        /// of what it eventually returns.</param>
         /// <param name="pulse">The Heart Beat Interval. Also reused as the grace period bounding a single
         /// pooled item's <c>Dispose()</c>/<c>DisposeAsync()</c> call during shutdown or scale-down, whether
         /// or not <c>HeartBeat</c> itself is configured. Default value is 10 seconds.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
-        IRingBufferElasticBuilder<T> HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse = null);
+        IRingBufferElasticBuilder<T> HeartBeat(Func<T, bool> value, TimeSpan? pulse = null);
 
         /// <summary>
         /// Sets the logger.

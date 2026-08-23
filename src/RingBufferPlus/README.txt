@@ -148,7 +148,7 @@ HeartBeat Usage
 ===============
 
 There may be scenarios where you want to inspect an item in the buffer for some action (such as checking its health status). When this option is used periodically, an item is made available in the buffer for this need.
-**You should not dispose of the acquired item yourself! This is done internally by the component.**
+Return false to discard it (a replacement is created in its place); return true to keep it. The framework owns acquiring and returning the item - there is no disposable object to manage yourself.
 
 Random rnd = new();
 
@@ -159,9 +159,10 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .FixedCapacity(6)
            .BuildWarmupAsync(cancellation);
 
-static void MyHeartBeat(RingBufferValue<int> item)
+static bool MyHeartBeat(int item)
 {
      //do anything ex: health check
+     return true;
 }
 
 RabbitMQ Usage
