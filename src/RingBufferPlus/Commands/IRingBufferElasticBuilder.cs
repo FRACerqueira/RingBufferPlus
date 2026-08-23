@@ -9,8 +9,14 @@ namespace RingBufferPlus
 {
     /// <summary>
     /// Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity,
-    /// producing an <see cref="IRingBufferManualScaleService{T}"/> unless <see cref="AutoScaleAcquireFault(byte)"/> is used.
+    /// producing an <see cref="IRingBufferManualScaleService{T}"/>.
     /// </summary>
+    /// <remarks>
+    /// Since v6.0.0 (ADR001V03/ADR007V03), the floor guard, backlog-reactive signal, and Monitor
+    /// are always active for any elastic pool - there is no separate "automatic vs. manual" mode to
+    /// choose between as in v4/v5 (<see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch, TimeSpan)"/>
+    /// is a temporary pin over the Monitor's own output, not a mutually exclusive alternative to it).
+    /// </remarks>
     /// <typeparam name="T">Type of buffer.</typeparam>
     public interface IRingBufferElasticBuilder<T>
     {
@@ -103,68 +109,35 @@ namespace RingBufferPlus
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> LockWhenScaling(bool value = true);
 
+        // Moved here from the now-removed IRingBufferAutoScaleBuilder<T> (ADR007V03): since the
+        // Monitor is unconditionally active for every elastic pool now, tuning it is no longer a
+        // mode-specific concern. OPEN QUESTION from when this method was first added (2026-08-23,
+        // still unresolved by this move): whether this shape (one method, four parameters,
+        // all-or-nothing) is still the right surface once real usage exists to judge it against.
         /// <summary>
-        /// Enables autoscale (scale up) in reaction to real-time acquire demand, and permanently removes manual switching
-        /// from the built service's type (see <see cref="IRingBufferManualScaleService{T}"/>) — the two are mutually exclusive.
+        /// Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window
+        /// percentile as a demand "fair level", inflated by a safety buffer, adjusted by a
+        /// linear-regression trend projected a configurable horizon ahead, clamped to
+        /// [MinCapacity, MaxCapacity]. This is the lowest-priority of the four signals in
+        /// ADR001V03's model (floor guard &gt; backlog-reactive &gt; manual pin &gt; Monitor) - it
+        /// only acts on ticks where demand is not currently keeping pace with capacity; the window
+        /// used for those ticks is <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>'s
+        /// own <c>numberSamples</c>, unchanged by this method.
         /// </summary>
-        /// <remarks>
-        /// <para>
-        /// Since v6.0.0 (ADR001V03), the scale-up process is triggered by the backlog-reactive signal: it
-        /// reacts to real-time waiting-caller depth (how many concurrent <c>AcquireAsync</c> callers are
-        /// genuinely waiting for an idle item right now), not to a count of past acquire faults/timeouts.
-        /// <paramref name="numberOfFaults"/> is currently unused - it is kept on this method's signature only
-        /// pending the public-surface redesign (ADR007V03); it has no effect on when or how a scale-up
-        /// triggers today.
-        /// </para>
-        /// A scale-up (or scale-down) that only partially completes can land the buffer strictly between two
-        /// named capacities - scale-down evaluation still applies from there, not only from the exact initial
-        /// or maximum capacity. There is no scale-down from minimum capacity: minimum capacity is the floor.
-        /// <para>
-        /// While above initial capacity (including, but not limited to, exactly maximum capacity), the
-        /// scale-down target is initial capacity, evaluated when the median <b>exceeds</b> the formula:
-        /// current capacity - initial capacity + 2, capped so the threshold never reaches current capacity
-        /// itself (see below). At exactly maximum capacity, and whenever this cap does not apply, this is the
-        /// same as: maximum capacity - initial capacity + 2.
-        /// </para>
-        /// <para>
-        /// While at or below initial capacity (including, but not limited to, exactly initial capacity),
-        /// down to minimum capacity, the scale-down target is minimum capacity, evaluated when the median
-        /// <b>reaches or exceeds</b> the formula: current capacity - minimum capacity + 2, with the same cap.
-        /// At exactly initial capacity, and whenever the cap does not apply, this is the same as: initial
-        /// capacity - minimum capacity + 2.
-        /// </para>
-        /// <para>
-        /// Both thresholds are capped at current capacity - 1: if initial capacity is 2 (the minimum legal
-        /// value), the upper-band formula would otherwise reduce to current capacity itself, a value the
-        /// median can never exceed - making scale-down from above initial capacity unreachable regardless of
-        /// position, including at maximum capacity. Likewise, if minimum capacity is 2, the lower-band
-        /// formula would otherwise require the median to equal current capacity exactly, i.e. zero
-        /// acquisitions across the entire sampling window, to ever scale down to the floor. The cap keeps
-        /// both bands reachable in every configuration without changing behavior anywhere the uncapped
-        /// formula was already below it.
-        /// </para>
-        /// <para>
-        /// The scale-down process is executed against the median of the samples collected via
-        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>, per the two
-        /// formulas above.
-        /// </para>
-        /// <para>
-        /// Scale-up has a deadline based on the factory's own per-item timeout (see
-        /// <see cref="IRingBufferBuilder{T}.Factory(Func{CancellationToken, Task{T}}, TimeSpan?, byte)"/>); scale-down never
-        /// waits at all. Neither direction "undoes" a partial result - a scale-up that only creates some of the
-        /// needed items keeps them, and a scale-down that only finds some items idle removes just those.
-        /// </para>
-        /// <para>
-        /// The backlog-reactive signal carries no counter to forget: it is re-evaluated fresh every time a
-        /// caller starts waiting and every time a scale-up batch completes, from the buffer's actual
-        /// real-time state (waiting callers vs. idle items) rather than from accumulated history - so there
-        /// is nothing that needs resetting between an earlier scale-up and a later one.
-        /// </para>
-        /// </remarks>
-        /// <param name="numberOfFaults">Unused since v6.0.0 (ADR001V03) - see the remarks above. Kept on the
-        /// signature pending the public-surface redesign (ADR007V03). Default is 1.</param>
-        /// <returns>An instance of <see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
-        IRingBufferAutoScaleBuilder<T> AutoScaleAcquireFault(byte numberOfFaults = 1);
+        /// <param name="percentileP">The percentile used as the fair level, in the range (0, 1]. Default is 0.95 (p95).</param>
+        /// <param name="safetyBuffer">Fractional headroom added on top of the percentile. Must be greater than or equal to 0. Default is 0.10 (10%).</param>
+        /// <param name="horizon">How many sampling ticks ahead the demand trend is projected. Must be greater than or equal to 0. Default is 5.</param>
+        /// <param name="deadband">The minimum difference (in items) between the computed target and the
+        /// current capacity before a scale operation is dispatched - without it, the algorithm was
+        /// measured to oscillate heavily under flat-but-noisy demand. Must be greater than or equal
+        /// to 0. Default is 3. Also governs how long a demand change can go unnoticed during a
+        /// steady period, since only a dispatched scale operation clears the sliding window - see
+        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>'s
+        /// own <c>baseTimer</c> parameter for what that unnoticed period can last at the shipped
+        /// defaults, and why <c>numberSamples</c> does not affect it.</param>
+        /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
+        /// <exception cref="InvalidOperationException">An argument is outside its valid range - validated at <c>Build</c>/<c>BuildWarmupAsync</c> time.</exception>
+        IRingBufferElasticBuilder<T> MonitorTuning(double percentileP = 0.95, double safetyBuffer = 0.10, double horizon = 5, int deadband = 3);
 
         /// <summary>
         /// Validates and generates RingBufferPlus in service mode.

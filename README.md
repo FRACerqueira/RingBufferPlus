@@ -59,8 +59,8 @@ For elastic (scaling) buffers, dependency injection, RabbitMQ channel pooling, a
 
 - [Concepts](doc/guides/concepts.md) — the mental model: lifecycle, `Capacity`/`MinCapacity`/`MaxCapacity`, thread-safety, when *not* to use this library.
 - [Fixed capacity](doc/guides/usage-fixed-capacity.md)
-- [Elastic capacity with manual scale](doc/guides/usage-elastic-manual-scale.md)
-- [Elastic capacity with autoscale on acquire fault](doc/guides/usage-elastic-autoscale.md)
+- [Pinning capacity manually](doc/guides/usage-elastic-manual-scale.md)
+- [Elastic autoscale](doc/guides/usage-elastic-autoscale.md)
 - [Locking `SwitchToAsync` while scaling](doc/guides/usage-lock-when-scaling.md)
 - [HeartBeat](doc/guides/usage-heartbeat.md)
 - [Background logger](doc/guides/usage-background-logger.md)
@@ -73,9 +73,9 @@ For elastic (scaling) buffers, dependency injection, RabbitMQ channel pooling, a
 For runnable samples, see the [Samples directory](./samples):
 
 - [RingBufferPlusBasicSample](./samples/RingBufferPlusBasicSample) — fixed capacity with HeartBeat.
-- [RingBufferPlusBasicManualScale](./samples/RingBufferPlusBasicManualScale) — elastic capacity with manual scale.
-- [RingBufferPlusApiSample](./samples/RingBufferPlusApiSample) — elastic capacity with manual scale in an ASP.NET Core API.
-- [RingBufferPlusBasicTriggerScale](./samples/RingBufferPlusBasicTriggerScale) — elastic capacity with autoscale on acquire fault.
+- [RingBufferPlusBasicManualScale](./samples/RingBufferPlusBasicManualScale) — elastic capacity, pinning capacity manually.
+- [RingBufferPlusApiSample](./samples/RingBufferPlusApiSample) — elastic capacity, pinning capacity manually, in an ASP.NET Core API.
+- [RingBufferPlusBasicTriggerScale](./samples/RingBufferPlusBasicTriggerScale) — elastic capacity with autoscale.
 - [RingBufferPlusRabbitSample](./samples/RingBufferPlusRabbitSample) — RabbitMQ channel pooling with autoscale.
 
 ## API Reference

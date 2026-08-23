@@ -82,7 +82,7 @@ namespace RingBufferPlusBasicManualScale
         private static async Task DemoSwitchAsync(IRingBufferManualScaleService<int> rb, ScaleSwitch target, string label)
         {
             Console.WriteLine($"Switch to {label}");
-            await rb.SwitchToAsync(target);
+            await rb.SwitchToAsync(target, TimeSpan.FromSeconds(10));
             var sw = Stopwatch.StartNew();
             while (sw.ElapsedMilliseconds < 5000)
             {

@@ -4,7 +4,7 @@
 </br>
 
 
-#### Represents a RingBufferPlus service that can be manually switched between capacities.
+#### Represents a RingBufferPlus service that can be manually pinned to a capacity.
 
 ```csharp
 public interface IRingBufferManualScaleService<T> : IRingBufferService<T>
@@ -18,11 +18,11 @@ public interface IRingBufferManualScaleService<T> : IRingBufferService<T>
 
 | name | description |
 | --- | --- |
-| [SwitchToAsync](IRingBufferManualScaleService-1/SwitchToAsync.md)(…) | Try to manually switch the current capacity. |
+| [SwitchToAsync](IRingBufferManualScaleService-1/SwitchToAsync.md)(…) | Pins the buffer to a capacity for a required duration, overriding the Monitor's own predictive output for that long. |
 
 ### Remarks
 
-This contract is only available when the buffer was built with [`ElasticCapacity`](./IRingBufferBuilder-1/ElasticCapacity.md) and without [`AutoScaleAcquireFault`](./IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md). When autoscale-on-fault is enabled, or the buffer has a fixed capacity, manual switching is not exposed at the type level (see ADR007).
+This contract is only available when the buffer was built with [`ElasticCapacity`](./IRingBufferBuilder-1/ElasticCapacity.md). A fixed-capacity buffer does not expose manual switching at the type level (see ADR007). Since v6.0.0 (ADR001V03/ADR007V03), the floor guard, backlog-reactive signal, and Monitor are always active for an elastic pool - [`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md) is not a mutually exclusive alternative to them, it is a temporary pin that substitutes for the Monitor's own predictive output for the given duration. The floor guard and backlog-reactive signal are never suppressed by an active pin.
 
 ### See Also
 

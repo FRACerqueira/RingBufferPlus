@@ -4,7 +4,7 @@
 </br>
 
 
-#### Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity, producing an [`IRingBufferManualScaleService`](./IRingBufferManualScaleService-1.md) unless [`AutoScaleAcquireFault`](./IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md) is used.
+#### Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity, producing an [`IRingBufferManualScaleService`](./IRingBufferManualScaleService-1.md).
 
 ```csharp
 public interface IRingBufferElasticBuilder<T>
@@ -19,15 +19,19 @@ public interface IRingBufferElasticBuilder<T>
 | name | description |
 | --- | --- |
 | [AcquireTimeout](IRingBufferElasticBuilder-1/AcquireTimeout.md)(…) | Sets the timeout to acquire buffer. |
-| [AutoScaleAcquireFault](IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md)(…) | Enables autoscale (scale up) when an acquire fault occurs, and permanently removes manual switching from the built service's type (see [`IRingBufferManualScaleService`](./IRingBufferManualScaleService-1.md)) — the two are mutually exclusive. |
 | [BackgroundLogger](IRingBufferElasticBuilder-1/BackgroundLogger.md)(…) | Sets to write in background (evaluation asynchronously). |
 | [Build](IRingBufferElasticBuilder-1/Build.md)(…) | Validates and generates RingBufferPlus in service mode. |
 | [BuildWarmupAsync](IRingBufferElasticBuilder-1/BuildWarmupAsync.md)(…) | Validates and generates RingBufferPlus and warms up with full capacity ready. |
 | [Factory](IRingBufferElasticBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [HeartBeat](IRingBufferElasticBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
-| [LockWhenScaling](IRingBufferElasticBuilder-1/LockWhenScaling.md)(…) | Sets whether [`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md) awaits the scale operation's completion before returning, instead of returning as soon as it is scheduled. |
+| [LockWhenScaling](IRingBufferElasticBuilder-1/LockWhenScaling.md)(…) | Sets whether !:IRingBufferManualScaleService&lt;T&gt;.SwitchToAsync(ScaleSwitch) awaits the scale operation's completion before returning, instead of returning as soon as it is scheduled. |
 | [Logger](IRingBufferElasticBuilder-1/Logger.md)(…) | Sets the logger. |
+| [MonitorTuning](IRingBufferElasticBuilder-1/MonitorTuning.md)(…) | Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window percentile as a demand "fair level", inflated by a safety buffer, adjusted by a linear-regression trend projected a configurable horizon ahead, clamped to [MinCapacity, MaxCapacity]. This is the lowest-priority of the four signals in ADR001V03's model (floor guard &gt; backlog-reactive &gt; manual pin &gt; Monitor) - it only acts on ticks where demand is not currently keeping pace with capacity; the window used for those ticks is [`ElasticCapacity`](./IRingBufferBuilder-1/ElasticCapacity.md)'s own `numberSamples`, unchanged by this method. |
 | [OnError](IRingBufferElasticBuilder-1/OnError.md)(…) | Sets the error handler to log errors. |
+
+### Remarks
+
+Since v6.0.0 (ADR001V03/ADR007V03), the floor guard, backlog-reactive signal, and Monitor are always active for any elastic pool - there is no separate "automatic vs. manual" mode to choose between as in v4/v5 ([`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md) is a temporary pin over the Monitor's own output, not a mutually exclusive alternative to it).
 
 ### See Also
 

@@ -1,13 +1,13 @@
 ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png)
 
-### RingBufferDefault.PulseHeartBeat field
+### RingBufferDefault.MonitorPercentileP field
 </br>
 
 
-#### The default timeout for the buffer health checks. Also reused as the default grace period bounding a single pooled item's own `Dispose()`/`DisposeAsync()` call during shutdown or scale-down - this applies whether or not a `HeartBeat` callback is configured at all.
+#### The default percentile used by the Monitor's predictive autoscale algorithm (ADR003V03) as the demand "fair level" - p95.
 
 ```csharp
-public static readonly TimeSpan PulseHeartBeat;
+public static readonly double MonitorPercentileP;
 ```
 
 ### See Also

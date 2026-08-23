@@ -1,13 +1,13 @@
 ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png)
 
-### RingBufferDefault.PulseHeartBeat field
+### RingBufferDefault.MonitorSafetyBuffer field
 </br>
 
 
-#### The default timeout for the buffer health checks. Also reused as the default grace period bounding a single pooled item's own `Dispose()`/`DisposeAsync()` call during shutdown or scale-down - this applies whether or not a `HeartBeat` callback is configured at all.
+#### The default fractional headroom the Monitor adds on top of the percentile "fair level" (ADR003V03) - 10%.
 
 ```csharp
-public static readonly TimeSpan PulseHeartBeat;
+public static readonly double MonitorSafetyBuffer;
 ```
 
 ### See Also

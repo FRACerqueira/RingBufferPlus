@@ -14,7 +14,7 @@ public IRingBufferFixedBuilder HeartBeat(Action<RingBufferValue<T>> value,
 | parameter | description |
 | --- | --- |
 | value | The [`RingBufferValue`](../RingBufferValue-1.md). |
-| pulse | The Heart Beat Interval. Default value is 10 seconds. |
+| pulse | The Heart Beat Interval. Also reused as the grace period bounding a single pooled item's `Dispose()`/`DisposeAsync()` call during shutdown or scale-down, whether or not `HeartBeat` itself is configured. Default value is 10 seconds. |
 
 ### Return Value
 

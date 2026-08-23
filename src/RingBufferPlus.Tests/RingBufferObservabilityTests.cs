@@ -32,8 +32,7 @@ namespace RingBufferPlus.Tests
             int capacity = 2,
             int minCapacity = 1,
             int maxCapacity = 4,
-            bool autoScaleFault = false,
-            byte numberFault = 0,
+            bool elastic = false,
             TimeSpan? acquireTimeout = null)
         {
             return new RingBufferManager<int>(token)
@@ -47,8 +46,7 @@ namespace RingBufferPlus.Tests
                 SamplesBase = TimeSpan.FromSeconds(30),
                 SamplesCount = 5,
                 AcquireTimeout = acquireTimeout ?? TimeSpan.FromMilliseconds(150),
-                AutoScaleFault = autoScaleFault,
-                NumberFault = numberFault,
+                Elastic = elastic,
                 Factory = (_) => Task.FromResult(1)
             };
         }
@@ -182,8 +180,8 @@ namespace RingBufferPlus.Tests
             Assert.Equal(false, acquireActivity.GetTagItem("success"));
             Assert.Equal(true, acquireActivity.GetTagItem("cancelled"));
 
-            // No acquire.faults increment and no AutoScaleFault reaction for a caller cancellation -
-            // that counter is reserved for genuine AcquireTimeout expirations.
+            // No acquire.faults increment for a caller cancellation - that counter is reserved for
+            // genuine AcquireTimeout expirations.
             var faults = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.faults" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName));
             Assert.Empty(faults);
         }
@@ -245,7 +243,7 @@ namespace RingBufferPlus.Tests
             // proportionally to the net gap, not necessarily in one single jump to MaxCapacity
             // like the old trigger did - EvaluateBacklogReactive re-checks after every batch
             // completes, so MaxCapacity may be reached via more than one small successive batch.
-            var manager = CreateManager(bufferName, cts.Token, capacity: 2, minCapacity: 1, maxCapacity: 4, autoScaleFault: true, numberFault: 0);
+            var manager = CreateManager(bufferName, cts.Token, capacity: 2, minCapacity: 1, maxCapacity: 4, elastic: true);
             await manager.WarmupAsync();
 
             var held1 = await manager.AcquireAsync();
@@ -300,7 +298,7 @@ namespace RingBufferPlus.Tests
                 SamplesBase = TimeSpan.FromMilliseconds(1000),
                 SamplesCount = 5,
                 AcquireTimeout = TimeSpan.FromSeconds(2),
-                AutoScaleFault = true,
+                Elastic = true,
                 Factory = _ => Task.FromResult(1)
             };
             await manager.WarmupAsync();
@@ -402,7 +400,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(moved);
 
             await service.DisposeAsync();
@@ -439,7 +437,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             throwing = true;
-            var switchEx = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity));
+            var switchEx = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
             Assert.IsType<InvalidOperationException>(switchEx);
 
             await service.DisposeAsync();
@@ -510,7 +508,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             // Give the engine time to dequeue the Switch command and actually start
             // CreateItemsAsync (the factory is mid-delay) before racing it with a normal dispose.
             await Task.Delay(200);
@@ -644,7 +642,7 @@ namespace RingBufferPlus.Tests
             // backlog-reactive's own proportional sizing (ADR001V03: reacts to the net gap, not a
             // coarse tier jump), which would need several precisely-timed concurrent waiters to
             // reconstruct the same batch size reliably.
-            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(accepted);
 
             await Task.Delay(300);
@@ -699,7 +697,7 @@ namespace RingBufferPlus.Tests
             // never creates anything, so CreateItemsAsync throws instead of returning. See the
             // sibling test above for why SwitchToAsync (deterministic quantity), not backlog-
             // reactive, drives this.
-            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(accepted);
 
             await Task.Delay(300);
@@ -745,7 +743,7 @@ namespace RingBufferPlus.Tests
             var held = new List<RingBufferValue<int>>();
             for (var i = 0; i < 4; i++) held.Add(await service.AcquireAsync());
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
             Assert.False(moved, "Expected a partial (not full) scale-down given only 1 idle item.");
 
             foreach (var h in held) await h.DisposeAsync();

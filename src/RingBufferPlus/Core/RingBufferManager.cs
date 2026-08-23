@@ -106,6 +106,16 @@ namespace RingBufferPlus.Core
         private int _currentCapacity;
         private volatile bool _scaling;
 
+        // Manual pin (ADR007V03): while set in the future, a successful SwitchToAsync's own target
+        // substitutes for the Monitor's predictive output - Tick is skipped entirely (see the Tick
+        // case's own comment), the same way it already is while _scaling is true, so the Monitor
+        // neither observes nor overrides the pinned capacity for this long. Never consulted by
+        // EvaluateFloorGuard or EvaluateBacklogReactive (ADR007V03: a pin never suppresses either -
+        // both keep running on their own independent triggers, untouched by this field). Engine-
+        // thread-only, like _currentCapacity itself - only the Switch case writes it, only the Tick
+        // case reads it.
+        private DateTime? _pinExpiresAt;
+
         // Backlog-reactive signal (ADR001V03): count of callers currently blocked in
         // AcquireCoreAsync waiting for an item - mutated via Interlocked from any caller thread
         // (unlike _currentCapacity, this is not sole-owner state, just a shared counter), read by
@@ -197,9 +207,15 @@ namespace RingBufferPlus.Core
 
         public int SamplesCount { get; init; }
 
-        public bool AutoScaleFault { get; init; }
-
-        public byte NumberFault { get; init; }
+        /// <summary>
+        /// True for an elastic pool (ADR001V03/ADR007V03): the floor guard, backlog-reactive
+        /// signal, and Monitor are all unconditionally active whenever this is true, and inactive
+        /// (Monitor: not even started; backlog-reactive: gated off) when this is false - a fixed
+        /// pool has nothing to scale. There is no further "automatic vs. manual" split within an
+        /// elastic pool; <see cref="SwitchToAsync(ScaleSwitch, TimeSpan)"/> is a temporary pin over
+        /// the same always-on Monitor, not an alternative mode.
+        /// </summary>
+        public bool Elastic { get; init; }
 
         /// <summary>
         /// The Monitor's predictive autoscale algorithm parameters (ADR003V03). Defaulted here
@@ -218,13 +234,6 @@ namespace RingBufferPlus.Core
         public TimeSpan AcquireTimeout { get; init; }
 
         public bool LockWhenScaling { get; init; }
-
-        /// <summary>
-        /// True only for elastic buffers without autoscale-on-fault. Guards the escaped-cast path:
-        /// <see cref="SwitchToAsync(ScaleSwitch)"/> is not exposed at the type level otherwise (ADR007),
-        /// but a caller that casts back to <see cref="IRingBufferManualScaleService{T}"/> must not silently no-op.
-        /// </summary>
-        public bool ManualSwitchAllowed { get; init; }
 
         public ILogger? Logger { get; init; }
 
@@ -311,7 +320,7 @@ namespace RingBufferPlus.Core
                     // not consumer demand, so it must not count here either.
                     Interlocked.Increment(ref _waitingCount);
                     isWaiting = true;
-                    if (AutoScaleFault && countsTowardFaultBudget)
+                    if (Elastic && countsTowardFaultBudget)
                     {
                         _commands.Writer.TryWrite(EngineCommand.Backlog());
                     }
@@ -391,11 +400,15 @@ namespace RingBufferPlus.Core
             }
         }
 
-        public async Task<bool> SwitchToAsync(ScaleSwitch value)
+        public async Task<bool> SwitchToAsync(ScaleSwitch value, TimeSpan pinDuration)
         {
-            if (!ManualSwitchAllowed)
+            if (!Elastic)
             {
-                throw new InvalidOperationException("Manual scale switching is not available: the buffer has a fixed capacity, or autoscale-on-fault is enabled (see ADR007).");
+                throw new InvalidOperationException("Manual scale switching is not available: the buffer has a fixed capacity (see ADR007).");
+            }
+            if (pinDuration <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(pinDuration), pinDuration, "pinDuration must be greater than TimeSpan.Zero.");
             }
             ObjectDisposedException.ThrowIf(_disposed, this);
             try
@@ -404,7 +417,7 @@ namespace RingBufferPlus.Core
 
                 var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                await _commands.Writer.WriteAsync(EngineCommand.Switch(value, accepted, completion), _lifetime.Token).ConfigureAwait(false);
+                await _commands.Writer.WriteAsync(EngineCommand.Switch(value, pinDuration, accepted, completion), _lifetime.Token).ConfigureAwait(false);
 
                 // Both bounded by _lifetime.Token: if this command loses its race against disposal
                 // and is abandoned unread in the channel, this must not hang forever waiting for
@@ -697,7 +710,7 @@ namespace RingBufferPlus.Core
             {
                 _heartbeatTask = Task.Run(RunHeartbeatAsync);
             }
-            if (!_disposed && AutoScaleFault)
+            if (!_disposed && Elastic)
             {
                 _sampleTickTask = Task.Run(RunSampleTickAsync);
             }
@@ -795,6 +808,12 @@ namespace RingBufferPlus.Core
                         break;
                     }
                     cmd.Accepted?.TrySetResult(true);
+                    // Manual pin (ADR007V03): only set once a real scale is actually dispatched, not
+                    // on the already-at-target rejection above - a pin's whole purpose is holding a
+                    // capacity against the Monitor, which is moot if this call never changed
+                    // anything. Set before dispatching, not after: the pin covers the dispatched
+                    // batch's own in-flight time too, not just the moment after it resolves.
+                    _pinExpiresAt = DateTime.UtcNow + cmd.PinDuration!.Value;
                     if (target > CurrentCapacity)
                     {
                         DispatchScaleUp(target, scaleTrigger: "manual", cmd.Completion);
@@ -833,6 +852,22 @@ namespace RingBufferPlus.Core
                         // window - however long that now is, no longer just one synchronous call -
                         // would be discarded anyway.
                         break;
+                    }
+                    if (_pinExpiresAt is { } pinExpiresAt)
+                    {
+                        // Manual pin (ADR007V03): substitutes for the Monitor's own predictive output
+                        // for the pin's own duration, so Tick is skipped here too, same as while
+                        // _scaling is true and for the same reason (see above) - any sample collected
+                        // during the pin would only feed a decision that must not run yet anyway.
+                        // Floor guard and backlog-reactive are NEVER gated by this (ADR007V03: a pin
+                        // never suppresses either) - they run from their own independent triggers
+                        // (ReplaceOne, Backlog, FactoryBatchCompleted, RemovalBatchCompleted), never
+                        // from Tick, so this check cannot affect them.
+                        if (DateTime.UtcNow < pinExpiresAt)
+                        {
+                            break;
+                        }
+                        _pinExpiresAt = null;
                     }
                     ProcessTick();
                     break;
@@ -965,10 +1000,9 @@ namespace RingBufferPlus.Core
         // Backlog-reactive signal (ADR001V03): reacts to real, currently-waiting callers instead
         // of a coarse fault count, before any AcquireTimeout elapses, proportional to the actual
         // unmet demand - waiting callers minus what can already serve them (idle items). Replaces
-        // the old fault-count-based trigger entirely (removed: EngineCommandKind.Fault, _faultCount)
-        // - AutoScaleFault/NumberFault (public config) are unchanged for now, deliberately deferred
-        // to the ADR007V03 public-surface pass; AutoScaleFault still gates whether this signal is
-        // active at all, NumberFault is currently unused internally.
+        // the old fault-count-based trigger entirely (removed: EngineCommandKind.Fault, _faultCount,
+        // and, once ADR007V03's public-surface pass landed, AutoScaleAcquireFault/NumberFault too -
+        // this signal is simply always active for an elastic pool, gated only by Elastic below).
         //
         // The ADR's own formula also nets out "in-flight-creating" so overlapping backlog waves
         // never duplicate a request; here that term is always zero by construction: a batch already
@@ -980,7 +1014,7 @@ namespace RingBufferPlus.Core
         // against).
         private void EvaluateBacklogReactive()
         {
-            if (!AutoScaleFault || _scaling || CurrentCapacity >= MaxCapacity)
+            if (!Elastic || _scaling || CurrentCapacity >= MaxCapacity)
             {
                 return;
             }
@@ -1874,6 +1908,7 @@ namespace RingBufferPlus.Core
         {
             public required EngineCommandKind Kind { get; init; }
             public ScaleSwitch? Target { get; init; }
+            public TimeSpan? PinDuration { get; init; }
             public TaskCompletionSource<bool>? Accepted { get; init; }
             public TaskCompletionSource<bool>? Completion { get; init; }
             public int Quantity { get; init; }
@@ -1885,8 +1920,8 @@ namespace RingBufferPlus.Core
             public static EngineCommand Warmup(TaskCompletionSource<bool> completion) =>
                 new() { Kind = EngineCommandKind.Warmup, Completion = completion };
 
-            public static EngineCommand Switch(ScaleSwitch target, TaskCompletionSource<bool> accepted, TaskCompletionSource<bool> completion) =>
-                new() { Kind = EngineCommandKind.Switch, Target = target, Accepted = accepted, Completion = completion };
+            public static EngineCommand Switch(ScaleSwitch target, TimeSpan pinDuration, TaskCompletionSource<bool> accepted, TaskCompletionSource<bool> completion) =>
+                new() { Kind = EngineCommandKind.Switch, Target = target, PinDuration = pinDuration, Accepted = accepted, Completion = completion };
 
             public static EngineCommand Backlog() => new() { Kind = EngineCommandKind.Backlog };
 

@@ -13,11 +13,10 @@ flowchart TB
         IB["IRingBufferBuilder&lt;T&gt;"]
         IFB["IRingBufferFixedBuilder&lt;T&gt;"]
         IEB["IRingBufferElasticBuilder&lt;T&gt;"]
-        IAB["IRingBufferAutoScaleBuilder&lt;T&gt;"]
     end
 
     subgraph "Implementation (src/RingBufferPlus/Core)"
-        Builder["RingBufferBuilder&lt;T&gt;<br/>(explicit interface implementation<br/>of all 4 builder interfaces)"]
+        Builder["RingBufferBuilder&lt;T&gt;<br/>(explicit interface implementation<br/>of all 3 builder interfaces)"]
         Manager["RingBufferManager&lt;T&gt;<br/>(the engine)"]
         Decision["AutoScaleDecision<br/>(pure: Median / EvaluateScaleDown)"]
     end
@@ -32,16 +31,15 @@ flowchart TB
     RB --> IB
     IB -->|FixedCapacity| IFB
     IB -->|ElasticCapacity| IEB
-    IEB -->|AutoScaleAcquireFault| IAB
-    IFB & IEB & IAB -->|implemented by| Builder
+    IFB & IEB -->|implemented by| Builder
     Builder -->|Build / BuildWarmupAsync| Manager
     Manager -->|implements| Service
-    Manager -->|implements, only reachable<br/>from IEB, not IAB| ManualService
+    Manager -->|implements, reachable<br/>from every IEB build| ManualService
     Manager -->|uses for scale-down decisions| Decision
     Manager -->|AcquireAsync returns| Value
 ```
 
-- **`RingBufferBuilder<T>`** (`src/RingBufferPlus/Core/RingBufferBuilder.cs`) is a single class implementing all four builder interfaces via explicit interface implementation, so the same method names (`Factory`, `Logger`, …) return different interface types depending on which mode you're in — this is what makes `AutoScaleAcquireFault` permanently hide `SwitchToAsync` at compile time. See [ADR007](../adr/ADR007V02-redesign-of-the-public-fluent-api-surface.md).
+- **`RingBufferBuilder<T>`** (`src/RingBufferPlus/Core/RingBufferBuilder.cs`) is a single class implementing all three builder interfaces via explicit interface implementation, so the same method names (`Factory`, `Logger`, …) return different interface types depending on which mode you're in — this is what makes `FixedCapacity` permanently hide `SwitchToAsync` at compile time (an elastic build never hides it: since ADR007V03 there is no separate autoscale-only mode that would). See [ADR007V03](../adr/ADR007V03-redesign-of-the-public-fluent-api-surface.md).
 - **`RingBufferManager<T>`** (`src/RingBufferPlus/Core/RingBufferManager.cs`) is the only concrete implementation of `IRingBufferService<T>`/`IRingBufferManualScaleService<T>`. It owns three `System.Threading.Channels.Channel<T>`-family queues (available items, engine commands, background log messages) and a single consumer loop that is the sole writer of scale state. See [ADR001](../adr/ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
 - **`AutoScaleDecision`** (`src/RingBufferPlus/Core/AutoScaleDecision.cs`) is a pure static class — `Median(samples)` and `EvaluateScaleDown(...)` take primitive inputs and return a decision with no dependency on the engine, specifically so the autoscale algorithm can be unit-tested and benchmarked in isolation. See [ADR003](../adr/ADR003V02-median-sample-autoscaling-algorithm.md).
 - **`RingBufferValue<T>`** (`src/RingBufferPlus/RingBufferValue.cs`) is the rented-item wrapper returned by `AcquireAsync`. Disposing it (`await using`) invokes the manager's turnback callback, which either returns the item to the pool or, if `Invalidate()` was called, discards it and queues a replacement.

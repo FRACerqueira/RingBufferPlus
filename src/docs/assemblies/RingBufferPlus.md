@@ -13,11 +13,10 @@
 
 | public type | description |
 | --- | --- |
-| interface [IRingBufferAutoScaleBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferAutoScaleBuilder-1.md) | Represents a RingBufferPlus builder committed to an elastic capacity with autoscale-on-fault enabled. |
 | interface [IRingBufferBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferBuilder-1.md) | Represents the entry point to configure and build a RingBufferPlus instance. |
-| interface [IRingBufferElasticBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferElasticBuilder-1.md) | Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity, producing an [`IRingBufferManualScaleService`](./RingBufferPlus/IRingBufferManualScaleService-1.md) unless [`AutoScaleAcquireFault`](./RingBufferPlus/IRingBufferElasticBuilder-1/AutoScaleAcquireFault.md) is used. |
+| interface [IRingBufferElasticBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferElasticBuilder-1.md) | Represents a RingBufferPlus builder committed to an elastic (min/init/max) capacity, producing an [`IRingBufferManualScaleService`](./RingBufferPlus/IRingBufferManualScaleService-1.md). |
 | interface [IRingBufferFixedBuilder&lt;T&gt;](./RingBufferPlus/IRingBufferFixedBuilder-1.md) | Represents a RingBufferPlus builder committed to a fixed capacity. |
-| interface [IRingBufferManualScaleService&lt;T&gt;](./RingBufferPlus/IRingBufferManualScaleService-1.md) | Represents a RingBufferPlus service that can be manually switched between capacities. |
+| interface [IRingBufferManualScaleService&lt;T&gt;](./RingBufferPlus/IRingBufferManualScaleService-1.md) | Represents a RingBufferPlus service that can be manually pinned to a capacity. |
 | interface [IRingBufferService&lt;T&gt;](./RingBufferPlus/IRingBufferService-1.md) | Represents the commands to RingBufferPlus service. |
 | static class [RingBuffer&lt;T&gt;](./RingBufferPlus/RingBuffer-1.md) | Represents the RingBufferPlus extensions. |
 | static class [RingBufferDefault](./RingBufferPlus/RingBufferDefault.md) | Represents the default values for the ring buffer. |

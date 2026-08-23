@@ -95,7 +95,7 @@ namespace RingBufferPlus.Tests
             Assert.True(service.IsInitCapacity);
 
             // Act: already at InitCapacity, asking to switch to InitCapacity again must be a no-op.
-            var result = await service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            var result = await service.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
 
             // Assert
             Assert.False(result);
@@ -116,7 +116,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // Act
-            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             // Assert: the request is accepted immediately...
             Assert.True(accepted);
@@ -190,7 +190,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             blockFactory = true;
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             await Task.Delay(50); // let the scale-up start and block inside the factory
 
             // Act: dispose while a scale-up's factory call is still pending on the gate.
@@ -223,7 +223,7 @@ namespace RingBufferPlus.Tests
             // Act: many concurrent callers racing to request the same scale target. The engine is a
             // single sequential consumer, so this is now a deterministic guarantee, not a race
             // reproduction - see the file header note.
-            var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity))));
+            var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)))));
 
             // Assert: exactly one caller wins the race and gets the request accepted.
             Assert.Equal(1, results.Count(accepted => accepted));
@@ -386,7 +386,7 @@ namespace RingBufferPlus.Tests
             // Act & Assert: using the manual-switch mechanism after disposal must throw loudly,
             // not silently no-op (there is no longer a separate scale queue to leak - the whole
             // engine loop is gone - but the public contract must still reject post-disposal work).
-            await Assert.ThrowsAsync<ObjectDisposedException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
         }
 
         // ---------------------------------------------------------------------
@@ -481,7 +481,7 @@ namespace RingBufferPlus.Tests
 
             // Act: the scale-up's factory calls throw. Before the fix, this faulted the engine
             // permanently and every call below would then hang instead of completing.
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(switchTask, completed);
             var switchEx = await Assert.ThrowsAsync<InvalidOperationException>(() => switchTask);
@@ -543,7 +543,7 @@ namespace RingBufferPlus.Tests
 
             throwing = true;
 
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(switchTask, completed);
             var switchEx = await Assert.ThrowsAsync<TaskCanceledException>(() => switchTask);
@@ -593,7 +593,7 @@ namespace RingBufferPlus.Tests
             {
                 // Deliberately NOT using LockWhenScaling(): the unlocked path is exactly what's
                 // under test - it returns true immediately without waiting for the eventual outcome.
-                var switched = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+                var switched = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
                 Assert.True(switched);
 
                 // Give the engine loop time to actually process the Switch command and fault
@@ -656,19 +656,18 @@ namespace RingBufferPlus.Tests
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
+        public async Task ElasticAutoscale_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
         {
             // Arrange: init capacity 4, min 2 (init != min, to avoid the separate, already-known R4
-            // defect where the scale-up target formula picks a no-op when init == min), the
-            // backlog-reactive signal active (AutoScaleAcquireFault gates it now, ADR001V03 -
-            // replaces the old fault-count trigger this test originally targeted), factory throws
-            // only while "throwing" is true.
+            // defect where the scale-up target formula picks a no-op when init == min); the
+            // backlog-reactive signal is unconditionally active for any elastic pool since
+            // ADR001V03/ADR007V03 - no toggle needed (it replaces the old fault-count trigger this
+            // test originally targeted); factory throws only while "throwing" is true.
             var throwing = false;
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultTriggeredScaleThrows", null);
             var service = builder
                 .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
                 .ElasticCapacity(4, 2, 6, 1, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(0)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1131,7 +1130,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             Assert.True(moved);
             Assert.True(service.IsMaxCapacity);
@@ -1164,7 +1163,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // Partial progress is not surfaced as an exception - only "nothing at all was gained" is.
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.False(moved);
 
             // 2 of the 3 requested items were created before the 3rd call failed - capacity must
@@ -1196,13 +1195,12 @@ namespace RingBufferPlus.Tests
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_WhenInitialCapacityEqualsMinCapacity_StillScalesUp()
+        public async Task ElasticAutoscale_WhenInitialCapacityEqualsMinCapacity_StillScalesUp()
         {
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractAutoScaleInitEqualsMin", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
                 .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(0)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1317,7 +1315,6 @@ namespace RingBufferPlus.Tests
             var service = builder
                 .Factory(_ => Task.Delay(150).ContinueWith(_ => 1))
                 .ElasticCapacity(3, 2, 10, 5, TimeSpan.FromSeconds(1))
-                .AutoScaleAcquireFault(0)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1331,9 +1328,9 @@ namespace RingBufferPlus.Tests
             // Pool is empty (all 3 items in `held`) - 7 concurrent waiters trigger the backlog-
             // reactive signal (ADR001V03), growing capacity 3 -> 10, possibly via more than one
             // successive batch (it reacts proportionally to the net gap, not a coarse jump to
-            // MaxCapacity like the old fault-count trigger this test originally used).
-            // AutoScaleAcquireFault must stay enabled here (not SwitchToAsync/manual mode) because
-            // EvaluateScaleDown's own scale-down path is itself gated on it. `held` is deliberately
+            // MaxCapacity like the old fault-count trigger this test originally used). The Monitor's
+            // own scale-down path (ADR003V03) is unconditionally active for this elastic pool too
+            // (ADR001V03/ADR007V03 - no toggle to enable it). `held` is deliberately
             // NOT released yet - releasing it before the waiters are served would let some of them
             // grab those items directly, shrinking the net gap EvaluateBacklogReactive computes and
             // making capacity land short of MaxCapacity.
@@ -1424,14 +1421,14 @@ namespace RingBufferPlus.Tests
             // This posts the scale-down but (without LockWhenScaling) returns as soon as it's
             // accepted, not once the move itself finishes - so it does not, by itself, measure
             // whether the engine is stuck processing it.
-            var firstSwitchAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            var firstSwitchAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
             Assert.True(firstSwitchAccepted);
 
             // A second, independent command posted right after must not be STUCK behind the
             // first one's engine-side processing - the whole point of this test. Whether it is
             // accepted or rejected (see the class remarks above) is a genuine race, not asserted.
             var sw = Stopwatch.StartNew();
-            await service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            await service.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
             sw.Stop();
             Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(500), $"Expected the engine to process (accept or reject) the second command promptly instead of being stuck behind the first scale-down's wait for busy items - took {sw.Elapsed}.");
 
@@ -1458,7 +1455,6 @@ namespace RingBufferPlus.Tests
                 .Factory(_ => Task.FromResult(1))
                 .HeartBeat(_ => { }, TimeSpan.FromMilliseconds(100))
                 .ElasticCapacity(2, 2, 4, 5, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(0)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(100))
                 .Build();
             await service.WarmupAsync();
@@ -1604,13 +1600,12 @@ namespace RingBufferPlus.Tests
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_WithMinimumLegalInitialCapacity_StillScalesDownFromMaxCapacity()
+        public async Task ElasticAutoscale_WithMinimumLegalInitialCapacity_StillScalesDownFromMaxCapacity()
         {
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMinimumInitialCapacityScaleDown", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
                 .ElasticCapacity(2, 2, 6, 3, TimeSpan.FromMilliseconds(600))
-                .AutoScaleAcquireFault(1)
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
@@ -1623,9 +1618,9 @@ namespace RingBufferPlus.Tests
 
             // Pool is empty - 4 concurrent waiters trigger the backlog-reactive signal
             // (ADR001V03), growing capacity 2 -> 6 (MaxCapacity), possibly via more than one
-            // successive batch. AutoScaleAcquireFault must stay enabled (not SwitchToAsync/manual
-            // mode) because EvaluateScaleDown's own scale-down path - what R18 is actually about -
-            // is itself gated on it.
+            // successive batch. The Monitor's own scale-down path (what R18 is actually about,
+            // originally against the now-retired median algorithm) is unconditionally active for
+            // this elastic pool - no toggle to enable it (ADR001V03/ADR007V03).
             var waiterTasks = Enumerable.Range(0, 4).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
             var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
@@ -1703,7 +1698,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             // Default tolerance (0) preserves the original behavior: only the 1 item attempted
             // before the failure (call 3) is kept - calls 5 and 6 are never even attempted.
@@ -1760,7 +1755,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
             scalingUp = true;
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             Assert.False(moved);
             // The first wave (2 concurrent attempts) always runs; at most a small, bounded number
@@ -1804,7 +1799,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // 8 more items are needed (2 -> 10), well beyond the concurrency bound of 3.
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             Assert.True(moved);
             Assert.Equal(10, service.CurrentCapacity);
@@ -1847,7 +1842,7 @@ namespace RingBufferPlus.Tests
             // Dispatches a scale-up whose single factory call takes ~2s. No LockWhenScaling here:
             // SwitchToAsync only awaits Accepted, returning as soon as the batch is dispatched -
             // not when it finishes.
-            var firstAccepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var firstAccepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(firstAccepted);
 
             // Act: immediately issue a second Switch request while the first batch is still
@@ -1856,7 +1851,7 @@ namespace RingBufferPlus.Tests
             // not even be looked at until the ~2s factory delay elapsed. With Fábrica decoupled,
             // the engine is free to dequeue and reject it immediately (_scaling is true).
             var sw = Stopwatch.StartNew();
-            var secondAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            var secondAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
             sw.Stop();
 
             Assert.False(secondAccepted);
@@ -2009,7 +2004,7 @@ namespace RingBufferPlus.Tests
             // contract as SwitchToAsync_WhenFactoryThrowsDuringScaleUp_PropagatesRealException_AndEngineSurvives.
             for (var i = 0; i < 3; i++)
             {
-                var ex = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity));
+                var ex = await Record.ExceptionAsync(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
                 Assert.IsType<InvalidOperationException>(ex);
                 Assert.True(service.IsInitCapacity);
             }
@@ -2018,7 +2013,7 @@ namespace RingBufferPlus.Tests
             // healthy; this scale-up's own deadline (quantity 1 * FactoryTimeout 300ms = 300ms) is
             // deliberately shorter than that backoff.
             factoryShouldFail = false;
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             Assert.True(moved, "Expected the scale-up to still get a real attempt despite an elevated backoff streak longer than its own deadline.");
             Assert.True(service.IsMaxCapacity);
@@ -2052,7 +2047,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var moved = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             // The batch did not fully complete (call 4 never made it in), but 3 of the 4 requested
             // items (calls 3, 5, 6) must still have been created - not just the 1 attempted before
@@ -2088,7 +2083,7 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             // Give the engine time to dequeue the Switch command and actually start CreateItemsAsync
             // (the factory is mid-delay) before racing it with a normal dispose.
             await Task.Delay(200);
@@ -2185,7 +2180,6 @@ namespace RingBufferPlus.Tests
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
                 .ElasticCapacity(8, 2, 20, 4, TimeSpan.FromMilliseconds(800))
-                .AutoScaleAcquireFault(1)
                 .BuildWarmupAsync();
 
             var held = new List<RingBufferValue<int>>();
@@ -2251,7 +2245,6 @@ namespace RingBufferPlus.Tests
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
                 .ElasticCapacity(4, 2, 8, 4, TimeSpan.FromMilliseconds(800))
-                .AutoScaleAcquireFault(1)
                 .BuildWarmupAsync();
 
             Assert.Equal(4, service.CurrentCapacity);
@@ -2281,7 +2274,7 @@ namespace RingBufferPlus.Tests
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task AutoScaleAcquireFault_PartialScaleUpLandsOffTier_StillEventuallyScalesDown()
+        public async Task ElasticAutoscale_PartialScaleUpLandsOffTier_StillEventuallyScalesDown()
         {
             // Backlog-reactive (ADR001V03) is self-driving: an unserved waiting caller keeps
             // re-triggering EvaluateBacklogReactive (via the FactoryBatchCompleted follow-up call)
@@ -2313,7 +2306,6 @@ namespace RingBufferPlus.Tests
                     return Task.FromResult(1);
                 }, TimeSpan.FromSeconds(5), maxConsecutiveFactoryFailures: 1)
                 .ElasticCapacity(4, 2, 20, 3, TimeSpan.FromMilliseconds(600))
-                .AutoScaleAcquireFault(1)
                 .AcquireTimeout(TimeSpan.FromSeconds(1))
                 .Build();
             await service.WarmupAsync();
@@ -2325,9 +2317,9 @@ namespace RingBufferPlus.Tests
             }
 
             // Pool is empty - 2 concurrent waiters trigger the backlog-reactive signal
-            // (ADR001V03). AutoScaleAcquireFault must stay enabled (not SwitchToAsync/manual mode)
-            // because this test's own off-tier scale-down check depends on EvaluateScaleDown's
-            // scale-down path, which is itself gated on it.
+            // (ADR001V03). This test's own off-tier scale-down check depends on the Monitor's
+            // scale-down path (ADR003V03), unconditionally active for this elastic pool - no toggle
+            // to enable it (ADR001V03/ADR007V03).
             var waiterTasks = Enumerable.Range(0, 2).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
             // Capacity must both move away from its initial value (a genuine failure happened and
@@ -2900,13 +2892,13 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // Scale down 4 -> 2: RemoveItemsAsync pulls 2 idle items whose Dispose() hangs forever.
-            var switchTask = service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            var switchTask = service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
             var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(switchTask, completed);
 
             // The engine must still be alive for further work - a second, unrelated command must
             // not be stuck behind the first scale-down's hung item disposals.
-            var secondSwitchTask = service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            var secondSwitchTask = service.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
             var secondCompleted = await Task.WhenAny(secondSwitchTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(secondSwitchTask, secondCompleted);
 
@@ -2951,7 +2943,7 @@ namespace RingBufferPlus.Tests
             // well before the engine even starts, let alone finishes, dequeuing/disposing the 2
             // idle items this scale-down needs to remove (both HangingDisposeProbe instances,
             // never released within this test's own window).
-            _ = service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            _ = service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
             // Give the engine a moment to actually dequeue and start processing the Switch command
             // before racing it with the unrelated ReplaceOne below.
             await Task.Delay(50);
@@ -3304,10 +3296,200 @@ namespace RingBufferPlus.Tests
                 .ElasticCapacity(2, 2, 4)
                 .BuildWarmupAsync();
 
-            _ = service.SwitchToAsync(ScaleSwitch.MaxCapacity); // triggers CreateItemsAsync(quantity: 2)
+            _ = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)); // triggers CreateItemsAsync(quantity: 2)
 
             var completed = await Task.WhenAny(cancelledPromptly.Task, Task.Delay(TimeSpan.FromSeconds(1)));
             Assert.Same(cancelledPromptly.Task, completed);
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // Manual pin (ADR007V03): SwitchToAsync substitutes for the Monitor's own predictive
+        // output for a required, explicit duration - it never suppresses the floor guard or the
+        // backlog-reactive signal, which keep acting on their own independent triggers regardless.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WhilePinIsActive_SuppressesTheMonitorsOwnScaleDown()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinSuppressesMonitor", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 2, 10, 3, TimeSpan.FromMilliseconds(300))
+                .BuildWarmupAsync();
+
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMilliseconds(900));
+            Assert.True(accepted);
+            // SwitchToAsync itself only waits for the dispatch to be ACCEPTED, not for the
+            // background scale-up batch to actually finish - poll instead of asserting immediately.
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (service.CurrentCapacity < 10 && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(10);
+            }
+            Assert.Equal(10, service.CurrentCapacity);
+
+            // All 10 items sit idle with nothing ever acquiring them - with a 100ms tick interval
+            // (300ms baseTimer / 3 samples), the Monitor's own near-zero demand window would
+            // already have dispatched a scale-down toward MinCapacity well within this delay if
+            // the pin above were not suppressing it (see the sibling _AfterPinExpires_ test, which
+            // proves this same setup does scale down once the pin is gone).
+            await Task.Delay(500);
+            Assert.Equal(10, service.CurrentCapacity);
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_AfterPinExpires_MonitorResumesAndScalesDown()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinExpiresMonitorResumes", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 2, 10, 3, TimeSpan.FromMilliseconds(300))
+                .BuildWarmupAsync();
+
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMilliseconds(400));
+            Assert.True(accepted);
+            // SwitchToAsync itself only waits for the dispatch to be ACCEPTED, not for the
+            // background scale-up batch to actually finish - poll instead of asserting immediately.
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(2);
+            while (service.CurrentCapacity < 10 && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(10);
+            }
+            Assert.Equal(10, service.CurrentCapacity);
+
+            // Past the pin's own duration, the Monitor needs at least two more tick intervals
+            // (100ms each) before it can act: the sliding window was emptied when the pin's own
+            // scale-up batch completed and stays empty for the pin's entire duration (Tick is
+            // skipped outright while pinned), so the first tick after expiry only adds the first
+            // sample back (ProcessTick's own "fewer than 2 samples" early return) - only the tick
+            // after that has enough to compute a target and dispatch.
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (service.CurrentCapacity == 10 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(50);
+            }
+            Assert.True(service.CurrentCapacity < 10, $"Expected the Monitor to resume and scale back down once the pin expired. Actual: {service.CurrentCapacity}.");
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task FloorGuard_DuringAnActivePin_StillRestoresCapacity()
+        {
+            var shouldFail = false;
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardDuringPin", null);
+            var service = builder
+                .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .Build();
+            await service.WarmupAsync();
+
+            // Pin to MaxCapacity for far longer than this whole test takes - ADR007V03: the floor
+            // guard must still act while a pin is active, since it is never suppressed by one.
+            var pinSetAt = DateTime.UtcNow;
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(10));
+            Assert.True(accepted);
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity < 6 && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(6, service.CurrentCapacity);
+
+            // Drive capacity below MinCapacity (2) while the pin above is still active: invalidate
+            // idle items one at a time while the factory is failing, so each ReplaceOne's own
+            // replacement attempt fails and capacity only ever shrinks. Polling between each one
+            // keeps this from racing ahead of the engine's own async ReplaceOne processing.
+            shouldFail = true;
+            for (var i = 0; i < 5; i++)
+            {
+                var before = service.CurrentCapacity;
+                var acquired = await service.AcquireAsync();
+                acquired.Invalidate();
+                await acquired.DisposeAsync();
+                var shrinkDeadline = DateTime.UtcNow.AddSeconds(2);
+                while (service.CurrentCapacity >= before && DateTime.UtcNow < shrinkDeadline)
+                {
+                    await Task.Delay(20);
+                }
+            }
+            Assert.True(service.CurrentCapacity < 2, $"Expected capacity to breach MinCapacity. Actual: {service.CurrentCapacity}.");
+
+            shouldFail = false;
+            var healDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity < 2 && DateTime.UtcNow < healDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(2, service.CurrentCapacity);
+            Assert.True(DateTime.UtcNow - pinSetAt < TimeSpan.FromSeconds(10), "Test took too long relative to the pin's own duration - it may have already expired, weakening this test's proof that the floor guard is not gated by it.");
+
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task BacklogReactive_DuringAnActivePin_StillScalesUp()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBacklogDuringPin", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(4, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .AcquireTimeout(TimeSpan.FromMilliseconds(500))
+                .Build();
+            await service.WarmupAsync();
+
+            // Pin down to MinCapacity for far longer than this whole test takes - ADR007V03:
+            // backlog-reactive must still act while this pin is active, since it is never
+            // suppressed by one.
+            var pinSetAt = DateTime.UtcNow;
+            var accepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromSeconds(10));
+            Assert.True(accepted);
+            var scaleDownDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity > 2 && DateTime.UtcNow < scaleDownDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.Equal(2, service.CurrentCapacity);
+
+            var held1 = await service.AcquireAsync();
+            var held2 = await service.AcquireAsync();
+            var waiterTasks = Enumerable.Range(0, 3).Select(_ => service.AcquireAsync().AsTask()).ToArray();
+
+            var scaleUpDeadline = DateTime.UtcNow.AddSeconds(3);
+            while (service.CurrentCapacity == 2 && DateTime.UtcNow < scaleUpDeadline)
+            {
+                await Task.Delay(20);
+            }
+            Assert.True(service.CurrentCapacity > 2, $"Expected the backlog-reactive signal to scale up despite an active pin. Actual: {service.CurrentCapacity}.");
+            Assert.True(DateTime.UtcNow - pinSetAt < TimeSpan.FromSeconds(10), "Test took too long relative to the pin's own duration - it may have already expired, weakening this test's proof that backlog-reactive is not gated by it.");
+
+            await Task.WhenAll(waiterTasks);
+            await held1.DisposeAsync();
+            await held2.DisposeAsync();
+            await service.DisposeAsync();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_WithNonPositivePinDuration_ThrowsArgumentOutOfRange()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinDurationValidation", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 2, 6)
+                .Build();
+            await service.WarmupAsync();
+
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.Zero));
+            await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(-1)));
 
             await service.DisposeAsync();
         }

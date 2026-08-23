@@ -7,16 +7,18 @@ using Microsoft.Extensions.Logging;
 
 namespace RingBufferPlus.Core
 {
-    // One mutable builder backs all four public views (ADR007): the mode-switch methods
-    // (FixedCapacity/ElasticCapacity/AutoScaleAcquireFault) narrow which interface the caller
-    // sees next, so the compiler enforces mutual exclusivity even though a single instance
-    // implements everything. Explicit interface implementation is required wherever the same
-    // method name returns a different interface type depending on which view is in scope.
+    // One mutable builder backs all three public views (ADR007): the mode-switch methods
+    // (FixedCapacity/ElasticCapacity) narrow which interface the caller sees next, so the
+    // compiler enforces mutual exclusivity even though a single instance implements everything.
+    // Since ADR007V03, ElasticCapacity is the only elastic view - the floor guard, backlog-
+    // reactive signal, and Monitor are unconditionally active for it, so there is no further
+    // automatic-vs-manual split (the former IRingBufferAutoScaleBuilder<T>/AutoScaleAcquireFault
+    // pair is gone). Explicit interface implementation is required wherever the same method name
+    // returns a different interface type depending on which view is in scope.
     internal sealed class RingBufferBuilder<T> :
         IRingBufferBuilder<T>,
         IRingBufferFixedBuilder<T>,
-        IRingBufferElasticBuilder<T>,
-        IRingBufferAutoScaleBuilder<T>
+        IRingBufferElasticBuilder<T>
     {
         #region Fields
 
@@ -27,8 +29,6 @@ namespace RingBufferPlus.Core
         private int _maxCapacity;
         private int _sampleUnit;
         private bool _elastic;
-        private bool _autoScaleFault;
-        private byte _numberFault;
         private bool _backgroundLogger;
         private bool _lockWhenScaling;
 
@@ -166,38 +166,11 @@ namespace RingBufferPlus.Core
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.LockWhenScaling(bool value) { SetLockWhenScaling(value); return this; }
-
-        IRingBufferAutoScaleBuilder<T> IRingBufferElasticBuilder<T>.AutoScaleAcquireFault(byte numberOfFaults)
-        {
-            _autoScaleFault = true;
-            _numberFault = numberOfFaults;
-            return this;
-        }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.MonitorTuning(double percentileP, double safetyBuffer, double horizon, int deadband) { SetMonitorTuning(percentileP, safetyBuffer, horizon, deadband); return this; }
 
         IRingBufferManualScaleService<T> IRingBufferElasticBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
 
         async Task<IRingBufferManualScaleService<T>> IRingBufferElasticBuilder<T>.BuildWarmupAsync(CancellationToken cancellation)
-        {
-            var srv = BuildCore(cancellation);
-            await srv.WarmupAsync(cancellation).ConfigureAwait(false);
-            return srv;
-        }
-
-        #endregion
-
-        #region IRingBufferAutoScaleBuilder<T>
-
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
-        IRingBufferAutoScaleBuilder<T> IRingBufferAutoScaleBuilder<T>.MonitorTuning(double percentileP, double safetyBuffer, double horizon, int deadband) { SetMonitorTuning(percentileP, safetyBuffer, horizon, deadband); return this; }
-
-        IRingBufferService<T> IRingBufferAutoScaleBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
-
-        async Task<IRingBufferService<T>> IRingBufferAutoScaleBuilder<T>.BuildWarmupAsync(CancellationToken cancellation)
         {
             var srv = BuildCore(cancellation);
             await srv.WarmupAsync(cancellation).ConfigureAwait(false);
@@ -224,15 +197,13 @@ namespace RingBufferPlus.Core
                 PulseHeartBeat = _pulseHeartBeat,
                 SamplesBase = _samplebasetime,
                 SamplesCount = _sampleUnit,
-                AutoScaleFault = _autoScaleFault,
-                NumberFault = _numberFault,
+                Elastic = _elastic,
                 MonitorPercentileP = _monitorPercentileP,
                 MonitorSafetyBuffer = _monitorSafetyBuffer,
                 MonitorHorizon = _monitorHorizon,
                 MonitorDeadband = _monitorDeadband,
                 AcquireTimeout = _acquireTimeout,
                 LockWhenScaling = _lockWhenScaling,
-                ManualSwitchAllowed = _elastic && !_autoScaleFault,
                 Logger = _logger,
                 BackgroundLogger = _backgroundLogger,
                 ErrorHandler = _errorHandler,

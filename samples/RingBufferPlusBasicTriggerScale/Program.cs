@@ -36,7 +36,6 @@ namespace RingBufferPlusBasicTriggerScale
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
                 .AcquireTimeout(TimeSpan.FromMilliseconds(500))
                 .ElasticCapacity(3, 2, 4, 50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(0)
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");

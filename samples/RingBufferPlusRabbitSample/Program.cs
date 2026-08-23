@@ -65,13 +65,12 @@ namespace RingBufferPlusRabbitSample
             //create connection
             connectionRabbit = await connectionFactory!.CreateConnectionAsync(cts.Token);
 
-            //create ring buffer with autoscale-on-fault
+            //create ring buffer with autoscale (always on for an elastic pool since v6.0.0)
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
                 .Logger(hostApp.Services.GetService<ILogger<Program>>())
                 .BackgroundLogger()
                 .Factory((token) => ChannelFactory(token)!)
                 .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault()
                 .BuildWarmupAsync(cts.Token);
 
             ReportCapacity(rb);

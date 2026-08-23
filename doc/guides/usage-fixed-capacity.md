@@ -32,7 +32,7 @@ await using (var buffer = await rb.AcquireAsync(cancellation))
 await rb.DisposeAsync();
 ```
 
-`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MinCapacity`/`MaxCapacity`/`AutoScaleAcquireFault`/`LockWhenScaling` are not offered as options: they would be meaningless for a fixed pool.
+`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MinCapacity`/`MaxCapacity`/`MonitorTuning`/`LockWhenScaling`/`SwitchToAsync` are not offered as options: they would be meaningless for a fixed pool.
 
 ## What happens internally
 

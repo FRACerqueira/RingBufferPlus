@@ -50,14 +50,13 @@ namespace RingBufferPlusApiSample.Controllers
         public async Task<ActionResult> ChangeCapacity(ScaleSwitch scaleUnit)
         {
             // This buffer is registered as the base IRingBufferService<int> (ADR007: manual switching
-            // is not part of that type). This buffer was built via ElasticCapacity without
-            // AutoScaleAcquireFault, so it does support manual switching at runtime - opt back in
-            // explicitly rather than casting blindly.
+            // is not part of that type). Every elastic buffer supports it at runtime regardless
+            // (ADR001V03/ADR007V03) - opt back in explicitly rather than casting blindly.
             if (_ringBufferService is not IRingBufferManualScaleService<int> manualScaleService)
             {
                 return BadRequest("Manual scale switching is not available for this buffer.");
             }
-            await manualScaleService.SwitchToAsync(scaleUnit);
+            await manualScaleService.SwitchToAsync(scaleUnit, TimeSpan.FromMinutes(1));
             return Ok(_ringBufferService.CurrentCapacity);
         }
     }

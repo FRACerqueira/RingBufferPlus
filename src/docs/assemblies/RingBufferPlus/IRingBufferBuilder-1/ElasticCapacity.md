@@ -4,11 +4,12 @@
 </br>
 
 
-#### Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *initialCapacity* and *maxCapacity* via [`SwitchToAsync`](../IRingBufferManualScaleService-1/SwitchToAsync.md).
+#### Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *initialCapacity* and *maxCapacity* via !:IRingBufferManualScaleService&lt;T&gt;.SwitchToAsync(ScaleSwitch).
 
 ```csharp
 public IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int minCapacity, 
-    int maxCapacity, int? numberSamples = null, TimeSpan? baseTimer = default)
+    int maxCapacity, int? numberSamples = null, TimeSpan? baseTimer = default, 
+    int? maxConcurrentFactoryCalls = null)
 ```
 
 | parameter | description |
@@ -16,8 +17,9 @@ public IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int min
 | initialCapacity | Initial/startup capacity. Value must be greater than or equal to *minCapacity* and less than or equal to *maxCapacity*. |
 | minCapacity | The minimal buffer capacity. Value must be greater than or equal to 2. |
 | maxCapacity | The maximum buffer capacity. Value must be greater than or equal to *minCapacity*. |
-| numberSamples | Number of samples collected. Default is 100 (one sample per 300ms). |
-| baseTimer | The TimeSpan interval to collect samples. Default value is 30 seconds (one sample per 300ms). |
+| numberSamples | Number of samples in the Monitor's sliding window. Default is 100 (one sample per 300ms). The window is only cleared when an actual scale operation fires (gated by [`MonitorTuning`](../IRingBufferElasticBuilder-1/MonitorTuning.md)'s `deadband`) - during a genuinely steady period (demand stable, every computed target landing inside the deadband), nothing clears it, so it fills to *numberSamples* and slides. The window's real-time span is always exactly *baseTimer* regardless of this parameter's value (the per-sample interval is *baseTimer* divided by this parameter, so the two cancel out) - see *baseTimer* for the adaptation-horizon trade-off this parameter does NOT control. Raising or lowering this value alone only changes how many discrete points make up that same time span - fewer points means a coarser, noisier percentile/trend estimate; more points means a smoother one at the cost of one Channel write (a Tick command) per sample. |
+| baseTimer | The TimeSpan interval to collect samples - and, since the Monitor's sliding window (*numberSamples*) always spans exactly this much real time regardless of how many samples it holds, this IS the adaptation horizon: at the default (30 seconds), a demand drop that arrives during a genuinely steady period (see *numberSamples*) can take roughly this long before the Monitor's own slow layer reacts to it - the buffer's higher-priority signals (floor guard, backlog-reactive) already cover the more urgent cases (an actual waiting caller, a floor breach) far faster than this, regardless of this value. Shortening this value is the only way to shrink that horizon; doing so makes every Tick fire more often too unless *numberSamples* is lowered proportionally to keep the per-sample interval unchanged. Default value is 30 seconds (one sample per 300ms). |
+| maxConcurrentFactoryCalls | Maximum number of concurrent factory calls when creating several items at once (the initial warmup fill, or a scale-up). Bounds a large batch from flooding a struggling-but-technically-accepting downstream with simultaneous creation attempts (e.g. database/broker connections) - see ADR001V03. Default is 4. |
 
 ### Return Value
 
@@ -25,7 +27,7 @@ An instance of [`IRingBufferElasticBuilder`](../IRingBufferElasticBuilder-1.md).
 
 ### Remarks
 
-*baseTimer*/*numberSamples* configure the scale-down sampling cadence only (used by autoscale-on-fault's evaluation) - they do not bound a scale-up or scale-down operation's own deadline. A scale-up's deadline is `quantity * FactoryTimeout` (see [`Factory`](./Factory.md)); a scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever capacity was actually gained or removed is kept.
+*baseTimer*/*numberSamples* configure the Monitor's sampling cadence and sliding-window size (ADR003V03) - the Monitor is always active for an elastic pool (ADR001V03/ADR007V03) and can dispatch either a scale-up or a scale-down (see [`MonitorTuning`](../IRingBufferElasticBuilder-1/MonitorTuning.md) for the rest of that algorithm's parameters). They do not bound a scale-up or scale-down operation's own deadline. A scale-up's deadline is `quantity * FactoryTimeout` (see [`Factory`](./Factory.md)); a scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever capacity was actually gained or removed is kept.
 
 ### See Also
 

@@ -36,7 +36,7 @@ static bool IsHealthy(int current) => true; // your real health check goes here
 
 `OnError` is where an exception thrown by `MyHeartBeat` itself, or a heartbeat that blocks past its `pulse` budget, is routed — see "What happens internally" below. Without it (and without `Logger`), those failures are swallowed silently.
 
-`HeartBeat` is available from every builder mode (`FixedCapacity`, `ElasticCapacity`, `AutoScaleAcquireFault`) — it is orthogonal to capacity mode.
+`HeartBeat` is available from every builder mode (`FixedCapacity`, `ElasticCapacity`) — it is orthogonal to capacity mode.
 
 ## What happens internally
 

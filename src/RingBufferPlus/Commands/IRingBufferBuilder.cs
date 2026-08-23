@@ -105,9 +105,9 @@ namespace RingBufferPlus
         /// </summary>
         /// <remarks>
         /// <paramref name="baseTimer"/>/<paramref name="numberSamples"/> configure the Monitor's sampling
-        /// cadence and sliding-window size (ADR003V03) - used by autoscale-on-fault's slow-layer evaluation,
-        /// which since v6.0.0 can dispatch either a scale-up or a scale-down (see
-        /// <see cref="IRingBufferAutoScaleBuilder{T}.MonitorTuning(double, double, double, int)"/> for the
+        /// cadence and sliding-window size (ADR003V03) - the Monitor is always active for an elastic pool
+        /// (ADR001V03/ADR007V03) and can dispatch either a scale-up or a scale-down (see
+        /// <see cref="IRingBufferElasticBuilder{T}.MonitorTuning(double, double, double, int)"/> for the
         /// rest of that algorithm's parameters). They do not bound a scale-up or scale-down operation's own
         /// deadline. A scale-up's deadline is <c>quantity * FactoryTimeout</c> (see
         /// <see cref="IRingBufferBuilder{T}.Factory(Func{CancellationToken, Task{T}}, TimeSpan?, byte)"/>); a
@@ -119,7 +119,7 @@ namespace RingBufferPlus
         /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
         /// <param name="numberSamples">Number of samples in the Monitor's sliding window. Default is 100 (one
         /// sample per 300ms). The window is only cleared when an actual scale operation fires (gated by
-        /// <see cref="IRingBufferAutoScaleBuilder{T}.MonitorTuning(double, double, double, int)"/>'s
+        /// <see cref="IRingBufferElasticBuilder{T}.MonitorTuning(double, double, double, int)"/>'s
         /// <c>deadband</c>) - during a genuinely steady period (demand stable, every computed target landing
         /// inside the deadband), nothing clears it, so it fills to <paramref name="numberSamples"/> and slides.
         /// The window's real-time span is always exactly <paramref name="baseTimer"/> regardless of this

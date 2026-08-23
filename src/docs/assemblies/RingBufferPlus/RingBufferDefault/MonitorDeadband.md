@@ -1,13 +1,13 @@
 ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png)
 
-### RingBufferDefault.PulseHeartBeat field
+### RingBufferDefault.MonitorDeadband field
 </br>
 
 
-#### The default timeout for the buffer health checks. Also reused as the default grace period bounding a single pooled item's own `Dispose()`/`DisposeAsync()` call during shutdown or scale-down - this applies whether or not a `HeartBeat` callback is configured at all.
+#### The default deadband: the Monitor's computed target must differ from the current capacity by at least this many items before a scale operation is dispatched (ADR003V03) - without it, the algorithm was measured to oscillate heavily under flat-but-noisy demand.
 
 ```csharp
-public static readonly TimeSpan PulseHeartBeat;
+public static readonly int MonitorDeadband;
 ```
 
 ### See Also

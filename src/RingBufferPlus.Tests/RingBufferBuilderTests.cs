@@ -69,19 +69,19 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public async Task ElasticCapacity_WithAutoScaleAcquireFault_HidesManualSwitchAtCompileTime_AndThrowsIfCastBack()
+        public async Task FixedCapacity_HidesManualSwitchAtCompileTime_AndThrowsIfCastBack()
         {
             IRingBufferService<int> service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
-                .AutoScaleAcquireFault(3)
+                .FixedCapacity(5)
                 .Build();
 
             // ADR007: Build() above statically returns IRingBufferService<int> - SwitchToAsync is not
-            // in scope at compile time. A caller that casts back to IRingBufferManualScaleService<int>
-            // must not silently no-op; it must fail loudly (see the advisor note on the escaped-cast path).
+            // in scope at compile time for a fixed-capacity buffer (it has nothing to scale). A caller
+            // that casts back to IRingBufferManualScaleService<int> must not silently no-op; it must
+            // fail loudly (see the advisor note on the escaped-cast path).
             var escaped = Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
 
             await service.DisposeAsync();
         }
@@ -99,22 +99,6 @@ namespace RingBufferPlus.Tests
 
             var errorHandlerfield = service.GetType().GetProperty("ErrorHandler")!;
             Assert.NotNull(errorHandlerfield.GetValue(service));
-        }
-
-        [Fact]
-        public void AutoScaleAcquireFault_ShouldSetAutoScaleFault()
-        {
-            var service = CreateBuilder()
-                .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
-                .AutoScaleAcquireFault(5)
-                .Build();
-
-            var autoScaleFaultField = service.GetType().GetProperty("AutoScaleFault")!;
-            var numberFaultField = service.GetType().GetProperty("NumberFault")!;
-
-            Assert.True((bool)autoScaleFaultField.GetValue(service)!);
-            Assert.Equal((byte)5, (byte)numberFaultField.GetValue(service)!);
         }
 
         [Fact]
@@ -303,7 +287,7 @@ namespace RingBufferPlus.Tests
         [InlineData(1.1)]
         public void ValidateBuild_ShouldThrowException_WhenPercentilePIsOutOfRange(double percentileP)
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(percentileP: percentileP);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).MonitorTuning(percentileP: percentileP);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -311,7 +295,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenSafetyBufferIsNegative()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(safetyBuffer: -0.01);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).MonitorTuning(safetyBuffer: -0.01);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -319,7 +303,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenHorizonIsNegative()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(horizon: -1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).MonitorTuning(horizon: -1);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -327,7 +311,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenDeadbandIsNegative()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(deadband: -1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).MonitorTuning(deadband: -1);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -335,29 +319,12 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void MonitorTuning_WithValidValues_BuildsSuccessfully()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).AutoScaleAcquireFault().MonitorTuning(0.90, 0.20, 3, 1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10).MonitorTuning(0.90, 0.20, 3, 1);
 
             var service = builder.Build();
 
             Assert.NotNull(service);
         }
 
-        // ---------------------------------------------------------------------
-        // ADR007 V02 (2026-08-20): LockWhenScaling was removed from the autoscale
-        // builder - it was a documented no-op that had already misled a real caller
-        // (see TODO/relatorio-viabilidade-ringbufferplus-v5.md, findings U-06/U-10).
-        // A call site chaining .LockWhenScaling() after .AutoScaleAcquireFault() is
-        // now a compile error, which cannot be expressed as a runtime assertion - this
-        // guards the same intent by asserting the member itself is gone, so it cannot
-        // be silently reintroduced.
-        // ---------------------------------------------------------------------
-
-        [Fact]
-        public void IRingBufferAutoScaleBuilder_DoesNotDeclare_LockWhenScaling()
-        {
-            var method = typeof(IRingBufferAutoScaleBuilder<int>).GetMethod("LockWhenScaling");
-
-            Assert.Null(method);
-        }
     }
 }

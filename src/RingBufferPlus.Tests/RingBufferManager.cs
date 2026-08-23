@@ -32,8 +32,7 @@ namespace RingBufferPlus.Tests
                 PulseHeartBeat = TimeSpan.FromSeconds(1),
                 SamplesBase = TimeSpan.FromSeconds(1),
                 SamplesCount = 5,
-                AutoScaleFault = true,
-                NumberFault = 3,
+                Elastic = true,
                 AcquireTimeout = TimeSpan.FromSeconds(1),
                 Logger = _loggerMock.Object,
                 BackgroundLogger = true,
@@ -87,7 +86,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // Act
-            await service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
 
             // Assert
             Assert.True(service.IsMinCapacity);
@@ -108,7 +107,7 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
 
             // Act
-            await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             // Assert
             Assert.True(service.IsMaxCapacity);
@@ -127,10 +126,10 @@ namespace RingBufferPlus.Tests
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
-            await service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
 
             // Act
-            await service.SwitchToAsync(ScaleSwitch.InitCapacity);
+            await service.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
 
             // Assert
             Assert.True(service.IsInitCapacity);
