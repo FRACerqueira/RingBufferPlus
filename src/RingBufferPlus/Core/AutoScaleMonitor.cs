@@ -14,7 +14,7 @@ namespace RingBufferPlus.Core
     // over-provisioning, and oscillation numbers across four synthetic scenarios) behind this
     // formula and its defaults.
     //
-    // Wired into RingBufferManager's engine loop via ProcessTickAsync (the Monitor role, ADR001V03)
+    // Wired into RingBufferManager's engine loop via ProcessTick (the Monitor role, ADR001V03)
     // - fed CurrentCapacity minus idle plus _waitingCount as its demand samples, never an
     // idle-derived proxy: idle is clamped at zero and therefore blind to unmet demand, which would
     // silently flatten the regression slope under sustained saturation - exactly the plateau where
@@ -24,7 +24,7 @@ namespace RingBufferPlus.Core
     // Deadband and window-reset-while-a-reactive-episode-is-in-flight (also validated by the same
     // simulation, and part of ADR003V03's decision) are call-site concerns, not part of this
     // calculation - see the simulation's SimulatePercentile, which applies both around its call to
-    // EvaluateTarget rather than inside it. ProcessTickAsync implements both.
+    // EvaluateTarget rather than inside it. ProcessTick implements both.
     internal static class AutoScaleMonitor
     {
         /// <summary>

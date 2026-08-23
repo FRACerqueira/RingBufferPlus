@@ -54,7 +54,7 @@ namespace RingBufferPlus.Core
         private readonly Task _engineTask;
 
         // Monitor's sliding demand window (ADR001V03/ADR003V03) - bounded to SamplesCount, engine-
-        // thread-only (only ProcessTickAsync and the scale-completion cleanup paths touch it).
+        // thread-only (only ProcessTick and the scale-completion cleanup paths touch it).
         private readonly List<int> _samples = [];
 
         // Monitor (ADR001V03/ADR003V03): whether the LAST TICK THAT ACTUALLY RAN observed demand
@@ -82,7 +82,7 @@ namespace RingBufferPlus.Core
         // see numberSamples' own XML doc for what that means at the shipped default. This field and
         // the pre-existing per-scale-op clears only shorten that lag when an actual burst/backlog
         // episode (not a quiet steady period) precedes the drop. Engine-thread-only, like
-        // _currentCapacity itself - only ProcessTickAsync reads or writes it.
+        // _currentCapacity itself - only ProcessTick reads or writes it.
         private bool _monitorActive;
 
         private readonly Meter _meter = new("RingBufferPlus");
@@ -137,6 +137,19 @@ namespace RingBufferPlus.Core
         // that batch has nothing observable left to do - TryWrite is its last real action, so an
         // overwritten reference is never "still doing work" that DisposeAsync then fails to wait for.
         private Task? _factoryBatchTask;
+
+        // Remoção (ADR001V03): the currently in-flight background scale-down disposal batch
+        // (DispatchScaleDown), if any - same shape, same guarantees, and same "only one batch (of
+        // either kind) in flight at a time via _scaling" invariant as _factoryBatchTask above.
+        // Isolated from the engine thread for the same reason Fábrica's creation execution already
+        // is: Dispose()/DisposeAsync() on a real connection can block on I/O just as a factory call
+        // can, and before this role existed, RemoveItemsAsync's own disposal (bounded by
+        // PulseHeartBeat, the pre-existing N1/N2 grace-period mitigation) still ran inline on the
+        // engine's single-consumer thread - so even a bounded hang there still delayed every other
+        // command (a floor-guard replenishment, an unrelated ReplaceOne, ...) queued behind it for
+        // up to that same grace period. DisposeAsync awaits this the same way, right alongside
+        // _factoryBatchTask.
+        private Task? _removalBatchTask;
 
         // Fábrica (ADR001V03): a simple growing backoff after consecutive genuine factory
         // failures - self-protection against hammering a broken factory, not a circuit-breaker
@@ -511,17 +524,30 @@ namespace RingBufferPlus.Core
                 }
 
                 // The engine loop has now fully stopped (awaited above as part of `pending`), so
-                // _factoryBatchTask can no longer be reassigned by a new DispatchScaleUp call - safe
-                // to read here. A Fábrica batch still in flight at shutdown must still be waited on:
-                // without this, its telemetry (activity/meter, recorded inside the batch itself -
-                // see DispatchScaleUp) could be recorded after this method has already returned, or
-                // its caller's Completion never resolved at all.
+                // _factoryBatchTask/_removalBatchTask can no longer be reassigned by a new
+                // DispatchScaleUp/DispatchScaleDown call - safe to read both here. A Fábrica or
+                // Remoção batch still in flight at shutdown must still be waited on: without this,
+                // its telemetry (activity/meter, recorded inside the batch itself) could be
+                // recorded after this method has already returned, or its caller's Completion
+                // never resolved at all.
                 var factoryBatchTask = _factoryBatchTask;
                 if (factoryBatchTask is not null)
                 {
                     try
                     {
                         await factoryBatchTask.ConfigureAwait(false);
+                    }
+                    catch (Exception ex)
+                    {
+                        LogError(ex);
+                    }
+                }
+                var removalBatchTask = _removalBatchTask;
+                if (removalBatchTask is not null)
+                {
+                    try
+                    {
+                        await removalBatchTask.ConfigureAwait(false);
                     }
                     catch (Exception ex)
                     {
@@ -579,8 +605,8 @@ namespace RingBufferPlus.Core
                 // leaking every remaining item plus _lifetime/_meter/_activitySource below -
                 // permanently, since _disposeGuard makes a second DisposeAsync() call a silent
                 // no-op. This is the exact same failure mode R2 already fixed for the warmup-
-                // exception trigger; DisposeItemsDefensivelyAsync (already used by RemoveItemsAsync)
-                // is the same fix applied to this trigger.
+                // exception trigger; DisposeItemsDefensivelyAsync (also used by DispatchScaleDown's
+                // Remoção batch) is the same fix applied to this trigger.
                 await DisposeItemsDefensivelyAsync(remainingItems).ConfigureAwait(false);
 
                 _lifetime.Dispose();
@@ -749,14 +775,19 @@ namespace RingBufferPlus.Core
 
                 case EngineCommandKind.Switch:
                     var target = ResolveTarget(cmd.Target!.Value);
-                    // _scaling here means "a Fábrica batch dispatched by a previous Switch or
-                    // backlog-reactive evaluation is still in flight" (ADR001V03): with that batch
-                    // now running in the background
-                    // instead of blocking this loop, a second overlapping dispatch could each read a
-                    // stale CurrentCapacity and independently add their own `created` on top of it,
-                    // overshooting MaxCapacity. Rejecting here keeps "at most one batch at a time"
-                    // and preserves the existing at-most-one-winner contract for concurrent callers
-                    // requesting the same target (advisor review).
+                    // _scaling here means "a Fábrica-or-Remoção batch dispatched by a previous
+                    // Switch, backlog-reactive, floor-guard, or Monitor evaluation is still in
+                    // flight" (ADR001V03): with that batch now running in the background instead of
+                    // blocking this loop, a second overlapping dispatch (of either kind) could each
+                    // read a stale CurrentCapacity and independently mutate it on top of that stale
+                    // read, over- or under-shooting [MinCapacity, MaxCapacity]. Rejecting here keeps
+                    // "at most one batch (create or remove) at a time" and preserves the existing
+                    // at-most-one-winner contract for concurrent callers requesting the same target
+                    // (advisor review). A caller-visible consequence once Remoção's own disposal can
+                    // take real time (was already true for Fábrica's factory calls): a second Switch
+                    // arriving while a scale-down's disposal is still in flight is now rejected for
+                    // as long as that disposal takes (bounded by PulseHeartBeat), not just for the
+                    // near-instant dequeue that used to be the entire scale-down operation.
                     if (target == CurrentCapacity || _scaling)
                     {
                         cmd.Accepted?.TrySetResult(false);
@@ -767,16 +798,10 @@ namespace RingBufferPlus.Core
                     if (target > CurrentCapacity)
                     {
                         DispatchScaleUp(target, scaleTrigger: "manual", cmd.Completion);
-                        break;
                     }
-                    try
+                    else
                     {
-                        var moved = await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "manual").ConfigureAwait(false);
-                        cmd.Completion?.TrySetResult(moved);
-                    }
-                    catch (Exception ex)
-                    {
-                        cmd.Completion?.TrySetException(ex);
+                        DispatchScaleDown(target, scaleTrigger: "manual", cmd.Completion);
                     }
                     break;
 
@@ -800,15 +825,16 @@ namespace RingBufferPlus.Core
                         // and this command being dequeued could otherwise let the Monitor's own
                         // scale-up or scale-down run here while another batch is still in flight, see
                         // the Switch case above for why that risks an overshoot). This also skips
-                        // ProcessTickAsync's own _samples.Add for this tick, not just the scale
-                        // decision - but that has no observable effect: the FactoryBatchCompleted
-                        // case unconditionally clears _samples once the in-flight batch finishes (F6,
-                        // same as MoveToCapacityAsync's own finally block already did), so any sample
-                        // collected during the batch's whole in-flight window - however long that
-                        // now is, no longer just one synchronous call - would be discarded anyway.
+                        // ProcessTick's own _samples.Add for this tick, not just the scale
+                        // decision - but that has no observable effect: FactoryBatchCompleted/
+                        // RemovalBatchCompleted unconditionally clear _samples once the in-flight
+                        // batch finishes (F6, same as MoveToCapacityAsync's own finally block
+                        // already did), so any sample collected during the batch's whole in-flight
+                        // window - however long that now is, no longer just one synchronous call -
+                        // would be discarded anyway.
                         break;
                     }
-                    await ProcessTickAsync().ConfigureAwait(false);
+                    ProcessTick();
                     break;
 
                 case EngineCommandKind.FactoryBatchCompleted:
@@ -865,6 +891,37 @@ namespace RingBufferPlus.Core
                     // must not have to wait for their own AcquireTimeout to be addressed - see
                     // EvaluateBacklogReactive's own remarks for why netting-out in-flight-creating
                     // reduces to this deferred re-check under that one-at-a-time rule.
+                    EvaluateBacklogReactive();
+                    break;
+
+                case EngineCommandKind.RemovalBatchCompleted:
+                    // Telemetry (activity/meter) was already finalized inside DispatchScaleDown's
+                    // own background task, unconditionally - see its comment for why. This case
+                    // only applies the sole-owner state changes: capacity, _scaling, and the
+                    // caller's completion. Same ordering rationale as FactoryBatchCompleted:
+                    // _scaling clears BEFORE the caller's completion resolves, so a sequential
+                    // caller (LockWhenScaling) never observes it still true once its own await
+                    // returns.
+                    _scaling = false;
+                    if (cmd.Removed > 0)
+                    {
+                        // Confirmed completion, not the request (ADR001V03) - the items were
+                        // already gone from _availableItems the instant DispatchScaleDown dequeued
+                        // them, but CurrentCapacity only reflects that once Remoção's own disposal
+                        // has actually finished, same "only the sole owner mutates, only on
+                        // confirmed completion" rule Fábrica's own capacity increment follows.
+                        Volatile.Write(ref _currentCapacity, CurrentCapacity - cmd.Removed);
+                    }
+                    var scaledDown = cmd.Removed == cmd.Quantity;
+                    _samples.Clear();
+                    // No Failure/exception path here, unlike FactoryBatchCompleted: a scale-down
+                    // can only ever fully or partially succeed (DispatchScaleDown's own comment),
+                    // never genuinely fail.
+                    cmd.Completion?.TrySetResult(scaledDown);
+                    // Same floor-guard-first-then-backlog re-check as FactoryBatchCompleted, for
+                    // the same reason: either signal may have been skipped (both check _scaling
+                    // before dispatching) while this removal's disposal was in flight.
+                    EvaluateFloorGuard();
                     EvaluateBacklogReactive();
                     break;
             }
@@ -960,7 +1017,8 @@ namespace RingBufferPlus.Core
         // the engine thread - later, when the batch's own FactoryBatchCompleted command is processed
         // - preserving the Orquestrador's sole-owner guarantee. Used only by Switch (manual),
         // EvaluateBacklogReactive (backlog), and EvaluateFloorGuard (floor) scale-up requests;
-        // Warmup and Tick's scale-down still call MoveToCapacityAsync directly, unchanged.
+        // Warmup's own scale-up still calls MoveToCapacityAsync directly, unchanged - see its own
+        // remarks for why. Tick's scale-down uses DispatchScaleDown below, the Remoção counterpart.
         private void DispatchScaleUp(int target, string scaleTrigger, TaskCompletionSource<bool>? completion)
         {
             var current = CurrentCapacity;
@@ -1033,6 +1091,92 @@ namespace RingBufferPlus.Core
             });
         }
 
+        // Remoção (ADR001V03): dispatches a scale-down's disposal of already-idle items onto the
+        // thread pool instead of awaiting it inline, so the engine's single consumer thread stays
+        // free to process other commands while the batch is in flight - the same isolation
+        // DispatchScaleUp already gives Fábrica, for the same underlying reason
+        // (Dispose()/DisposeAsync() on a real connection can block on I/O just as a factory call
+        // can). Per the ADR's own wording, the Orquestrador dequeues here, on the engine thread,
+        // BEFORE handing off to the background task - Remoção itself never touches the channel.
+        // TryRead is fast/non-blocking (never awaits) regardless of how many items are actually
+        // idle right now (opportunistic, partial-if-needed, same "keep whatever progress was made"
+        // spirit already applied to scale-up) - only the disposal that follows can ever block, and
+        // that is exactly what gets isolated. _currentCapacity is still mutated only on the engine
+        // thread - later, when the batch's own RemovalBatchCompleted command is processed - per the
+        // ADR's "confirmed completion, never the request" rule, same as Fábrica's own capacity
+        // increment. Used by Switch (manual) and Tick's Monitor-driven (auto) scale-down requests.
+        private void DispatchScaleDown(int target, string scaleTrigger, TaskCompletionSource<bool>? completion)
+        {
+            var current = CurrentCapacity;
+            var quantity = current - target;
+            _scaling = true;
+
+            var removed = new List<T>(quantity);
+            while (removed.Count < quantity && _availableItems.Reader.TryRead(out var item))
+            {
+                removed.Add(item);
+            }
+
+            var activity = _activitySource.StartActivity("RingBufferPlus.Scale");
+            activity?.SetTag("buffer.name", Name);
+            activity?.SetTag("direction", "down");
+            activity?.SetTag("trigger", scaleTrigger);
+            var sw = Stopwatch.StartNew();
+            LogMessage($"Starting ScaleDown {quantity}.");
+
+            _removalBatchTask = Task.Run(async () =>
+            {
+                if (removed.Count > 0)
+                {
+                    await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
+                }
+                sw.Stop();
+                LogMessage("End ScaleDown.");
+
+                // Telemetry (activity/meter) is finalized here, unconditionally, same reasoning as
+                // DispatchScaleUp's own comment: independent, thread-safe instrumentation, not
+                // sole-owner state, must still be reported even if the manager is disposed before
+                // this batch finishes.
+                //
+                // Scale-down is different in kind from scale-up, not just degree (Round 7,
+                // shutdown-vs-genuine-failure sweep, preserved from MoveToCapacityAsync's own
+                // retired scale-down branch): the dequeue above never observes any token and
+                // disposal never throws (per-item failures are already swallowed by
+                // DisposeItemsDefensivelyAsync, F19) - a scale-down can only ever fully succeed or
+                // partially succeed ("not enough idle items were available right now," entirely by
+                // design). There is no cancellation path and no genuine-failure path to distinguish
+                // here at all, so `!scaledDown` must never be reported as ActivityStatusCode.Error -
+                // it would misrepresent this normal, expected outcome as a fault. "cancelled" is
+                // still always emitted (false) to preserve the existing tag contract every scale
+                // operation carries, not just the ones where it can actually be true.
+                var scaledDown = removed.Count == quantity;
+                activity?.SetStatus(ActivityStatusCode.Ok);
+                activity?.SetTag("cancelled", false);
+                activity?.Dispose();
+                _scaleOperations.Add(1,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("direction", "down"),
+                    new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("success", scaledDown),
+                    new KeyValuePair<string, object?>("cancelled", false));
+                _scaleDuration.Record(sw.Elapsed.TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("direction", "down"),
+                    new KeyValuePair<string, object?>("success", scaledDown),
+                    new KeyValuePair<string, object?>("cancelled", false));
+
+                var posted = _commands.Writer.TryWrite(EngineCommand.RemovalBatchCompleted(quantity, removed.Count, completion));
+                if (!posted)
+                {
+                    // The manager was disposed while this batch was in flight - the engine loop is
+                    // gone, so nothing will ever apply the capacity mutation or clear _scaling.
+                    // Resolve the caller (if any) directly instead of leaving it hanging forever;
+                    // capacity itself is moot at this point (the buffer is shutting down).
+                    completion?.TrySetResult(scaledDown);
+                }
+            });
+        }
+
         // Monitor (ADR001V03's lowest-priority signal; ADR003V03's algorithm): a sliding-window
         // percentile + safety buffer "fair level", adjusted by a linear-regression trend projected
         // a configurable horizon ahead, clamped to [MinCapacity, MaxCapacity] - replaces the old
@@ -1050,16 +1194,18 @@ namespace RingBufferPlus.Core
         // genuinely steady period (no scale op at all, deadband absorbing every small drift) still
         // lets the window grow to SamplesCount before demand next moves - a real, accepted
         // trade-off of the shipped defaults, not something this field or the pre-existing
-        // per-scale-op clears (MoveToCapacityAsync/FactoryBatchCompleted) prevent.
+        // per-scale-op clears (MoveToCapacityAsync/FactoryBatchCompleted/RemovalBatchCompleted)
+        // prevent.
         //
         // Otherwise, this tick's demand joins the sliding window (bounded to SamplesCount,
         // evaluated every tick once at least 2 samples exist - not collected into one fixed batch
         // like the old median algorithm was) and the resulting target is compared against
         // CurrentCapacity: a change smaller than MonitorDeadband is ignored (measured to cut
         // oscillation under flat-but-noisy demand from 48 reversals in 300 ticks to 1); a larger
-        // increase dispatches a background scale-up (DispatchScaleUp, same as backlog/floor/
-        // manual); a larger decrease scales down inline, same as before.
-        private async Task ProcessTickAsync()
+        // increase or decrease dispatches a background batch (DispatchScaleUp/DispatchScaleDown,
+        // same as backlog/floor/manual) - this method has no async work of its own left once
+        // Remoção moved scale-down's own execution off the engine thread too.
+        private void ProcessTick()
         {
             var idle = _availableItems.Reader.Count;
             var demand = CurrentCapacity - idle + Volatile.Read(ref _waitingCount);
@@ -1107,11 +1253,7 @@ namespace RingBufferPlus.Core
             }
             else
             {
-                // No try/catch here (Round 7, shutdown-vs-genuine-failure sweep, preserved from the
-                // old median algorithm): a scale-down can never throw (RemoveItemsAsync never
-                // observes a token and never throws, R6; per-item dispose failures are already
-                // swallowed by DisposeItemsDefensivelyAsync, F19).
-                await MoveToCapacityAsync(target, hasTimeout: true, _lifetime.Token, scaleTrigger: "auto").ConfigureAwait(false);
+                DispatchScaleDown(target, scaleTrigger: "auto", completion: null);
             }
         }
 
@@ -1122,70 +1264,33 @@ namespace RingBufferPlus.Core
             _ => Capacity
         };
 
-        private async Task<bool> MoveToCapacityAsync(int target, bool hasTimeout, CancellationToken token, string? scaleTrigger = null)
+        // Warmup's only remaining use of this method (Remoção, ADR001V03): once Switch's and
+        // Tick's scale-down paths moved to DispatchScaleDown, and both their scale-up paths had
+        // already moved to DispatchScaleUp, this method's sole surviving caller is Warmup - always
+        // a scale-up (CurrentCapacity starts at 0, Capacity is always >= 2), always with no
+        // scaleTrigger (the initial fill is not a "scale operation" the scale.* metrics describe,
+        // see the class remarks). The scale-down branch, the telemetry block, and the
+        // genuine-failure bookkeeping that only ever fed that (now-dead-by-construction, scaleTrigger
+        // is never passed) telemetry were removed with it - not simplified defensively, since
+        // nothing can reach them anymore.
+        private async Task<bool> MoveToCapacityAsync(int target, bool hasTimeout, CancellationToken token)
         {
             var current = CurrentCapacity;
             if (target == current) return true;
 
-            var direction = target > current ? "up" : "down";
-            using var activity = scaleTrigger is null ? null : _activitySource.StartActivity("RingBufferPlus.Scale");
-            activity?.SetTag("buffer.name", Name);
-            activity?.SetTag("direction", direction);
-            activity?.SetTag("trigger", scaleTrigger);
-            var sw = scaleTrigger is null ? null : Stopwatch.StartNew();
-
             _scaling = true;
-            var ok = false;
-            // Set only by the scale-up branch, when a genuine (non-cancellation) factory failure
-            // happened somewhere in the batch even though it also made partial progress - see the
-            // cancelledByShutdown computation below (Round 5, Observabilidade, finding O7).
-            var hadGenuineFailure = false;
             try
             {
-                if (target > current)
+                var quantity = target - current;
+                LogMessage($"Starting ScaleUp {quantity}.");
+                var (created, _) = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
+                LogMessage("End ScaleUp.");
+                var ok = created == quantity;
+                // A partial scale-up still gained real, usable capacity - advance by however many
+                // items were actually created, not just on hitting the full target.
+                if (created > 0)
                 {
-                    var quantity = target - current;
-                    LogMessage($"Starting ScaleUp {quantity}.");
-                    int created;
-                    try
-                    {
-                        (created, hadGenuineFailure) = await CreateItemsAsync(quantity, hasTimeout, token).ConfigureAwait(false);
-                    }
-                    catch (Exception)
-                    {
-                        // O7-residual (Round 6, Resiliência): CreateItemsAsync's own throw path
-                        // (zero items created, every attempt failed for a real reason) skips the
-                        // tuple return entirely, so hadGenuineFailure would otherwise stay at its
-                        // default false here - reopening the exact masking O7 fixed, just via
-                        // CreateItemsAsync's other exit path. Always a genuine failure at this
-                        // point: CreateItemsAsync only ever throws its own lastFailure, which its
-                        // two per-item catches already keep free of ordinary cancellation (R15).
-                        hadGenuineFailure = true;
-                        throw;
-                    }
-                    LogMessage("End ScaleUp.");
-                    ok = created == quantity;
-                    // A partial scale-up still gained real, usable capacity - advance by however
-                    // many items were actually created, not just on hitting the full target.
-                    if (created > 0)
-                    {
-                        Volatile.Write(ref _currentCapacity, current + created);
-                    }
-                }
-                else
-                {
-                    var quantity = current - target;
-                    LogMessage($"Starting ScaleDown {quantity}.");
-                    var removed = await RemoveItemsAsync(quantity).ConfigureAwait(false);
-                    LogMessage("End ScaleDown.");
-                    ok = removed == quantity;
-                    // A partial scale-down still reduced real capacity (R6) - advance by however
-                    // many items were actually removed, not just on hitting the full target. Same
-                    // "keep whatever progress was made" spirit already applied to scale-up (R5/P1#8).
-                    if (removed > 0)
-                    {
-                        Volatile.Write(ref _currentCapacity, current - removed);
-                    }
+                    Volatile.Write(ref _currentCapacity, current + created);
                 }
                 return ok;
             }
@@ -1196,48 +1301,6 @@ namespace RingBufferPlus.Core
                 // they describe the pre-scale capacity, not the one the buffer has now. The next
                 // scale-down decision must be based on a fresh window sampled after this point.
                 _samples.Clear();
-                if (scaleTrigger is not null)
-                {
-                    // `ok` also reflects a scale attempt that threw (it stays false, set only on the
-                    // success path above) - so a failed or timed-out operation is never recorded
-                    // identically to a successful one. But `!ok` alone conflates a genuine factory
-                    // failure/timeout with an ordinary DisposeAsync() racing this operation (the
-                    // same distinction R15/F15/R17/R18 already make for logs - Round 4,
-                    // Observabilidade, finding O1) - token is always _lifetime.Token for every
-                    // caller of this method that passes a scaleTrigger, so this check is exactly
-                    // that same "was this shutdown, not failure" test. `!hadGenuineFailure` closes
-                    // a gap in that same test (Round 5, finding O7): a batch can make partial
-                    // progress despite a real per-item failure, and then have its still-not-
-                    // attempted items cancelled by an ordinary shutdown moments later - without this
-                    // check, that real failure would be masked entirely, reported as "just a
-                    // shutdown" with no trace it happened.
-                    //
-                    // Scale-down is different in kind, not just degree (Round 7, shutdown-vs-
-                    // genuine-failure sweep): RemoveItemsAsync never observes any token and never
-                    // throws (R6) - a scale-down can only ever fully succeed or partially succeed
-                    // ("not enough idle items right now," entirely by design). There is no
-                    // cancellation path and no genuine-failure path to distinguish here at all, so
-                    // `!ok` on a scale-down must never be reported as ActivityStatusCode.Error - it
-                    // would misrepresent R6's own normal, expected outcome as a fault, contradicting
-                    // usage-observability.md's own documented contract ("Error only on a genuine
-                    // failed/timed-out attempt"). `success=false` alone (already correctly set
-                    // below regardless of direction) still signals "didn't fully reach target."
-                    var cancelledByShutdown = direction == "down" ? false : !ok && token.IsCancellationRequested && !hadGenuineFailure;
-                    var statusOk = direction == "down" || ok || cancelledByShutdown;
-                    activity?.SetStatus(statusOk ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
-                    activity?.SetTag("cancelled", cancelledByShutdown);
-                    _scaleOperations.Add(1,
-                        new KeyValuePair<string, object?>("buffer.name", Name),
-                        new KeyValuePair<string, object?>("direction", direction),
-                        new KeyValuePair<string, object?>("trigger", scaleTrigger),
-                        new KeyValuePair<string, object?>("success", ok),
-                        new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
-                    _scaleDuration.Record(sw!.Elapsed.TotalSeconds,
-                        new KeyValuePair<string, object?>("buffer.name", Name),
-                        new KeyValuePair<string, object?>("direction", direction),
-                        new KeyValuePair<string, object?>("success", ok),
-                        new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
-                }
             }
         }
 
@@ -1408,12 +1471,15 @@ namespace RingBufferPlus.Core
             // bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
             // (PulseHeartBeat, F16). Both callers of this method depend on it never hanging:
             // DisposeAsync()'s own drain loop (N1, a hang there just delays/blocks shutdown
-            // itself) and RemoveItemsAsync (N2, far worse - it runs on the single-consumer
-            // engine's own thread during a scale-down, so a hang there stalled every other
-            // command, including the wait DisposeAsync() itself has on _engineTask, forever).
-            // PulseHeartBeat is reused as the grace period here too, same "can't cancel external
-            // code, so stop waiting instead" precedent F16 already established for the heartbeat
-            // case.
+            // itself) and, at the time N2 was found, a scale-down's own removal - which ran
+            // inline on the single-consumer engine's own thread back then, so a hang there
+            // stalled every other command until this bound gave up on it. Remoção (ADR001V03)
+            // has since moved that call onto DispatchScaleDown's own background task, so this
+            // bound no longer protects the engine thread for that caller specifically - it now
+            // only bounds how long that background batch itself waits before giving up on a
+            // still-hanging item. PulseHeartBeat is reused as the grace period here too, same
+            // "can't cancel external code, so stop waiting instead" precedent F16 already
+            // established for the heartbeat case.
             //
             // Round 8 (Estabilidade F29 + Observabilidade): two gaps in the fix above. (1) a plain
             // synchronous IDisposable.Dispose() blocks inline before any await point exists for
@@ -1456,26 +1522,6 @@ namespace RingBufferPlus.Core
                 // disposed, nor escape and kill the engine loop.
                 LogError(disposeEx);
             }
-        }
-
-        private async Task<int> RemoveItemsAsync(int quantity)
-        {
-            var removed = new List<T>(quantity);
-            // Opportunistic (R6): take only whatever is already idle right now via a
-            // non-blocking TryRead loop - never wait for busy items to be returned. The engine is
-            // a single serial consumer (ADR001), so blocking here to wait for capacity to free up
-            // would stall every other command (Backlog, another Switch, ReplaceOne, Tick) for as
-            // long as that wait takes. A partial reduction is fine - MoveToCapacityAsync advances
-            // _currentCapacity by whatever was actually removed either way.
-            while (removed.Count < quantity && _availableItems.Reader.TryRead(out var item))
-            {
-                removed.Add(item);
-            }
-            if (removed.Count > 0)
-            {
-                await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
-            }
-            return removed.Count;
         }
 
         private async Task CreateSingleReplacementAsync()
@@ -1690,7 +1736,7 @@ namespace RingBufferPlus.Core
                     // single serial consumer, so a Tick written now would just queue up behind the
                     // in-flight scale and get processed the instant it frees up - a burst of
                     // near-duplicate post-scale samples, not a time-spread window. _scaling is
-                    // read here (its only reader) instead of in ProcessTickAsync, where it was
+                    // read here (its only reader) instead of in ProcessTick, where it was
                     // always already false by the time a queued Tick got processed.
                     if (!_scaling)
                     {
@@ -1822,7 +1868,7 @@ namespace RingBufferPlus.Core
 
         #endregion
 
-        private enum EngineCommandKind { Warmup, Switch, ReplaceOne, Tick, FactoryBatchCompleted, Backlog }
+        private enum EngineCommandKind { Warmup, Switch, ReplaceOne, Tick, FactoryBatchCompleted, RemovalBatchCompleted, Backlog }
 
         private sealed record EngineCommand
         {
@@ -1832,6 +1878,7 @@ namespace RingBufferPlus.Core
             public TaskCompletionSource<bool>? Completion { get; init; }
             public int Quantity { get; init; }
             public int Created { get; init; }
+            public int Removed { get; init; }
             public Exception? Failure { get; init; }
             public string? ScaleTrigger { get; init; }
 
@@ -1857,6 +1904,15 @@ namespace RingBufferPlus.Core
                     Failure = failure,
                     Completion = completion,
                     ScaleTrigger = scaleTrigger,
+                };
+
+            public static EngineCommand RemovalBatchCompleted(int quantity, int removed, TaskCompletionSource<bool>? completion) =>
+                new()
+                {
+                    Kind = EngineCommandKind.RemovalBatchCompleted,
+                    Quantity = quantity,
+                    Removed = removed,
+                    Completion = completion,
                 };
         }
     }

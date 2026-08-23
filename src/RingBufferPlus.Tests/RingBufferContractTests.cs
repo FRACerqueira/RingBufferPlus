@@ -1387,6 +1387,19 @@ namespace RingBufferPlus.Tests
         // applied to scale-up (R5/P1#8), instead of blocking every other command (Fault, another
         // Switch, ReplaceOne) behind a wait bounded by SamplesBase. See
         // TODO/relatorio-viabilidade-ringbufferplus-v5.md, R6.
+        //
+        // Remoção (ADR001V03) update: whether the second Switch below is accepted or rejected is
+        // now a genuine race, not asserted either way - a caller-visible consequence documented on
+        // the Switch case itself. Before Remoção, a scale-down's own removal was a single
+        // synchronous step (dequeue only, R6's own "never wait for busy items" already made it
+        // near-instant for int items specifically), so _scaling reliably cleared before this second
+        // command was even posted. After Remoção, EVERY scale-down (regardless of item type) goes
+        // through the same dispatch-then-confirm-on-completion cycle Fábrica's scale-up already
+        // used - for int items the background batch is still near-instant, but whether it wins the
+        // race against this second command's own processing is exact scheduling, observed to go
+        // either way across repeated full-suite runs. What stays deterministic, and is what this
+        // test actually asserts, is that the engine processes the second command promptly either
+        // way, instead of being stuck behind the first scale-down's wait for busy items.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1414,15 +1427,13 @@ namespace RingBufferPlus.Tests
             var firstSwitchAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity);
             Assert.True(firstSwitchAccepted);
 
-            // A second, independent command posted right after must not be stuck behind the
-            // first one's engine-side processing. Under the bug, the engine blocks inside the
-            // first scale-down waiting for a 3rd item to free up, so this second command's own
-            // Accepted signal (resolved only once the engine reaches it) is delayed by roughly
-            // the first operation's full SamplesBase-bound wait/timeout (2s here).
+            // A second, independent command posted right after must not be STUCK behind the
+            // first one's engine-side processing - the whole point of this test. Whether it is
+            // accepted or rejected (see the class remarks above) is a genuine race, not asserted.
             var sw = Stopwatch.StartNew();
             await service.SwitchToAsync(ScaleSwitch.InitCapacity);
             sw.Stop();
-            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(500), $"Expected the engine to process the second command promptly instead of being stuck behind the first scale-down's wait for busy items - took {sw.Elapsed}.");
+            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(500), $"Expected the engine to process (accept or reject) the second command promptly instead of being stuck behind the first scale-down's wait for busy items - took {sw.Elapsed}.");
 
             foreach (var value in held)
             {
@@ -2903,6 +2914,71 @@ namespace RingBufferPlus.Tests
             var disposeTask = service.DisposeAsync().AsTask();
             var disposeCompleted = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(disposeTask, disposeCompleted);
+        }
+
+        // ---------------------------------------------------------------------
+        // Remoção (ADR001V03): the test above proves the engine survives a hung scale-down disposal
+        // within DisposeAsync()'s own drain (already true before this role existed, thanks to the
+        // pre-existing PulseHeartBeat grace-period bound, N1/N2). What it does NOT prove is that the
+        // engine stays FREE while that grace period is still being waited out - a scale-down's
+        // disposal ran INLINE on the engine's own single-consumer thread before this role isolated
+        // it, so an entirely unrelated command (ReplaceOne, gated by nothing scale-related) queued
+        // right behind a hung scale-down still had to wait out the full grace period before the
+        // engine could even dequeue it. This test races a ReplaceOne against a scale-down whose
+        // disposal never releases within the test's own window, and asserts the replacement's own
+        // factory call - genuinely unrelated to the scale-down - happens promptly instead of being
+        // stuck behind it.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleDown_WhenDisposalHangs_StillLetsAnUnrelatedReplaceOneRunPromptly()
+        {
+            using var releaseHang = new ManualResetEventSlim();
+            var callCount = 0;
+            IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractScaleDownDisposalDoesNotBlockReplaceOne", null);
+            var service = await builder
+                .Factory(_ =>
+                {
+                    Interlocked.Increment(ref callCount);
+                    return Task.FromResult(new HangingDisposeProbe(releaseHang));
+                })
+                .ElasticCapacity(4, 2, 4, 1, TimeSpan.FromSeconds(30))
+                .BuildWarmupAsync();
+            Assert.Equal(4, Volatile.Read(ref callCount));
+
+            // Fire-and-forget: without LockWhenScaling, this returns as soon as it's accepted -
+            // well before the engine even starts, let alone finishes, dequeuing/disposing the 2
+            // idle items this scale-down needs to remove (both HangingDisposeProbe instances,
+            // never released within this test's own window).
+            _ = service.SwitchToAsync(ScaleSwitch.MinCapacity);
+            // Give the engine a moment to actually dequeue and start processing the Switch command
+            // before racing it with the unrelated ReplaceOne below.
+            await Task.Delay(50);
+
+            var acquired = await service.AcquireAsync();
+            var sw = Stopwatch.StartNew();
+            acquired.Invalidate();
+            // Deliberately NOT awaited: TurnbackAsync's own Invalidate branch posts ReplaceOne to
+            // the engine BEFORE awaiting the old (also-hanging) item's own DisposeAsync() - so the
+            // caller's own await on that call is itself bound by that same hang, a separate,
+            // already-covered concern (see the DisposeAsync_WhenAnIdleItemsDisposeHangsForever_...
+            // tests) unrelated to what this test measures. Only the ENGINE's own processing of the
+            // already-posted ReplaceOne command is under test here.
+            var oldItemDisposeTask = acquired.DisposeAsync().AsTask();
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (Volatile.Read(ref callCount) < 5 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(10);
+            }
+            sw.Stop();
+            Assert.Equal(5, Volatile.Read(ref callCount));
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1), $"Expected the unrelated ReplaceOne's own factory call to happen promptly instead of being stuck behind the scale-down's own hung-disposal grace period (PulseHeartBeat default, 10s). Actual: {sw.Elapsed}.");
+
+            releaseHang.Set();
+            await oldItemDisposeTask;
+            await service.DisposeAsync();
         }
 
         // ---------------------------------------------------------------------
