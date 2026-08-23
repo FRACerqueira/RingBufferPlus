@@ -1355,6 +1355,24 @@ namespace RingBufferPlus.Core
             // an exact, ordered meaning (this is a single shared counter, not per-lane) - the same
             // "simple, not a circuit-breaker" approximation the ADR calls for, and identical to the
             // original sequential behavior whenever MaxConcurrentFactoryCalls is 1.
+            //
+            // Known, deliberately kept trade-off between these two defaults (revisited 2026-08-23,
+            // no change made): all `quantity` attempts below are launched at once, so the first
+            // MaxConcurrentFactoryCalls (default 4) of them always acquire a gate slot and run to
+            // real completion before any of them can report a failure and set giveUp - a fully
+            // broken factory therefore still gets up to 4 genuine attempts per batch, not 1, despite
+            // MaxConsecutiveFactoryFailures's default of 0 ("give up on the first failure"). Already
+            // covered by this method's own XML doc on maxConsecutiveFactoryFailures and exercised by
+            // ScaleUp_WithElevatedBackoffStreak_StillGetsARealAttempt_WithinItsOwnTightDeadline's own
+            // "first wave always runs" test. Considered and rejected: lowering
+            // MaxConcurrentFactoryCalls's default to 1 would restore an exact "N consecutive"
+            // guarantee, but defeats the whole reason Fábrica is concurrent by default (serializes
+            // every ordinary healthy-factory batch, not just the pathological broken-factory case);
+            // raising MaxConsecutiveFactoryFailures's default would make the number honest but moves
+            // the wrong direction - more tolerance means MORE wasted attempts against a broken
+            // factory, not fewer. Kept as-is: the real cost is bounded (wall-clock stays ~1x
+            // FactoryTimeout regardless, since the wave is concurrent, not sequential) and already
+            // documented; no default change addresses it without a worse trade-off elsewhere.
             async Task AttemptAsync()
             {
                 lock (stateLock) { if (giveUp) return; }
