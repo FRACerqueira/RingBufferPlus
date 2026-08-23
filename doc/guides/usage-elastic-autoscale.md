@@ -13,7 +13,7 @@ var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
     .AcquireTimeout(TimeSpan.FromMilliseconds(500))
-    .ElasticCapacity(initialCapacity: 3, minCapacity: 2, maxCapacity: 4, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
+    .ElasticCapacity(minCapacity: 2, maxCapacity: 4, target: 3, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
     .MonitorTuning(percentileP: 0.95, safetyBuffer: 0.10, horizon: 5, deadband: 3) // optional - these are the defaults
     .BuildWarmupAsync(cancellation);
 

@@ -31,7 +31,7 @@ namespace RingBufferPlusBasicManualScale
             var rb = await RingBuffer<int>.New("MyBuffer")
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-                .ElasticCapacity(6, 3, 9)
+                .ElasticCapacity(3, 9, 6)
                 .BuildWarmupAsync(cts.Token);
 
             ReportCreated(rb);
@@ -57,7 +57,7 @@ namespace RingBufferPlusBasicManualScale
             rb = await RingBuffer<int>.New("MyBuffer")
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
-                .ElasticCapacity(6, 3, 9)
+                .ElasticCapacity(3, 9, 6)
                 .LockWhenScaling()
                 .BuildWarmupAsync(cts.Token);
 

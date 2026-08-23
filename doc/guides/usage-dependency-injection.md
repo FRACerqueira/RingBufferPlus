@@ -15,7 +15,7 @@ builder.Services.AddRingBuffer<int>("MyBuffer", (ringbuf, services) =>
     var applifetime = services.GetService<IHostApplicationLifetime>();
     return ringbuf
         .Factory((_) => Task.FromResult(10))
-        .ElasticCapacity(5, 2, 7)
+        .ElasticCapacity(2, 7, 5)
         .Build(applifetime!.ApplicationStopping);
 });
 

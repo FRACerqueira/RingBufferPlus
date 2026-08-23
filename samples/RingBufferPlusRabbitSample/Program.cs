@@ -69,7 +69,7 @@ namespace RingBufferPlusRabbitSample
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
                 .Logger(hostApp.Services.GetService<ILogger<Program>>())
                 .Factory((token) => ChannelFactory(token)!)
-                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(5, 20, 10, 50, TimeSpan.FromSeconds(5))
                 .BuildWarmupAsync(cts.Token);
 
             ReportCapacity(rb);

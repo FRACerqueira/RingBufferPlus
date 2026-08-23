@@ -103,10 +103,21 @@ namespace RingBufferPlus
 
         /// <summary>
         /// Sets an elastic capacity for the ring buffer, enabling manual switching between
-        /// <paramref name="minCapacity"/>, <paramref name="initialCapacity"/> and <paramref name="maxCapacity"/>
+        /// <paramref name="minCapacity"/>, <paramref name="target"/> and <paramref name="maxCapacity"/>
         /// via <see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch, TimeSpan)"/>.
         /// </summary>
         /// <remarks>
+        /// <para>
+        /// Since v6.0.0 (ADR007V03), <paramref name="minCapacity"/>/<paramref name="maxCapacity"/> are the
+        /// first two parameters and <paramref name="target"/> - the startup capacity, what
+        /// <see cref="ScaleSwitch.InitCapacity"/> returns to - is optional, defaulting to
+        /// <paramref name="minCapacity"/> ("provision for demand, not worst case": start small and let the
+        /// floor guard/backlog-reactive signal/Monitor grow it, rather than defaulting to some arbitrary
+        /// middle value). <paramref name="minCapacity"/> equal to <paramref name="maxCapacity"/> means no real
+        /// elasticity at all - a valid, degenerate configuration, not an error - and in that case
+        /// <paramref name="target"/>, if given explicitly, must equal both, else <c>Build</c>/
+        /// <c>BuildWarmupAsync</c> throws the same way an out-of-range <paramref name="target"/> already does.
+        /// </para>
         /// <paramref name="baseTimer"/>/<paramref name="numberSamples"/> configure the Monitor's sampling
         /// cadence and sliding-window size (ADR003V03) - the Monitor is always active for an elastic pool
         /// (ADR001V03/ADR007V03) and can dispatch either a scale-up or a scale-down (see
@@ -117,9 +128,11 @@ namespace RingBufferPlus
         /// scale-down never waits at all. Neither direction undoes a partial result on timeout - whatever
         /// capacity was actually gained or removed is kept.
         /// </remarks>
-        /// <param name="initialCapacity">Initial/startup capacity. Value must be greater than or equal to <paramref name="minCapacity"/> and less than or equal to <paramref name="maxCapacity"/>.</param>
         /// <param name="minCapacity">The minimal buffer capacity. Value must be greater than or equal to 2.</param>
         /// <param name="maxCapacity">The maximum buffer capacity. Value must be greater than or equal to <paramref name="minCapacity"/>.</param>
+        /// <param name="target">Initial/startup capacity - the target to provision for. Value must be greater
+        /// than or equal to <paramref name="minCapacity"/> and less than or equal to <paramref name="maxCapacity"/>.
+        /// Defaults to <paramref name="minCapacity"/> when not given.</param>
         /// <param name="numberSamples">Number of samples in the Monitor's sliding window. Default is 100 (one
         /// sample per 300ms). The window is only cleared when an actual scale operation fires (gated by
         /// <see cref="IRingBufferElasticBuilder{T}.MonitorTuning(double, double, double, int)"/>'s
@@ -147,6 +160,6 @@ namespace RingBufferPlus
         /// batch from flooding a struggling-but-technically-accepting downstream with simultaneous
         /// creation attempts (e.g. database/broker connections) - see ADR001V03. Default is 4.</param>
         /// <returns>An instance of <see cref="IRingBufferElasticBuilder{T}"/>.</returns>
-        IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples = null, TimeSpan? baseTimer = null, int? maxConcurrentFactoryCalls = null);
+        IRingBufferElasticBuilder<T> ElasticCapacity(int minCapacity, int maxCapacity, int? target = null, int? numberSamples = null, TimeSpan? baseTimer = null, int? maxConcurrentFactoryCalls = null);
     }
 }

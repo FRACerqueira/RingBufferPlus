@@ -9,7 +9,7 @@ namespace RingBufferPlus
     /// Represents a RingBufferPlus service that can be manually pinned to a capacity.
     /// </summary>
     /// <remarks>
-    /// This contract is only available when the buffer was built with <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>.
+    /// This contract is only available when the buffer was built with <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int?, int?, TimeSpan?, int?)"/>.
     /// A fixed-capacity buffer does not expose manual switching at the type level (see ADR007). Since
     /// v6.0.0 (ADR001V03/ADR007V03), the floor guard, backlog-reactive signal, and Monitor are always
     /// active for an elastic pool - <see cref="SwitchToAsync(ScaleSwitch, TimeSpan)"/> is not a

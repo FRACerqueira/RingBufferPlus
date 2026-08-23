@@ -12,7 +12,7 @@ Since v6.0.0 ([ADR001V03](../adr/ADR001V03-concurrency-model-for-ring-buffer-man
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
-    .ElasticCapacity(initialCapacity: 6, minCapacity: 3, maxCapacity: 9)
+    .ElasticCapacity(minCapacity: 3, maxCapacity: 9, target: 6)
     .BuildWarmupAsync(cancellation);
 
 if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(10)))
@@ -41,5 +41,5 @@ await rb.DisposeAsync();
 ## Common errors
 
 - Calling `SwitchToAsync(ScaleSwitch.MaxCapacity, duration)` when already at `MaxCapacity` and treating the `false` result as a failure — it isn't; it means there was nothing to do (and no pin was set).
-- Passing an `initialCapacity` outside `[minCapacity, maxCapacity]` to `ElasticCapacity` — this throws `InvalidOperationException` at `Build`/`BuildWarmupAsync` time, not at the `ElasticCapacity` call itself.
+- Passing a `target` outside `[minCapacity, maxCapacity]` to `ElasticCapacity` — this throws `InvalidOperationException` at `Build`/`BuildWarmupAsync` time, not at the `ElasticCapacity` call itself.
 - Passing a zero or negative `pinDuration` — throws `ArgumentOutOfRangeException` immediately, before anything is scheduled.

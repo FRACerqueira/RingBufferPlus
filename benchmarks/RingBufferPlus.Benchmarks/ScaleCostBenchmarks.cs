@@ -29,23 +29,23 @@ namespace RingBufferPlus.Benchmarks
         {
             _service = RingBuffer<int>.New("BenchmarkScale")
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(16, 4, 64)
+                .ElasticCapacity(4, 64, 16)
                 .LockWhenScaling()
                 .BuildWarmupAsync()
                 .GetAwaiter().GetResult();
         }
 
         [IterationSetup(Target = nameof(ScaleUp_4To64))]
-        public void BeforeScaleUp() => _service.SwitchToAsync(ScaleSwitch.MinCapacity).GetAwaiter().GetResult();
+        public void BeforeScaleUp() => _service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromSeconds(1)).GetAwaiter().GetResult();
 
         [Benchmark]
-        public async Task ScaleUp_4To64() => await _service.SwitchToAsync(ScaleSwitch.MaxCapacity);
+        public async Task ScaleUp_4To64() => await _service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(1));
 
         [IterationSetup(Target = nameof(ScaleDown_64To4))]
-        public void BeforeScaleDown() => _service.SwitchToAsync(ScaleSwitch.MaxCapacity).GetAwaiter().GetResult();
+        public void BeforeScaleDown() => _service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(1)).GetAwaiter().GetResult();
 
         [Benchmark]
-        public async Task ScaleDown_64To4() => await _service.SwitchToAsync(ScaleSwitch.MinCapacity);
+        public async Task ScaleDown_64To4() => await _service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromSeconds(1));
 
         [GlobalCleanup]
         public void Cleanup() => _service.DisposeAsync().AsTask().GetAwaiter().GetResult();

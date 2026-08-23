@@ -86,7 +86,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractNoOpSwitch", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -109,7 +109,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBackgroundSwitch", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(3, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 3, 1, TimeSpan.FromSeconds(5))
                 .Build();
             await service.WarmupAsync();
 
@@ -182,7 +182,7 @@ namespace RingBufferPlus.Tests
                     }
                     return 1;
                 })
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromMilliseconds(300))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromMilliseconds(300))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -214,7 +214,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractConflictingScale", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(4, 2, 12, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 12, 4, 1, TimeSpan.FromSeconds(5))
                 .Build();
             await service.WarmupAsync();
 
@@ -376,7 +376,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposedSwitch", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(4, 2, 8)
+                .ElasticCapacity(2, 8, 4)
                 .Build();
             await service.WarmupAsync();
             await service.DisposeAsync();
@@ -425,7 +425,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFactoryThrowsDuringScale", null);
             var service = builder
                 .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -489,7 +489,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFactoryThrowsOceDuringScale", null);
             var service = builder
                 .Factory(_ => throwing ? throw new TaskCanceledException("factory's own unrelated timeout") : Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -530,7 +530,7 @@ namespace RingBufferPlus.Tests
             var service = await builder
                 .Factory(_ => scaleUpShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
                 .OnError(_ => { })
-                .ElasticCapacity(2, 2, 4, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 4, 2, 1, TimeSpan.FromSeconds(5))
                 .BuildWarmupAsync();
 
             scaleUpShouldThrow = true;
@@ -620,7 +620,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultTriggeredScaleThrows", null);
             var service = builder
                 .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .ElasticCapacity(4, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 4, 1, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1079,7 +1079,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpNeedsMoreTimeThanSamplesBase", null);
             var service = builder
                 .Factory(async _ => { await Task.Delay(150); return 1; }, TimeSpan.FromSeconds(1))
-                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromMilliseconds(300))
+                .ElasticCapacity(2, 5, 2, 1, TimeSpan.FromMilliseconds(300))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1111,7 +1111,7 @@ namespace RingBufferPlus.Tests
                     }
                     return Task.FromResult(call);
                 })
-                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 5, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1154,7 +1154,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractAutoScaleInitEqualsMin", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1268,7 +1268,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleUpThenScaleDownTiming", null);
             var service = builder
                 .Factory(_ => Task.Delay(150).ContinueWith(_ => 1))
-                .ElasticCapacity(3, 2, 10, 5, TimeSpan.FromSeconds(1))
+                .ElasticCapacity(2, 10, 3, 5, TimeSpan.FromSeconds(1))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(200))
                 .Build();
             await service.WarmupAsync();
@@ -1360,7 +1360,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleDownDoesNotBlockEngine", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(5, 2, 5, 5, TimeSpan.FromSeconds(2))
+                .ElasticCapacity(2, 5, 5, 5, TimeSpan.FromSeconds(2))
                 .Build();
             await service.WarmupAsync();
 
@@ -1408,7 +1408,7 @@ namespace RingBufferPlus.Tests
             var service = builder
                 .Factory(_ => Task.FromResult(1))
                 .HeartBeat(_ => true, TimeSpan.FromMilliseconds(100))
-                .ElasticCapacity(2, 2, 4, 5, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 4, 2, 5, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(100))
                 .Build();
             await service.WarmupAsync();
@@ -1561,7 +1561,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMinimumInitialCapacityScaleDown", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 3, TimeSpan.FromMilliseconds(600))
+                .ElasticCapacity(2, 6, 2, 3, TimeSpan.FromMilliseconds(600))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
@@ -1649,7 +1649,7 @@ namespace RingBufferPlus.Tests
                     }
                     return call;
                 }, TimeSpan.FromMilliseconds(500)) // maxConsecutiveFactoryFailures defaults to 0.
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1705,7 +1705,7 @@ namespace RingBufferPlus.Tests
                     }
                     return 1;
                 })
-                .ElasticCapacity(2, 2, 10, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 2)
+                .ElasticCapacity(2, 10, 2, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 2)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1749,7 +1749,7 @@ namespace RingBufferPlus.Tests
                     Interlocked.Decrement(ref inFlight);
                     return 1;
                 })
-                .ElasticCapacity(2, 2, 10, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 3)
+                .ElasticCapacity(2, 10, 2, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 3)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1790,7 +1790,7 @@ namespace RingBufferPlus.Tests
                     }
                     return 0;
                 })
-                .ElasticCapacity(2, 2, 4, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
+                .ElasticCapacity(2, 4, 2, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
                 .Build();
             await service.WarmupAsync();
             scalingUp = true;
@@ -1860,7 +1860,7 @@ namespace RingBufferPlus.Tests
                 // this test's next deliberate trigger, corrupting the very timestamps this test
                 // reads to measure backoff. MinCapacity=2 (the minimum legal value) gives enough
                 // headroom that the 3 consecutive failures below never come close to it.
-                .ElasticCapacity(8, 2, 16)
+                .ElasticCapacity(2, 16, 8)
                 .Build();
             await service.WarmupAsync();
             warmupDone = true;
@@ -1947,7 +1947,7 @@ namespace RingBufferPlus.Tests
                     }
                     return Task.FromResult(1);
                 }, TimeSpan.FromMilliseconds(300))
-                .ElasticCapacity(2, 2, 3, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
+                .ElasticCapacity(2, 3, 2, 1, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 1)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -1998,7 +1998,7 @@ namespace RingBufferPlus.Tests
                     }
                     return call;
                 }, TimeSpan.FromMilliseconds(500), maxConsecutiveFactoryFailures: 1)
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -2034,7 +2034,7 @@ namespace RingBufferPlus.Tests
             var service = builder
                 .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(2), ct); return 1; }, TimeSpan.FromSeconds(5))
                 .OnError(ex => errors.Add(ex))
-                .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromSeconds(30))
+                .ElasticCapacity(2, 5, 2, 1, TimeSpan.FromSeconds(30))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -2135,7 +2135,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMonitorNoOscillation", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(8, 2, 20, 4, TimeSpan.FromMilliseconds(800))
+                .ElasticCapacity(2, 20, 8, 4, TimeSpan.FromMilliseconds(800))
                 .BuildWarmupAsync();
 
             var held = new List<RingBufferValue<int>>();
@@ -2200,7 +2200,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMonitorDeadbandReachability", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(4, 2, 8, 4, TimeSpan.FromMilliseconds(800))
+                .ElasticCapacity(2, 8, 4, 4, TimeSpan.FromMilliseconds(800))
                 .BuildWarmupAsync();
 
             Assert.Equal(4, service.CurrentCapacity);
@@ -2261,7 +2261,7 @@ namespace RingBufferPlus.Tests
                     }
                     return Task.FromResult(1);
                 }, TimeSpan.FromSeconds(5), maxConsecutiveFactoryFailures: 1)
-                .ElasticCapacity(4, 2, 20, 3, TimeSpan.FromMilliseconds(600))
+                .ElasticCapacity(2, 20, 4, 3, TimeSpan.FromMilliseconds(600))
                 .AcquireTimeout(TimeSpan.FromSeconds(1))
                 .Build();
             await service.WarmupAsync();
@@ -2844,7 +2844,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractScaleDownHangingDispose", null);
             var service = builder
                 .Factory(_ => Task.FromResult(new HangingDisposeProbe(releaseHang)))
-                .ElasticCapacity(4, 2, 4, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 4, 4, 1, TimeSpan.FromSeconds(5))
                 .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
                 .LockWhenScaling()
                 .Build();
@@ -2894,7 +2894,7 @@ namespace RingBufferPlus.Tests
                     Interlocked.Increment(ref callCount);
                     return Task.FromResult(new HangingDisposeProbe(releaseHang));
                 })
-                .ElasticCapacity(4, 2, 4, 1, TimeSpan.FromSeconds(30))
+                .ElasticCapacity(2, 4, 4, 1, TimeSpan.FromSeconds(30))
                 .BuildWarmupAsync();
             Assert.Equal(4, Volatile.Read(ref callCount));
 
@@ -3252,7 +3252,7 @@ namespace RingBufferPlus.Tests
                     }
                     return 2;
                 }, TimeSpan.FromMilliseconds(200))
-                .ElasticCapacity(2, 2, 4)
+                .ElasticCapacity(2, 4, 2)
                 .BuildWarmupAsync();
 
             _ = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)); // triggers CreateItemsAsync(quantity: 2)
@@ -3276,7 +3276,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinSuppressesMonitor", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(2, 2, 10, 3, TimeSpan.FromMilliseconds(300))
+                .ElasticCapacity(2, 10, 2, 3, TimeSpan.FromMilliseconds(300))
                 .BuildWarmupAsync();
 
             var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMilliseconds(900));
@@ -3308,7 +3308,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinExpiresMonitorResumes", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(2, 2, 10, 3, TimeSpan.FromMilliseconds(300))
+                .ElasticCapacity(2, 10, 2, 3, TimeSpan.FromMilliseconds(300))
                 .BuildWarmupAsync();
 
             var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMilliseconds(400));
@@ -3346,7 +3346,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardDuringPin", null);
             var service = builder
                 .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .Build();
             await service.WarmupAsync();
 
@@ -3400,7 +3400,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBacklogDuringPin", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(4, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 4, 1, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(500))
                 .Build();
             await service.WarmupAsync();
@@ -3443,7 +3443,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractPinDurationValidation", null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6)
+                .ElasticCapacity(2, 6, 2)
                 .Build();
             await service.WarmupAsync();
 

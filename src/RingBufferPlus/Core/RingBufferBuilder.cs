@@ -119,11 +119,11 @@ namespace RingBufferPlus.Core
             return this;
         }
 
-        IRingBufferElasticBuilder<T> IRingBufferBuilder<T>.ElasticCapacity(int initialCapacity, int minCapacity, int maxCapacity, int? numberSamples, TimeSpan? baseTimer, int? maxConcurrentFactoryCalls)
+        IRingBufferElasticBuilder<T> IRingBufferBuilder<T>.ElasticCapacity(int minCapacity, int maxCapacity, int? target, int? numberSamples, TimeSpan? baseTimer, int? maxConcurrentFactoryCalls)
         {
-            _initcapacity = initialCapacity;
             _minCapacity = minCapacity;
             _maxCapacity = maxCapacity;
+            _initcapacity = target ?? minCapacity;
             _sampleUnit = numberSamples ?? RingBufferDefault.SampleUnit;
             _samplebasetime = baseTimer ?? RingBufferDefault.SamplesBaseTime;
             _maxConcurrentFactoryCalls = maxConcurrentFactoryCalls ?? RingBufferDefault.MaxConcurrentFactoryCalls;
@@ -241,13 +241,13 @@ namespace RingBufferPlus.Core
                 }
                 if (_minCapacity > _initcapacity)
                 {
-                    var err = new InvalidOperationException("The min capacity is greater than the initial capacity.");
+                    var err = new InvalidOperationException("The min capacity is greater than target.");
                     LogError(err);
                     throw err;
                 }
                 if (_maxCapacity < _initcapacity)
                 {
-                    var err = new InvalidOperationException("The max capacity is less than the initial capacity.");
+                    var err = new InvalidOperationException("The max capacity is less than target.");
                     LogError(err);
                     throw err;
                 }

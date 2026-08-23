@@ -29,7 +29,7 @@ namespace RingBufferPlusApiSample
                 var applifetime = services.GetService<IHostApplicationLifetime>();
                 return ringbuf
                         .Factory((cts) => { return Task.FromResult(10); })
-                        .ElasticCapacity(5, 2, 7)
+                        .ElasticCapacity(2, 7, 5)
                         .Build(applifetime!.ApplicationStopping);
             });
 

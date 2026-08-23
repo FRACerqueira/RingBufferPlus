@@ -16,7 +16,7 @@ Random rnd = new();
 var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
-    .ElasticCapacity(6, 3, 9)
+    .ElasticCapacity(3, 9, 6)
     .LockWhenScaling()
     .BuildWarmupAsync(cancellation);
 

@@ -35,7 +35,7 @@ These three numbers only exist for an elastic buffer ([`ElasticCapacity`](usage-
 
 ```mermaid
 flowchart LR
-    A["Builder<br/>.FixedCapacity(n) or<br/>.ElasticCapacity(init,min,max)"] --> B["Build / BuildWarmupAsync"]
+    A["Builder<br/>.FixedCapacity(n) or<br/>.ElasticCapacity(min,max,target)"] --> B["Build / BuildWarmupAsync"]
     B --> C["IRingBufferService&lt;T&gt;<br/>(or IRingBufferManualScaleService&lt;T&gt;)"]
     C --> D["WarmupAsync<br/>(fills the pool to Capacity)"]
     D --> E["AcquireAsync<br/>(rents one item)"]

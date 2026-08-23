@@ -19,7 +19,7 @@ public interface IRingBufferBuilder<T>
 | name | description |
 | --- | --- |
 | [AcquireTimeout](IRingBufferBuilder-1/AcquireTimeout.md)(…) | Sets the timeout to acquire buffer. |
-| [ElasticCapacity](IRingBufferBuilder-1/ElasticCapacity.md)(…) | Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *initialCapacity* and *maxCapacity* via [`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md). |
+| [ElasticCapacity](IRingBufferBuilder-1/ElasticCapacity.md)(…) | Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *target* and *maxCapacity* via [`SwitchToAsync`](./IRingBufferManualScaleService-1/SwitchToAsync.md). |
 | [Factory](IRingBufferBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [FixedCapacity](IRingBufferBuilder-1/FixedCapacity.md)(…) | Sets a fixed capacity for the ring buffer: no autoscale, no manual switch, no min/max range. |
 | [HeartBeat](IRingBufferBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer: periodically inspects a live item's health. |

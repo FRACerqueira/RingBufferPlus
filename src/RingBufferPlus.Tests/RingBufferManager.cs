@@ -79,7 +79,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -100,7 +100,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -121,7 +121,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("TestBuffer", null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();

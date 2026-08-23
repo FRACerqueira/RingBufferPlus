@@ -350,7 +350,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
             var service = builder
                 .Factory(_ => shouldFail ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .Build();
             await service.WarmupAsync();
 
@@ -395,7 +395,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
             var service = builder
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -431,7 +431,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
             var service = builder
                 .Factory(_ => throwing ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -503,7 +503,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
             var service = builder
                 .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(5), ct); return 1; }, TimeSpan.FromSeconds(10))
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();
@@ -627,7 +627,7 @@ namespace RingBufferPlus.Tests
                     await Task.Delay(TimeSpan.FromSeconds(5), ct);
                     return 1;
                 }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
@@ -685,7 +685,7 @@ namespace RingBufferPlus.Tests
                     await Task.Delay(TimeSpan.FromSeconds(5), ct);
                     return 1;
                 }, TimeSpan.FromSeconds(10), maxConsecutiveFactoryFailures: 1)
-                .ElasticCapacity(2, 2, 6, 1, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 6, 2, 1, TimeSpan.FromSeconds(5))
                 .AcquireTimeout(TimeSpan.FromMilliseconds(150))
                 .Build();
             await service.WarmupAsync();
@@ -733,7 +733,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
             var service = builder
                 .Factory(_ => Task.FromResult(1))
-                .ElasticCapacity(5, 2, 5)
+                .ElasticCapacity(2, 5, 5)
                 .LockWhenScaling()
                 .Build();
             await service.WarmupAsync();

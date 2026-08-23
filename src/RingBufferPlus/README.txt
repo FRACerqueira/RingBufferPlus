@@ -28,8 +28,8 @@ Features
         - **Under stressful conditions**, the RingBufferPlus tends to go to **maximum capacity** and stay until conditions return to normal.
         - **Under low usage conditions**, the RingBufferPlus tends to go to **minimum capacity** and stay until conditions return to normal.
 - Set a unique name per buffer instance
-- Explicit FixedCapacity or ElasticCapacity (initial/min/max) modes
-- ScaleUp / ScaleDown, automatic (on acquire fault) or manual (elastic buffer)
+- Explicit FixedCapacity or ElasticCapacity (min/max/target) modes
+- ScaleUp / ScaleDown: for an elastic buffer, a floor guard, a backlog-reactive signal, and a predictive Monitor are always active - plus an optional temporary manual pin (SwitchToAsync)
 - HeartBeat: at each pulse, an item is acquired from the buffer for evaluation asynchronously
 - Native observability: OpenTelemetry-compatible metrics (Meter) and traces (ActivitySource), no extra dependency
 - Set a user function for errors (optional)
@@ -82,35 +82,34 @@ await using (var buffer = await rb.AcquireAsync(cancellation))
 
 await rb.DisposeAsync();
 
-Manual Scale Usage
-===================
-This example uses RingBufferPlus with an elastic capacity and manual scale.
-The manual scaling up and down process is done in the background without locking buffer acquisition or the SwitchToAsync command.
+Pinning Capacity Manually
+=========================
+Every elastic buffer already has a floor guard, a backlog-reactive signal, and a predictive Monitor active on its own (see "Elastic Autoscale Usage" below) - there is no separate manual-only mode. SwitchToAsync pins the buffer to a capacity for a required duration, substituting for the Monitor's own output for that long; the floor guard and backlog-reactive signal are never suppressed by an active pin.
+This is done in the background without locking buffer acquisition or the SwitchToAsync command by default.
 
 Random rnd = new();
 
 var rb = await RingBuffer<int>.New("MyBuffer")
            .Logger(logger)
            .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
-           .ElasticCapacity(initialCapacity: 6, minCapacity: 3, maxCapacity: 9)
+           .ElasticCapacity(minCapacity: 3, maxCapacity: 9, target: 6)
            .BuildWarmupAsync(cancellation);
 
-if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity))
+if (!await rb.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(10)))
 {
-    //manual scale was not scheduled
+    //pin was not scheduled
     //do something
 }
 
-// ... later, e.g. once load has passed ...
-await rb.SwitchToAsync(ScaleSwitch.InitCapacity);
+// ... later, once the pin's own duration has done its job ...
+await rb.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
 
 await rb.DisposeAsync();
 
-Trigger Scale Usage
-===================
-This example uses RingBufferPlus with autoscaling. Autoscaling (scaling up) occurs when there is a capacity acquisition failure. Scaling down occurs automatically in the background once resource availability is reached.
+Elastic Autoscale Usage
+=======================
+This example uses RingBufferPlus with autoscaling: the floor guard, backlog-reactive signal (reacts the instant a caller starts waiting, before AcquireTimeout can elapse), and a predictive Monitor (percentile + trend, can scale up or down) are all active automatically - no opt-in call needed.
 The background auto scale up/down process does not lock buffer acquisition.
-Manual scaling (SwitchToAsync) is unavailable at the type level when using AutoScaleAcquireFault.
 
 Random rnd = new();
 
@@ -118,11 +117,11 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .Logger(logger)
            .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
            .AcquireTimeout(TimeSpan.FromMilliseconds(500))
-           .ElasticCapacity(initialCapacity: 3, minCapacity: 2, maxCapacity: 4, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
-           .AutoScaleAcquireFault(numberOfFaults: 2)
+           .ElasticCapacity(minCapacity: 2, maxCapacity: 4, target: 3, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
            .BuildWarmupAsync(cancellation);
 
-// no SwitchToAsync here - rb is a plain IRingBufferService<int>
+// SwitchToAsync is also available here to pin a capacity temporarily (see "Pinning Capacity
+// Manually" above) - it is not a separate, mutually exclusive mode.
 
 await rb.DisposeAsync();
 
@@ -136,13 +135,13 @@ Random rnd = new();
 var rb = await RingBuffer<int>.New("MyBuffer")
            .Logger(logger)
            .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
-           .ElasticCapacity(6, 3, 9)
+           .ElasticCapacity(minCapacity: 3, maxCapacity: 9, target: 6)
            .LockWhenScaling()
            .BuildWarmupAsync(cancellation);
 
 // with LockWhenScaling(): returns only after the buffer has actually reached MaxCapacity
 // (or the scale-up was undone on timeout, reflected in the false result)
-var reached = await rb.SwitchToAsync(ScaleSwitch.MaxCapacity);
+var reached = await rb.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(10));
 
 HeartBeat Usage
 ===============
@@ -168,9 +167,8 @@ static bool MyHeartBeat(int item)
 RabbitMQ Usage
 ==============
 
-This example uses RingBufferPlus to pool RabbitMQ channels for publishing with improved performance, using automatic scaling when an acquisition failure occurs.
+This example uses RingBufferPlus to pool RabbitMQ channels for publishing with improved performance, autoscaling automatically to real publish pressure.
 Scaling down is performed automatically in the background once resource availability is reached.
-Manual scaling (SwitchToAsync) is unavailable at the type level when using AutoScaleAcquireFault.
 
 var connectionFactory = new ConnectionFactory()
 {
@@ -189,8 +187,7 @@ static async Task<IChannel> ChannelFactory(IConnection connectionRabbit, Cancell
 var rb = await RingBuffer<IChannel>.New("RabbitChannels")
            .Logger(logger)
            .Factory((token) => ChannelFactory(connectionRabbit, token))
-           .ElasticCapacity(initialCapacity: 10, minCapacity: 5, maxCapacity: 20, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(10))
-           .AutoScaleAcquireFault()
+           .ElasticCapacity(minCapacity: 5, maxCapacity: 20, target: 10, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(10))
            .BuildWarmupAsync(cancellation);
 
 await using (var buffer = await rb.AcquireAsync(cancellation))
