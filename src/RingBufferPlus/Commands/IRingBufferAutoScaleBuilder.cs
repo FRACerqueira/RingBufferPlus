@@ -94,6 +94,14 @@ namespace RingBufferPlus
         /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         IRingBufferAutoScaleBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
 
+        // OPEN QUESTION for a future ADR007 revision: this method was added after ADR007V03 was
+        // already Accepted (2026-08-22), as a deliberate choice to expose percentileP/safetyBuffer/
+        // horizon/deadband via the builder now rather than default-and-defer them the way
+        // AutoScaleAcquireFault's own numberOfFaults parameter was deferred in the same commit
+        // (ADR001V03/ADR003V03 wiring, 62ab98d). Not reopened as of this note - revisit whether
+        // this shape (one method, four parameters, all-or-nothing) is still the right surface once
+        // ADR007's public-surface work is next picked up, now that real usage (if any) exists to
+        // judge it against.
         /// <summary>
         /// Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window
         /// percentile as a demand "fair level", inflated by a safety buffer, adjusted by a
