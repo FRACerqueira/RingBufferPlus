@@ -16,7 +16,6 @@ static async Task<IChannel> ChannelFactory(IConnection connectionRabbit, Cancell
 
 var rb = await RingBuffer<IChannel>.New("RabbitChannels")
     .Logger(logger)
-    .BackgroundLogger()
     .Factory((token) => ChannelFactory(connectionRabbit, token))
     .ElasticCapacity(initialCapacity: 10, minCapacity: 5, maxCapacity: 20, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(5))
     .BuildWarmupAsync(cancellation);

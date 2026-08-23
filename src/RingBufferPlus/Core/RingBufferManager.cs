@@ -49,7 +49,6 @@ namespace RingBufferPlus.Core
         private readonly CancellationTokenSource _lifetime;
         private readonly Channel<T> _availableItems = Channel.CreateUnbounded<T>();
         private readonly Channel<EngineCommand> _commands = Channel.CreateUnbounded<EngineCommand>();
-        private readonly Channel<LogMessageBackground> _logQueue = Channel.CreateUnbounded<LogMessageBackground>();
         private Lazy<Task> _warmup;
         private readonly Task _engineTask;
 
@@ -94,7 +93,6 @@ namespace RingBufferPlus.Core
 
         private Task? _heartbeatTask;
         private Task? _sampleTickTask;
-        private Task? _loggerTask;
 
         // Deferred dispose continuations from an orphaned heartbeat callback (F12/F15) - added
         // only from RunHeartbeatAsync's own loop, so by the time _heartbeatTask (awaited in
@@ -237,9 +235,7 @@ namespace RingBufferPlus.Core
 
         public ILogger? Logger { get; init; }
 
-        public bool BackgroundLogger { get; init; }
-
-        public Action<ILogger?, Exception>? ErrorHandler { get; init; }
+        public Action<Exception>? ErrorHandler { get; init; }
 
         public Action<RingBufferValue<T>>? BufferHeartBeat { get; init; }
 
@@ -483,14 +479,6 @@ namespace RingBufferPlus.Core
             {
                 await _lifetime.CancelAsync().ConfigureAwait(false);
                 _commands.Writer.TryComplete();
-                // _logQueue is intentionally NOT completed here - DisposeAsync itself still has
-                // log-generating work ahead (the WhenAll failure catch below, the deferred-
-                // heartbeat-disposal block, and the item-drain loop in the finally all call
-                // LogMessage/LogError). Completing the queue this early silently drops every one
-                // of those under BackgroundLogger=true, since LogMessage/LogError only ever
-                // TryWrite to it in that mode, with no synchronous fallback (Round 5, Estabilidade,
-                // Finding B). It is completed, and _loggerTask awaited, at the very end of this
-                // method instead - after every possible log call above has already run.
 
                 // If a warmup was already in flight, let it unwind first (it observes cancellation
                 // and returns or throws) before snapshotting which background pumps to await -
@@ -514,9 +502,6 @@ namespace RingBufferPlus.Core
                 var pending = new List<Task> { _engineTask };
                 if (_heartbeatTask is not null) pending.Add(_heartbeatTask);
                 if (_sampleTickTask is not null) pending.Add(_sampleTickTask);
-                // _loggerTask is deliberately NOT included here - it can only finish once
-                // _logQueue is completed, which is deferred to the end of this method (see above).
-                // Awaiting it here, before that completion, would hang forever.
 
                 try
                 {
@@ -625,25 +610,6 @@ namespace RingBufferPlus.Core
                 _lifetime.Dispose();
                 _meter.Dispose();
                 _activitySource.Dispose();
-
-                // Only now, after every DisposeAsync-generated log call above has already run, is
-                // it safe to complete the queue and let the logger pump finish draining it (Finding B).
-                _logQueue.Writer.TryComplete();
-                if (_loggerTask is not null)
-                {
-                    try
-                    {
-                        await _loggerTask.ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException)
-                    {
-                        //ignore: expected once _lifetime is cancelled
-                    }
-                    catch (Exception ex)
-                    {
-                        LogError(ex);
-                    }
-                }
             }
         }
 
@@ -651,15 +617,6 @@ namespace RingBufferPlus.Core
 
         private async Task WarmupCoreAsync()
         {
-            // _loggerTask is guarded by "is null", not just "!_disposed", because a retried warmup
-            // attempt (ADR011) re-enters this method - without the guard, a retry after a failed
-            // first attempt would start a second logger pump and orphan the first one (never
-            // awaited again, since _loggerTask would be overwritten).
-            if (_loggerTask is null && !_disposed && BackgroundLogger && (Logger is not null || ErrorHandler is not null))
-            {
-                _loggerTask = Task.Run(RunLoggerAsync);
-            }
-
             LogMessage("Starting warmup process.");
 
             bool reached;
@@ -1785,46 +1742,6 @@ namespace RingBufferPlus.Core
             }
         }
 
-        private async Task RunLoggerAsync()
-        {
-            try
-            {
-                await foreach (var item in _logQueue.Reader.ReadAllAsync(CancellationToken.None).ConfigureAwait(false))
-                {
-                    // SafeInvokeSink on every dispatch below (F23): one bad message must not kill
-                    // this pump for the rest of the instance's life - the same defensive-wrap
-                    // principle DisposeItemsDefensivelyAsync already applies to pooled items.
-                    if (!string.IsNullOrEmpty(item.Message))
-                    {
-                        if (item.LogLevel == LogLevel.Debug)
-                        {
-                            SafeInvokeSink(() => logMessageForDbg(Logger!, Name, item.Message, null));
-                        }
-                        else if (item.LogLevel == LogLevel.Warning)
-                        {
-                            SafeInvokeSink(() => logMessageFoWrn(Logger!, Name, item.Message, null));
-                        }
-                    }
-                    if (item.Error is not null)
-                    {
-                        if (ErrorHandler is null)
-                        {
-                            var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {item.Error.Message} ";
-                            SafeInvokeSink(() => logMessageForErr(Logger!, Name, msg, item.Error));
-                        }
-                        else
-                        {
-                            SafeInvokeSink(() => ErrorHandler.Invoke(Logger, item.Error));
-                        }
-                    }
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                //ignore
-            }
-        }
-
         #endregion
 
         #region logging
@@ -1833,37 +1750,19 @@ namespace RingBufferPlus.Core
         {
             if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            // Round 8 (F30): _logQueue is an unbounded channel, so TryWrite only fails once the
-            // queue has been completed (e.g. a late message logged after DisposeAsync already
-            // called _logQueue.Writer.TryComplete()) - falling back to a synchronous dispatch
-            // here means that message is still delivered instead of silently dropped.
-            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Debug, msg, null)))
-            {
-                SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
-            }
+            SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
         }
 
         private void LogWarning(string message)
         {
             if (Logger is null) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
-            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Warning, msg, null)))
-            {
-                SafeInvokeSink(() => logMessageFoWrn(Logger, Name, msg, null));
-            }
+            SafeInvokeSink(() => logMessageFoWrn(Logger, Name, msg, null));
         }
 
         private void LogError(Exception error)
         {
             if (Logger is null && ErrorHandler is null) return;
-            if (!BackgroundLogger || !_logQueue.Writer.TryWrite(new LogMessageBackground(LogLevel.Error, null, error)))
-            {
-                DispatchLogErrorSynchronously(error);
-            }
-        }
-
-        private void DispatchLogErrorSynchronously(Exception error)
-        {
             if (ErrorHandler is null)
             {
                 var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {error.Message} ";
@@ -1871,19 +1770,18 @@ namespace RingBufferPlus.Core
             }
             else
             {
-                SafeInvokeSink(() => ErrorHandler.Invoke(Logger, error));
+                SafeInvokeSink(() => ErrorHandler.Invoke(error));
             }
         }
 
         // A user-supplied Logger/ErrorHandler is untrusted external code (Round 6, F23 - found
         // independently by both the Estabilidade and Observabilidade passes): if it throws, that
-        // must never be allowed to kill the logger pump (RunLoggerAsync, under
-        // BackgroundLogger=true), permanently break the heartbeat pump/leak a pooled item/make
-        // DisposeAsync() itself throw (the synchronous path, under BackgroundLogger=false), or
-        // otherwise escape into an unrelated core operation like WarmupAsync/AcquireAsync. There
-        // is nothing further to log about the failure - the sink itself is what's broken - so
-        // this is a silent best-effort swallow, extending the same "must never throw regardless
-        // of how a background pump ended" philosophy DisposeAsync's own comment already states.
+        // must never be allowed to permanently break the heartbeat pump/leak a pooled item/make
+        // DisposeAsync() itself throw, or otherwise escape into an unrelated core operation like
+        // WarmupAsync/AcquireAsync. There is nothing further to log about the failure - the sink
+        // itself is what's broken - so this is a silent best-effort swallow, extending the same
+        // "must never throw regardless of how a background pump ended" philosophy DisposeAsync's
+        // own comment already states.
         private static void SafeInvokeSink(Action invoke)
         {
             try

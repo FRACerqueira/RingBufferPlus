@@ -4,7 +4,7 @@
 </br>
 
 
-#### Sets whether !:IRingBufferManualScaleService&lt;T&gt;.SwitchToAsync(ScaleSwitch) awaits the scale operation's completion before returning, instead of returning as soon as it is scheduled.
+#### Sets whether [`SwitchToAsync`](../IRingBufferManualScaleService-1/SwitchToAsync.md) awaits the scale operation's completion before returning, instead of returning as soon as it is scheduled.
 
 ```csharp
 public IRingBufferElasticBuilder LockWhenScaling(bool value = true)

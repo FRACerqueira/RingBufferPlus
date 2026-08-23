@@ -35,7 +35,6 @@ namespace RingBufferPlus.Tests
                 Elastic = true,
                 AcquireTimeout = TimeSpan.FromSeconds(1),
                 Logger = _loggerMock.Object,
-                BackgroundLogger = true,
                 Factory = (_) => Task.FromResult(1)
             };
         }

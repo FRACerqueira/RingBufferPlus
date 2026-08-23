@@ -19,13 +19,12 @@ public interface IRingBufferFixedBuilder<T>
 | name | description |
 | --- | --- |
 | [AcquireTimeout](IRingBufferFixedBuilder-1/AcquireTimeout.md)(…) | Sets the timeout to acquire buffer. |
-| [BackgroundLogger](IRingBufferFixedBuilder-1/BackgroundLogger.md)(…) | Sets to write in background (evaluation asynchronously). |
 | [Build](IRingBufferFixedBuilder-1/Build.md)(…) | Validates and generates RingBufferPlus in service mode. |
 | [BuildWarmupAsync](IRingBufferFixedBuilder-1/BuildWarmupAsync.md)(…) | Validates and generates RingBufferPlus and warms up with full capacity ready. |
 | [Factory](IRingBufferFixedBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [HeartBeat](IRingBufferFixedBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer. |
 | [Logger](IRingBufferFixedBuilder-1/Logger.md)(…) | Sets the logger. |
-| [OnError](IRingBufferFixedBuilder-1/OnError.md)(…) | Sets the error handler to log errors. |
+| [OnError](IRingBufferFixedBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline whenever this buffer logs an error internally. |
 
 ### See Also
 

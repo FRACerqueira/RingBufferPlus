@@ -257,7 +257,7 @@ namespace RingBufferPlus.Tests
             Assert.Null(secondDispose);
 
             // Assert: none of the background tasks ended in a faulted state.
-            foreach (var fieldName in new[] { "_engineTask", "_heartbeatTask", "_loggerTask", "_sampleTickTask" })
+            foreach (var fieldName in new[] { "_engineTask", "_heartbeatTask", "_sampleTickTask" })
             {
                 if (GetPrivateField(service, fieldName) is Task task)
                 {
@@ -296,7 +296,7 @@ namespace RingBufferPlus.Tests
             Assert.Null(disposeEx);
 
             // ...and every background pump WarmupCoreAsync might have started is accounted for and clean.
-            foreach (var fieldName in new[] { "_engineTask", "_heartbeatTask", "_loggerTask", "_sampleTickTask" })
+            foreach (var fieldName in new[] { "_engineTask", "_heartbeatTask", "_sampleTickTask" })
             {
                 if (GetPrivateField(service, fieldName) is Task task)
                 {
@@ -576,7 +576,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractUnlockedSwitchUnobservedException", null);
             var service = await builder
                 .Factory(_ => scaleUpShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .OnError((_, _) => { })
+                .OnError(_ => { })
                 .ElasticCapacity(2, 2, 4, 1, TimeSpan.FromSeconds(5))
                 .BuildWarmupAsync();
 
@@ -632,7 +632,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractReplacementFactoryThrowsOce", null);
             var service = await builder
                 .Factory(_ => replacementShouldThrow ? throw new TaskCanceledException("factory's own unrelated timeout") : Task.FromResult(1))
-                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .OnError(ex => { lock (errors) errors.Add(ex); })
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
@@ -2077,7 +2077,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringScaleUpNoFalseTimeout", null);
             var service = builder
                 .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(2), ct); return 1; }, TimeSpan.FromSeconds(5))
-                .OnError((_, ex) => errors.Add(ex))
+                .OnError(ex => errors.Add(ex))
                 .ElasticCapacity(2, 2, 5, 1, TimeSpan.FromSeconds(30))
                 .LockWhenScaling()
                 .Build();
@@ -2113,7 +2113,7 @@ namespace RingBufferPlus.Tests
                     await Task.Delay(TimeSpan.FromSeconds(2), ct);
                     return 1;
                 }, TimeSpan.FromSeconds(5))
-                .OnError((_, ex) => errors.Add(ex))
+                .OnError(ex => errors.Add(ex))
                 .HeartBeat(value =>
                 {
                     value.Invalidate();
@@ -2149,7 +2149,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeDuringWarmupNoFalseFailure", null);
             var service = builder
                 .Factory(async ct => { await Task.Delay(TimeSpan.FromSeconds(5), ct); return 1; }, TimeSpan.FromSeconds(10))
-                .OnError((_, ex) => errors.Add(ex))
+                .OnError(ex => errors.Add(ex))
                 .FixedCapacity(2)
                 .Build();
 
@@ -2397,7 +2397,7 @@ namespace RingBufferPlus.Tests
                 IRingBufferBuilder<int> builder = new RingBufferBuilder<int>($"ContractHeartbeatAcquireDisposeRace{i}", null);
                 var service = await builder
                     .Factory(_ => Task.FromResult(1))
-                    .OnError((_, ex) => errors.Add(ex))
+                    .OnError(ex => errors.Add(ex))
                     .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
                     .FixedCapacity(2)
                     .BuildWarmupAsync();
@@ -2434,7 +2434,7 @@ namespace RingBufferPlus.Tests
                 IRingBufferBuilder<int> builder = new RingBufferBuilder<int>($"ContractHeartbeatFastFinishDisposeRace{i}", null);
                 var service = await builder
                     .Factory(_ => Task.FromResult(1))
-                    .OnError((_, ex) => errors.Add(ex))
+                    .OnError(ex => errors.Add(ex))
                     .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(1))
                     .FixedCapacity(2)
                     .BuildWarmupAsync();
@@ -2532,7 +2532,7 @@ namespace RingBufferPlus.Tests
                     lock (probes) probes.Add(probe);
                     return Task.FromResult(probe);
                 })
-                .OnError((_, ex) => errors.Add(ex))
+                .OnError(ex => errors.Add(ex))
                 .FixedCapacity(3)
                 .BuildWarmupAsync();
 
@@ -2544,28 +2544,26 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.30 - With BackgroundLogger(true), DisposeAsync() completed and drained _logQueue (and
-        // awaited _loggerTask) before its own later log calls - the WhenAll-failure catch, the
-        // deferred-heartbeat-disposal grace-period message, and the item-drain loop's own defensive
-        // logging - ever ran, silently dropping every one of them (Rodada 5, Estabilidade, Finding
-        // B): LogMessage/LogError only ever TryWrite to that queue in background mode, with no
-        // synchronous fallback. Fixed by deferring _logQueue's completion and _loggerTask's await
-        // to the very end of DisposeAsync, after every possible log call above has already run.
+        // 1.30 - DisposeAsync's grace-period-timeout warning (an orphaned heartbeat callback's
+        // deferred disposal did not finish within PulseHeartBeat) must actually reach the
+        // configured Logger. Originally written against BackgroundLogger(true)'s own queue-
+        // completion-ordering bug (Rodada 5, Estabilidade, Finding B, since fixed); that queue no
+        // longer exists (ADR007V03 removed BackgroundLogger entirely - logging is always
+        // synchronous now), so this is a plain regression test for the message itself.
         // ---------------------------------------------------------------------
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task DisposeAsync_WithBackgroundLoggerEnabled_StillDeliversItsOwnLateLogMessages()
+        public async Task DisposeAsync_WhenAnOrphanedHeartbeatDisposalOutlivesTheGracePeriod_LogsAWarning()
         {
             var logger = new CapturingLogger();
             using var callbackStarted = new ManualResetEventSlim();
             using var releaseCallback = new ManualResetEventSlim();
 
-            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeBackgroundLoggerLateMessages", null);
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractDisposeGracePeriodWarning", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
                 .Logger(logger)
-                .BackgroundLogger(true)
                 .HeartBeat(_ =>
                 {
                     callbackStarted.Set();
@@ -2656,7 +2654,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<DisposableProbe> builder = new RingBufferBuilder<DisposableProbe>("ContractHeartbeatThrowingOnError", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(new DisposableProbe()))
-                .OnError((_, _) => throw new InvalidOperationException("user OnError sink bug"))
+                .OnError(_ => throw new InvalidOperationException("user OnError sink bug"))
                 .HeartBeat(_ =>
                 {
                     callbackStarted.Set();
@@ -2685,26 +2683,27 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.33 - F23's BackgroundLogger-specific half: with BackgroundLogger(true), a throwing
-        // OnError is invoked from inside RunLoggerAsync's own dispatch loop - unguarded, this
-        // faulted the pump on the very first bad message and silently dropped every message for
-        // the rest of the instance's life, with no exception surfacing anywhere (the queue is
-        // unbounded and nothing was left reading it).
+        // 1.33 - F23: each SafeInvokeSink call is independent, but this proves it end-to-end -
+        // a throwing OnError on one heartbeat-triggered invocation must not prevent later,
+        // separate invocations of the same handler from still firing normally. Originally written
+        // against BackgroundLogger(true)'s own dispatch loop, which a throwing OnError could fault
+        // permanently (unguarded, dropping every later message silently); that loop no longer
+        // exists (ADR007V03 removed BackgroundLogger entirely), but the black-box behavior this
+        // test observes is unrelated to that mechanism and still worth guarding.
         // ---------------------------------------------------------------------
 
         [Fact]
         [Trait("Category", "Contract")]
-        public async Task BackgroundLogger_WhenOnErrorThrowsOnce_StillDeliversLaterMessages()
+        public async Task HeartBeat_WhenOnErrorThrowsOnce_StillDeliversLaterInvocations()
         {
             var callCount = 0;
             var delivered = new List<Exception>();
 
-            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBackgroundLoggerOnErrorThrowsOnce", null);
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractOnErrorThrowsOnceStillDeliversLater", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(1))
                 .Logger(new CapturingLogger())
-                .BackgroundLogger(true)
-                .OnError((_, ex) =>
+                .OnError(ex =>
                 {
                     if (Interlocked.Increment(ref callCount) == 1)
                     {
@@ -2721,18 +2720,19 @@ namespace RingBufferPlus.Tests
             {
                 await Task.Delay(50);
             }
-            Assert.True(callCount >= 3, $"Expected at least 3 OnError invocations (the pump must survive the first throw), got {callCount}.");
+            Assert.True(callCount >= 3, $"Expected at least 3 OnError invocations (a throw on one must not prevent later ones), got {callCount}.");
             Assert.NotEmpty(delivered);
 
             await service.DisposeAsync();
         }
 
         // ---------------------------------------------------------------------
-        // Round 8 (F30): _logQueue is unbounded, so LogMessage/LogWarning/LogError's TryWrite only
-        // ever fails once the queue has been completed - DisposeAsync completes it only after the
-        // final item-drain loop returns, but a hung item's background dispose (Round 8 fix above)
-        // can fault well after that, once released. Before this fix that late LogError call was
-        // silently dropped.
+        // Round 8 (F30): a LogError call from a hung item's background dispose (Round 8 fix above)
+        // faulting strictly after DisposeAsync() has already returned must still reach OnError, not
+        // be silently dropped. Originally about BackgroundLogger(true)'s own queue-completion
+        // timing (that queue no longer exists, ADR007V03) - logging is unconditionally synchronous
+        // now, but a late-firing background task calling LogError after the method that started it
+        // returned is still a real scenario worth guarding.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2746,18 +2746,17 @@ namespace RingBufferPlus.Tests
             var service = await builder
                 .Factory(_ => Task.FromResult(new HangingThenThrowingDisposeProbe(releaseHang)))
                 .Logger(new CapturingLogger())
-                .BackgroundLogger(true)
-                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .OnError(ex => { lock (errors) errors.Add(ex); })
                 .HeartBeat(_ => { }, pulse: TimeSpan.FromMilliseconds(200))
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
-            // Returns once the grace period elapses for the hung idle item - _logQueue is now
-            // completed (DisposeAsync's finally block already ran to the end).
+            // Returns once the grace period elapses for the hung idle item - DisposeAsync's own
+            // finally block has already run to completion by this point.
             await service.DisposeAsync();
 
-            // Only now does the background dispose actually finish, and fault - strictly after the
-            // queue that LogError would normally write to has been closed.
+            // Only now does the background dispose actually finish, and fault - strictly after
+            // DisposeAsync() itself has already returned.
             releaseHang.Set();
 
             var deadline = DateTime.UtcNow.AddSeconds(3);
@@ -2836,7 +2835,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractBuildThrowingOnError", null);
             var fixedBuilder = builder
                 .Logger(new CapturingLogger())
-                .OnError((_, _) => throw new InvalidOperationException("user OnError sink bug"))
+                .OnError(_ => throw new InvalidOperationException("user OnError sink bug"))
                 .FixedCapacity(2);
 
             var ex = Assert.Throws<InvalidOperationException>(() => fixedBuilder.Build());
@@ -3055,7 +3054,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractReplacementFailureLosesCapacity", null);
             var service = await builder
                 .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1))
-                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .OnError(ex => { lock (errors) errors.Add(ex); })
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 
@@ -3172,7 +3171,7 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardGraceWindow", null);
             var service = await builder
                 .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1), factoryTimeout)
-                .OnError((_, ex) => { lock (errors) errors.Add(ex); })
+                .OnError(ex => { lock (errors) errors.Add(ex); })
                 .FixedCapacity(2)
                 .BuildWarmupAsync();
 

@@ -4,15 +4,15 @@
 </br>
 
 
-#### Sets the error handler to log errors.
+#### Sets the error handler, invoked inline whenever this buffer logs an error internally.
 
 ```csharp
-public IRingBufferFixedBuilder OnError(Action<ILogger?, Exception> errorHandler)
+public IRingBufferFixedBuilder OnError(Action<Exception> errorHandler)
 ```
 
 | parameter | description |
 | --- | --- |
-| errorHandler | The handler to log error. |
+| errorHandler | The handler to invoke with the error. Called synchronously, inline (ADR007V03) - no background queue. The logger configured via [`Logger`](./Logger.md) is a separate concern; this handler does not receive it. |
 
 ### Return Value
 

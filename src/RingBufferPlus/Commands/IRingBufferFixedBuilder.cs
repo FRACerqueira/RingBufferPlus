@@ -68,13 +68,6 @@ namespace RingBufferPlus
         IRingBufferFixedBuilder<T> Logger(ILogger? value);
 
         /// <summary>
-        /// Sets to write in background (evaluation asynchronously).
-        /// </summary>
-        /// <param name="value">True to write in background.</param>
-        /// <returns><see cref="IRingBufferFixedBuilder{T}"/>.</returns>
-        IRingBufferFixedBuilder<T> BackgroundLogger(bool value = true);
-
-        /// <summary>
         /// Sets the timeout to acquire buffer.
         /// </summary>
         /// <param name="value">The timeout for acquiring a value from the buffer. Default value is 5 seconds.</param>
@@ -82,11 +75,13 @@ namespace RingBufferPlus
         IRingBufferFixedBuilder<T> AcquireTimeout(TimeSpan value);
 
         /// <summary>
-        /// Sets the error handler to log errors.
+        /// Sets the error handler, invoked inline whenever this buffer logs an error internally.
         /// </summary>
-        /// <param name="errorHandler">The handler to log error.</param>
+        /// <param name="errorHandler">The handler to invoke with the error. Called synchronously,
+        /// inline (ADR007V03) - no background queue. The logger configured via <see cref="Logger(ILogger?)"/>
+        /// is a separate concern; this handler does not receive it.</param>
         /// <returns><see cref="IRingBufferFixedBuilder{T}"/>.</returns>
-        IRingBufferFixedBuilder<T> OnError(Action<ILogger?, Exception> errorHandler);
+        IRingBufferFixedBuilder<T> OnError(Action<Exception> errorHandler);
 
         /// <summary>
         /// Validates and generates RingBufferPlus in service mode.

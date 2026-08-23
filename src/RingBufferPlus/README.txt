@@ -33,7 +33,6 @@ Features
 - HeartBeat: at each pulse, an item is acquired from the buffer for evaluation asynchronously
 - Native observability: OpenTelemetry-compatible metrics (Meter) and traces (ActivitySource), no extra dependency
 - Set a user function for errors (optional)
-- Set logger to execute in a separate thread asynchronously (BackgroundLogger)
 - Command to invalidate and renew an acquired item
 - Command to warm up to full capacity before starting the application (optional but **recommended**)
 - Receive an item from the buffer with **success/failure** information and **elapsed time** for acquisition
@@ -165,21 +164,6 @@ static void MyHeartBeat(RingBufferValue<int> item)
      //do anything ex: health check
 }
 
-Background Logger Usage
-=======================
-
-Log execution is done automatically by the component (Debug, Warning and Error levels) on the same execution thread by default. This can add latency to whatever operation triggered the log if the sink is slow.
-Use BackgroundLogger() to move the actual write off that path, onto a dedicated background task.
-
-Random rnd = new();
-
-var rb = await RingBuffer<int>.New("MyBuffer")
-           .Logger(logger)
-           .BackgroundLogger()
-           .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
-           .FixedCapacity(6)
-           .BuildWarmupAsync(cancellation);
-
 RabbitMQ Usage
 ==============
 
@@ -203,7 +187,6 @@ static async Task<IChannel> ChannelFactory(IConnection connectionRabbit, Cancell
 
 var rb = await RingBuffer<IChannel>.New("RabbitChannels")
            .Logger(logger)
-           .BackgroundLogger()
            .Factory((token) => ChannelFactory(connectionRabbit, token))
            .ElasticCapacity(initialCapacity: 10, minCapacity: 5, maxCapacity: 20, numberSamples: 50, baseTimer: TimeSpan.FromSeconds(10))
            .AutoScaleAcquireFault()

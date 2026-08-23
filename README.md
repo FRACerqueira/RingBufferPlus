@@ -63,7 +63,6 @@ For elastic (scaling) buffers, dependency injection, RabbitMQ channel pooling, a
 - [Elastic autoscale](doc/guides/usage-elastic-autoscale.md)
 - [Locking `SwitchToAsync` while scaling](doc/guides/usage-lock-when-scaling.md)
 - [HeartBeat](doc/guides/usage-heartbeat.md)
-- [Background logger](doc/guides/usage-background-logger.md)
 - [RabbitMQ channel pooling](doc/guides/usage-rabbitmq.md)
 - [ASP.NET Core / generic host dependency injection](doc/guides/usage-dependency-injection.md)
 - [Observability (metrics and tracing)](doc/guides/usage-observability.md)

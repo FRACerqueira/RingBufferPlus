@@ -29,7 +29,6 @@ namespace RingBufferPlus.Core
         private int _maxCapacity;
         private int _sampleUnit;
         private bool _elastic;
-        private bool _backgroundLogger;
         private bool _lockWhenScaling;
 
         private TimeSpan _samplebasetime;
@@ -44,7 +43,7 @@ namespace RingBufferPlus.Core
         private double _monitorHorizon;
         private int _monitorDeadband;
 
-        private Action<ILogger?, Exception>? _errorHandler;
+        private Action<Exception>? _errorHandler;
         private Action<RingBufferValue<T>>? _bufferHeartBeat;
         private Func<CancellationToken, Task<T>>? _factory;
 
@@ -89,11 +88,9 @@ namespace RingBufferPlus.Core
 
         private void SetLogger(ILogger? value) => _logger = value;
 
-        private void SetBackgroundLogger(bool value) => _backgroundLogger = value;
-
         private void SetAcquireTimeout(TimeSpan value) => _acquireTimeout = value;
 
-        private void SetOnError(Action<ILogger?, Exception> errorHandler) => _errorHandler = errorHandler;
+        private void SetOnError(Action<Exception> errorHandler) => _errorHandler = errorHandler;
 
         private void SetLockWhenScaling(bool value) => _lockWhenScaling = value;
 
@@ -112,9 +109,8 @@ namespace RingBufferPlus.Core
         IRingBufferBuilder<T> IRingBufferBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
-        IRingBufferBuilder<T> IRingBufferBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
         IRingBufferBuilder<T> IRingBufferBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
-        IRingBufferBuilder<T> IRingBufferBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferBuilder<T> IRingBufferBuilder<T>.OnError(Action<Exception> errorHandler) { SetOnError(errorHandler); return this; }
 
         IRingBufferFixedBuilder<T> IRingBufferBuilder<T>.FixedCapacity(int value)
         {
@@ -142,9 +138,8 @@ namespace RingBufferPlus.Core
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
-        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
         IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
-        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferFixedBuilder<T> IRingBufferFixedBuilder<T>.OnError(Action<Exception> errorHandler) { SetOnError(errorHandler); return this; }
 
         IRingBufferService<T> IRingBufferFixedBuilder<T>.Build(CancellationToken cancellation) => BuildCore(cancellation);
 
@@ -162,9 +157,8 @@ namespace RingBufferPlus.Core
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout, byte maxConsecutiveFactoryFailures) { SetFactory(value, timeout, maxConsecutiveFactoryFailures); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.HeartBeat(Action<RingBufferValue<T>> value, TimeSpan? pulse) { SetHeartBeat(value, pulse); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.Logger(ILogger? value) { SetLogger(value); return this; }
-        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.BackgroundLogger(bool value) { SetBackgroundLogger(value); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.AcquireTimeout(TimeSpan value) { SetAcquireTimeout(value); return this; }
-        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.OnError(Action<ILogger?, Exception> errorHandler) { SetOnError(errorHandler); return this; }
+        IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.OnError(Action<Exception> errorHandler) { SetOnError(errorHandler); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.LockWhenScaling(bool value) { SetLockWhenScaling(value); return this; }
         IRingBufferElasticBuilder<T> IRingBufferElasticBuilder<T>.MonitorTuning(double percentileP, double safetyBuffer, double horizon, int deadband) { SetMonitorTuning(percentileP, safetyBuffer, horizon, deadband); return this; }
 
@@ -205,7 +199,6 @@ namespace RingBufferPlus.Core
                 AcquireTimeout = _acquireTimeout,
                 LockWhenScaling = _lockWhenScaling,
                 Logger = _logger,
-                BackgroundLogger = _backgroundLogger,
                 ErrorHandler = _errorHandler,
                 BufferHeartBeat = _bufferHeartBeat,
                 Factory = _factory!
@@ -314,15 +307,23 @@ namespace RingBufferPlus.Core
 
         private void LogError(Exception message)
         {
-            if (_logger is null || !_logger.IsEnabled(LogLevel.Error)) return;
+            // Fixed alongside the OnError signature change (ADR007V03): this guard previously
+            // required _logger to be non-null AND enabled for Error, which meant a caller who
+            // configured OnError without also configuring Logger never had their error handler
+            // invoked at all during Build-time validation - the exact opposite of "the logger is
+            // already configured separately" (ADR007V03's own reasoning for simplifying OnError).
+            if (_logger is null && _errorHandler is null) return;
 
-            if (_errorHandler == null)
+            if (_errorHandler is null)
             {
-                SafeInvokeSink(() => logMessageForErr(_logger, _uniqueName, message.ToString(), null));
+                if (_logger!.IsEnabled(LogLevel.Error))
+                {
+                    SafeInvokeSink(() => logMessageForErr(_logger, _uniqueName, message.ToString(), null));
+                }
             }
             else
             {
-                SafeInvokeSink(() => _errorHandler?.Invoke(_logger, message));
+                SafeInvokeSink(() => _errorHandler.Invoke(message));
             }
         }
 

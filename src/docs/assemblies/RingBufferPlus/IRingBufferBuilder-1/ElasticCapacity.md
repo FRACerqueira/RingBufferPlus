@@ -4,7 +4,7 @@
 </br>
 
 
-#### Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *initialCapacity* and *maxCapacity* via !:IRingBufferManualScaleService&lt;T&gt;.SwitchToAsync(ScaleSwitch).
+#### Sets an elastic capacity for the ring buffer, enabling manual switching between *minCapacity*, *initialCapacity* and *maxCapacity* via [`SwitchToAsync`](../IRingBufferManualScaleService-1/SwitchToAsync.md).
 
 ```csharp
 public IRingBufferElasticBuilder<T> ElasticCapacity(int initialCapacity, int minCapacity, 

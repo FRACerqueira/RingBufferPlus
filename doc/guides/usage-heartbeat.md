@@ -15,7 +15,7 @@ var rb = await RingBuffer<int>.New("MyBuffer")
     .Logger(logger)
     .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
     .HeartBeat(MyHeartBeat, pulse: TimeSpan.FromSeconds(10))
-    .OnError((logger, ex) => logger?.LogError(ex, "RingBuffer background error"))
+    .OnError(ex => logger?.LogError(ex, "RingBuffer background error"))
     .FixedCapacity(3)
     .BuildWarmupAsync(cancellation);
 

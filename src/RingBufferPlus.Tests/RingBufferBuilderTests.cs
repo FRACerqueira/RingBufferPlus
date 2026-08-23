@@ -89,7 +89,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void OnError_ShouldSetErrorHandler()
         {
-            Action<ILogger?, Exception> errorHandler = (logger, ex) => { };
+            Action<Exception> errorHandler = ex => { };
 
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
@@ -156,19 +156,6 @@ namespace RingBufferPlus.Tests
 
             var loggerField = service.GetType().GetProperty("Logger")!;
             Assert.NotNull(loggerField.GetValue(service));
-        }
-
-        [Fact]
-        public void BackgroundLogger_ShouldSetBackgroundLogger()
-        {
-            var service = CreateBuilder()
-                .Factory(_ => Task.FromResult(0))
-                .BackgroundLogger(true)
-                .FixedCapacity(2)
-                .Build();
-
-            var backgroundLoggerField = service.GetType().GetProperty("BackgroundLogger")!;
-            Assert.True((bool)backgroundLoggerField.GetValue(service)!);
         }
 
         [Fact]
