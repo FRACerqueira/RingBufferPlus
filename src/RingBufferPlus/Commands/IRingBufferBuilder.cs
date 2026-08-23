@@ -122,12 +122,23 @@ namespace RingBufferPlus
         /// <see cref="IRingBufferAutoScaleBuilder{T}.MonitorTuning(double, double, double, int)"/>'s
         /// <c>deadband</c>) - during a genuinely steady period (demand stable, every computed target landing
         /// inside the deadband), nothing clears it, so it fills to <paramref name="numberSamples"/> and slides.
-        /// At the defaults (<paramref name="baseTimer"/> 30s / <paramref name="numberSamples"/> 100 = one
-        /// sample every 300ms), that is roughly a 30-second adaptation horizon for a demand drop that arrives
-        /// during such a steady period - lower <paramref name="numberSamples"/> (or shorten
-        /// <paramref name="baseTimer"/>) for a faster reaction, at the cost of a noisier percentile/trend
-        /// estimate from fewer/closer-together samples.</param>
-        /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples. Default value is 30 seconds (one sample per 300ms).</param>
+        /// The window's real-time span is always exactly <paramref name="baseTimer"/> regardless of this
+        /// parameter's value (the per-sample interval is <paramref name="baseTimer"/> divided by this
+        /// parameter, so the two cancel out) - see <paramref name="baseTimer"/> for the adaptation-horizon
+        /// trade-off this parameter does NOT control. Raising or lowering this value alone only changes how
+        /// many discrete points make up that same time span - fewer points means a coarser, noisier
+        /// percentile/trend estimate; more points means a smoother one at the cost of one <see
+        /// cref="System.Threading.Channels.Channel{T}"/> write (a Tick command) per sample.</param>
+        /// <param name="baseTimer">The <see cref="TimeSpan"/> interval to collect samples - and, since the
+        /// Monitor's sliding window (<paramref name="numberSamples"/>) always spans exactly this much real
+        /// time regardless of how many samples it holds, this IS the adaptation horizon: at the default (30
+        /// seconds), a demand drop that arrives during a genuinely steady period (see
+        /// <paramref name="numberSamples"/>) can take roughly this long before the Monitor's own slow layer
+        /// reacts to it - the buffer's higher-priority signals (floor guard, backlog-reactive) already cover
+        /// the more urgent cases (an actual waiting caller, a floor breach) far faster than this, regardless
+        /// of this value. Shortening this value is the only way to shrink that horizon; doing so makes every
+        /// Tick fire more often too unless <paramref name="numberSamples"/> is lowered proportionally to keep
+        /// the per-sample interval unchanged. Default value is 30 seconds (one sample per 300ms).</param>
         /// <param name="maxConcurrentFactoryCalls">Maximum number of concurrent factory calls when
         /// creating several items at once (the initial warmup fill, or a scale-up). Bounds a large
         /// batch from flooding a struggling-but-technically-accepting downstream with simultaneous

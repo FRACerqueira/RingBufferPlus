@@ -113,7 +113,8 @@ namespace RingBufferPlus
         /// to 0. Default is 3. Also governs how long a demand change can go unnoticed during a
         /// steady period, since only a dispatched scale operation clears the sliding window - see
         /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int, int?, TimeSpan?, int?)"/>'s
-        /// own <c>numberSamples</c> parameter for what that means at the shipped defaults.</param>
+        /// own <c>baseTimer</c> parameter for what that unnoticed period can last at the shipped
+        /// defaults, and why <c>numberSamples</c> does not affect it.</param>
         /// <returns><see cref="IRingBufferAutoScaleBuilder{T}"/>.</returns>
         /// <exception cref="InvalidOperationException">An argument is outside its valid range - validated at <c>Build</c>/<c>BuildWarmupAsync</c> time.</exception>
         IRingBufferAutoScaleBuilder<T> MonitorTuning(double percentileP = 0.95, double safetyBuffer = 0.10, double horizon = 5, int deadband = 3);
