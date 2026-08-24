@@ -139,8 +139,9 @@ var rb = await RingBuffer<int>.New("MyBuffer")
            .LockWhenScaling()
            .BuildWarmupAsync(cancellation);
 
-// with LockWhenScaling(): returns only after the buffer has actually reached MaxCapacity
-// (or the scale-up was undone on timeout, reflected in the false result)
+// with LockWhenScaling(): returns only after the scale-up finishes, one way or the other -
+// true if it fully reached MaxCapacity, false if it only partially completed before its own
+// timeout (whatever capacity was actually gained is kept either way, not undone)
 var reached = await rb.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(10));
 
 HeartBeat Usage

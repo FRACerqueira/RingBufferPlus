@@ -18,7 +18,8 @@ flowchart TB
     subgraph "Implementation (src/RingBufferPlus/Core)"
         Builder["RingBufferBuilder&lt;T&gt;<br/>(explicit interface implementation<br/>of all 3 builder interfaces)"]
         Manager["RingBufferManager&lt;T&gt;<br/>(the engine)"]
-        Decision["AutoScaleDecision<br/>(pure: Median / EvaluateScaleDown)"]
+        Monitor["AutoScaleMonitor<br/>(pure: percentile + regression)"]
+        FloorGuard["FloorGuardDecision<br/>(pure: breach / grace window)"]
     end
 
     subgraph "Public service surface"
@@ -35,13 +36,15 @@ flowchart TB
     Builder -->|Build / BuildWarmupAsync| Manager
     Manager -->|implements| Service
     Manager -->|implements, reachable<br/>from every IEB build| ManualService
-    Manager -->|uses for scale-down decisions| Decision
+    Manager -->|uses for predictive scale up/down| Monitor
+    Manager -->|uses to detect/repair a floor breach| FloorGuard
     Manager -->|AcquireAsync returns| Value
 ```
 
 - **`RingBufferBuilder<T>`** (`src/RingBufferPlus/Core/RingBufferBuilder.cs`) is a single class implementing all three builder interfaces via explicit interface implementation, so the same method names (`Factory`, `Logger`, …) return different interface types depending on which mode you're in — this is what makes `FixedCapacity` permanently hide `SwitchToAsync` at compile time (an elastic build never hides it: since ADR007V03 there is no separate autoscale-only mode that would). See [ADR007V03](../adr/ADR007V03-redesign-of-the-public-fluent-api-surface.md).
-- **`RingBufferManager<T>`** (`src/RingBufferPlus/Core/RingBufferManager.cs`) is the only concrete implementation of `IRingBufferService<T>`/`IRingBufferManualScaleService<T>`. It owns three `System.Threading.Channels.Channel<T>`-family queues (available items, engine commands, background log messages) and a single consumer loop that is the sole writer of scale state. See [ADR001](../adr/ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
-- **`AutoScaleDecision`** (`src/RingBufferPlus/Core/AutoScaleDecision.cs`) is a pure static class — `Median(samples)` and `EvaluateScaleDown(...)` take primitive inputs and return a decision with no dependency on the engine, specifically so the autoscale algorithm can be unit-tested and benchmarked in isolation. See [ADR003](../adr/ADR003V02-median-sample-autoscaling-algorithm.md).
+- **`RingBufferManager<T>`** (`src/RingBufferPlus/Core/RingBufferManager.cs`) is the only concrete implementation of `IRingBufferService<T>`/`IRingBufferManualScaleService<T>`. It owns the engine command channel and the available-items channel, plus background tasks for Fábrica (scale-up) and Remoção (scale-down) dispatch, with a single consumer loop that is the sole writer of scale state. See [ADR001](../adr/ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
+- **`AutoScaleMonitor`** (`src/RingBufferPlus/Core/AutoScaleMonitor.cs`) is a pure static class — `Percentile(samples, p)` and `Slope(samples)` take primitive inputs and return the demand estimate the engine's `ProcessTick` combines with a safety buffer and deadband into a target capacity, with no dependency on the engine, specifically so the algorithm can be unit-tested and benchmarked in isolation. Replaces the median-based algorithm from v5.0.0. See [ADR003](../adr/ADR003V03-median-sample-autoscaling-algorithm.md).
+- **`FloorGuardDecision`** (`src/RingBufferPlus/Core/FloorGuardDecision.cs`) is a pure static class — `EvaluateBreach(...)`/`HasGraceWindowElapsed(...)` detect and repair `CurrentCapacity` dropping below `MinCapacity` (e.g. a failed heartbeat- or `Invalidate()`-triggered replacement), independent of the Monitor and backlog-reactive signals, which are always active alongside it. See [ADR001](../adr/ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
 - **`RingBufferValue<T>`** (`src/RingBufferPlus/RingBufferValue.cs`) is the rented-item wrapper returned by `AcquireAsync`. Disposing it (`await using`) invokes the manager's turnback callback, which either returns the item to the pool or, if `Invalidate()` was called, discards it and queues a replacement.
 - **Observability**: each `RingBufferManager<T>` owns its own `Meter`/`ActivitySource` (not one static instance for the whole assembly), both named `"RingBufferPlus"` — per-instance so disposing one buffer can never silence another's telemetry, while a single exporter subscription by name still sees every buffer, disambiguated by a `buffer.name` tag. See [ADR008](../adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md) and the [observability guide](../guides/usage-observability.md).
 
@@ -53,7 +56,7 @@ flowchart TB
 | Engine + builder implementation | `src/RingBufferPlus/Core/` |
 | DI integration (`AddRingBuffer`, registers an `IHostedService` for automatic warmup) | `src/RingBufferPlus/HostingExtensions.cs` |
 | Behavioral contract tests (the acceptance gate for any engine change) | `src/RingBufferPlus.Tests/RingBufferContractTests.cs` |
-| Autoscale algorithm unit tests | `src/RingBufferPlus.Tests/AutoScaleDecisionTests.cs` |
+| Autoscale algorithm unit tests | `src/RingBufferPlus.Tests/AutoScaleMonitorTests.cs`, `src/RingBufferPlus.Tests/FloorGuardDecisionTests.cs` |
 | Observability (metrics/tracing) tests | `src/RingBufferPlus.Tests/RingBufferObservabilityTests.cs` |
 | Quantitative benchmarks (throughput, scale cost, autoscale reaction time, observability overhead) | `benchmarks/RingBufferPlus.Benchmarks/` |
 | All architecture decisions, with context/trade-offs/consequences | `doc/adr/` |

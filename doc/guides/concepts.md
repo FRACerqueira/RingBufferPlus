@@ -15,7 +15,7 @@ This guide gives you the mental model to read before touching the API reference 
 
 ## What RingBufferPlus is
 
-A ring buffer is a bounded pool of pre-built instances of `T` (database connections, RabbitMQ channels, any expensive-to-construct object). Callers `AcquireAsync` an instance, use it, and return it to the pool by disposing the wrapper (`await using`). The "plus" is elastic capacity: the pool can grow and shrink at runtime, either on a manual command or automatically in reaction to acquisition pressure — see [ADR001](../adr/ADR001V02-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md) and [ADR003](../adr/ADR003V02-median-sample-autoscaling-algorithm.md).
+A ring buffer is a bounded pool of pre-built instances of `T` (database connections, RabbitMQ channels, any expensive-to-construct object). Callers `AcquireAsync` an instance, use it, and return it to the pool by disposing the wrapper (`await using`). The "plus" is elastic capacity: the pool can grow and shrink at runtime, either on a manual command or automatically in reaction to acquisition pressure — see [ADR001](../adr/ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md) and [ADR003](../adr/ADR003V03-median-sample-autoscaling-algorithm.md).
 
 Every instance is built once via the `Factory` you supply, and each build is exactly one call to that factory — the buffer never mutates or resets an item on your behalf.
 
