@@ -7,7 +7,7 @@
 |Scope||
 |Domain||
 |Created|Proposed (2026-08-22)|
-|Changed|Accepted (2026-08-22)|
+|Changed|Accepted (2026-08-24)|
 |Superseded||
 <!-- Do not remove this comment, lines and table (1-12) -->
 ---
@@ -32,6 +32,8 @@ Technical Story: The README history (`README.md`, "What's new" section) shows co
 **This exception does not repeat.** It applies only to this specific symbol and this specific release, exactly as Stage (a)'s "single reset" does not repeat for future majors (see Positive/Negative Consequences below, revised). A future breaking removal of a symbol that *did* carry real, relied-upon behavior must bump MAJOR under Stage (b), with no exception, unless a new ADR makes the same narrow case this one makes: that the specific symbol being removed never had real behavior for a deprecation cycle, or a major-version signal, to protect.
 
 **Amended on 2026-08-22 under [ADR006V02](./ADR006V02-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) — a second, explicitly justified reset:** Stage (b) below originally said strict SemVer resumes "from v5.0.0 onward (including v5.1, v6, etc.)" — written when v6 was still hypothetical. A design analysis conducted before any v6.0.0 implementation work produced real evidence (a decision-quality simulation showing the shipped median autoscaling algorithm can get structurally stuck over-provisioned, and a real benchmark showing the current reactive path is dominated by configured timeout rather than actual scaling cost) justifying a second breaking overhaul, authorized by [ADR006V02](./ADR006V02-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) on its own terms — not by treating Stage (a)'s "single reset" as silently repeatable. **Stage (b)'s resumption point moves from v5.0.0 to v6.0.0**: v6.0.0 is authorized as its own reset (no `[Obsolete]` bridge required for its changes), and strict SemVer with mandatory deprecation cycles now resumes from v6.0.0 onward instead. This is the second and, per [ADR006V02](./ADR006V02-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md), the **last** such reset without its own fresh justification — a third would need the same evidentiary bar this one met, not a citation of precedent.
+
+**Amended on 2026-08-24 — the 5.1.0 exception above never shipped:** the "Decision" and "second, explicit, narrow exception" above (versioning the `LockWhenScaling` removal as 5.1.0) described a release that was planned but never published — the maintainer decided to discontinue it before it shipped, once the v6.0.0 overhaul (already authorized above) superseded it. Because no release was ever made under that decision, this is not a case of rewriting a decision this project already acted on (the immutability this document's own convention otherwise protects, e.g. Stage (a)'s v5.0.0 reset) — there is no shipped 5.1.0 to have a historical record of. v6.0.0 is v5.0.0's sole, direct successor; no v5.1.0 release exists or will exist. Stage (b) below is corrected accordingly: it now resumes from v6.0.0, with no intervening v5.1.0.
 
 ## Context and Problem Statement
 
@@ -62,7 +64,7 @@ Chosen option: "Two-stage regime", because it is the only option compatible with
 * Mandatory communication: `CHANGELOG.md` with a dedicated "Breaking changes v5.0.0" section, published *together with* the release, not after. Per the revision note above, this CHANGELOG section is the sole migration reference — no separate migration guide document.
 * **Support policy for previous versions (total cutoff, decision confirmed by the maintainer):** v4.x (and earlier majors) receive no fix after the v5.0.0 release — not even the concurrency bugs already documented in [ADR001](./ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md). There is no "one last courtesy" v4.0.2. Already-published releases remain available: (i) as GitHub tags/branches, as history; (ii) as already-published NuGet packages — which **cannot be deleted** (NuGet only allows unlisting/deprecating, never removal), so they remain installable even without receiving updates. `SECURITY.md` and `CONTRIBUTING.md` must explicitly state that only the latest major (v5.x onward) receives vulnerability/bug fixes.
 
-**Stage (b) — from v6.0.0 onward (see the 2026-08-22 amendment above; v5.0.0 through v5.1.0 fall under this stage's original text), strict SemVer resumed (follow-up action):**
+**Stage (b) — from v6.0.0 onward (see the 2026-08-24 amendment above; no v5.1.0 release exists between v5.0.0 and v6.0.0), strict SemVer resumed (follow-up action):**
 1. Document the policy in `CONTRIBUTING.md`: no public symbol is removed without `[Obsolete("migration message")]` for at least one release cycle.
 2. Change `publish.yml` to only run after `build.yml` has succeeded on the same commit (via `workflow_run` or by consolidating the workflows with `needs`) — **this item applies immediately, including to the v5.0.0 release itself**, it is not part of the "reset".
 3. Validate that the tag follows `vMAJOR.MINOR.PATCH` before `dotnet pack` — **also applies immediately**.
