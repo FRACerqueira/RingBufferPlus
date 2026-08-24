@@ -380,6 +380,83 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 12 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 11 (commits `821e4e7`..`1b7c06b`)
+não introduziram regressão, e achar o que passou batido nas onze primeiras
+rodadas.
+
+**Critério de parada definido ANTES de rodar, por decisão do usuário após
+uma análise de tendência das 11 rodadas anteriores**: se usabilidade e
+observabilidade voltarem limpas ou só com achado residual/trivial nesta
+rodada, a auditoria é encerrada formalmente ao final deste round — não é
+uma decisão a ser revisitada depois de ver o resultado.
+
+**Enquadramento:**
+- **Usabilidade**: enquadramento reduzido (mesmo tratamento que
+  complexidade teve antes de convergir) — padrão dos Rounds 9→10→11 foi
+  achado residual do próprio fix da rodada anterior, não descoberta nova.
+- **Observabilidade**: enquadramento completo normal.
+- **Desempenho**: verificação de regressão ligada ao que o Round 11 mudou
+  (2 comentários de código + doc do Monitor — sem mudança de
+  comportamento, então provavelmente sem alvo de medição).
+- Complexidade, estabilidade, resiliência não disparadas (convergidas).
+
+**Desempenho**: confirmou por leitura do diff completo que o Round 11 só
+mudou 2 blocos de comentário + doc — nenhuma linha de código executável.
+**Não mediu, explicitamente**: "sem mudança de código executável nesta
+rodada, nada para medir."
+
+**Usabilidade (reduzida)**: confirmou as 4 correções do Round 11
+corretas. **2 achados, ambos residuais da mesma decisão do Round 11**:
+- **[Baixo]** `usage-fixed-capacity.md:35` dizia que `MinCapacity`/
+  `MaxCapacity` "seriam sem sentido" (meaningless) para um pool fixo —
+  contradizendo a própria linha 39 do mesmo arquivo (corrigida no Round
+  11) e `concepts.md`. A razão real é só que não são *opções* de builder
+  separadas (só existe um valor pra configurar), não que não têm
+  significado — o floor guard os lê e age sobre eles ativamente.
+- **[Médio]** `usage-elastic-autoscale.md:30` dizia que uma amostra entra
+  na janela do Monitor "em todo tick de amostragem" — falso sempre que
+  `active` é verdadeiro (achado do Round 11), inclusive em utilização
+  plena comum. Esse guia não tinha sido tocado quando o Round 11 corrigiu
+  a mesma alegação em `usage-observability.md` e nos comentários de
+  código — lacuna de propagação da mesma decisão, não achado novo de
+  causa raiz.
+
+Ambos corrigidos diretamente (correções factuais inequívocas, sem novo
+trade-off).
+
+**Observabilidade**: confirmou o fix do Round 11 sem desvio (re-derivou a
+álgebra e releu `ProcessTick` de forma independente). **1 achado [Baixo],
+dispositivo (não precisou de corroboração)**: o XML doc da propriedade
+`Elastic` (`RingBufferManager.cs`, interna, não faz parte da API pública
+gerada) agrupava o floor guard junto com o backlog-reactive/Monitor como
+se os 3 fossem gateados por `Elastic` — "a fixed pool has nothing to
+scale". Falso: `EvaluateFloorGuard` nunca checa `Elastic` em nenhum dos 3
+pontos de chamada (ao contrário do backlog-reactive e do Monitor, ambos
+genuinamente gateados), e `FloorGuardDecision.cs`'s próprio comentário de
+classe já afirma isso. Como a classe é `internal`, nunca chegou a um
+consumidor externo — só um futuro mantenedor lendo o código-fonte.
+Corrigido diretamente. Varredura fresca completa de toda superfície de
+telemetria (2 arquivos que são os únicos a tocar `Meter`/`ActivitySource`/
+`ILogger` em todo o repo) sem mais nenhum achado.
+
+Verificado: 194/194 testes net10.0 (sem mudança de contagem — só doc e
+comentários nesta rodada), build limpo (0 warnings, 0 errors) em toda a
+solução (3 TFMs, samples, benchmarks, gerador de docs).
+
+**Critério de parada atingido**: usabilidade e observabilidade voltaram
+com achados residuais/triviais (propagação de uma decisão já tomada, e
+um comentário interno não-público, respectivamente) — nenhuma classe de
+bug nova, nenhum comportamento novo, nenhuma decisão de trade-off
+pendente. Conforme combinado antes de rodar esta rodada, **a auditoria
+pré-release do v6.0.0 é encerrada formalmente aqui, ao final do Round
+12.**
+
+Status: **fechado — auditoria encerrada.**
+
+---
+
 ## Round 11 — 2026-08-24
 
 Objetivo: verificar se o fix do Round 10 (commits `ab3592b`..`821e4e7`) não

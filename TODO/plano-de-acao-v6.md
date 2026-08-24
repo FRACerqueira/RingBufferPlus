@@ -585,3 +585,68 @@ Verificado: 194/194 testes net10.0 (201 no fechamento do Round 10, -7 pela
 remoção de testes redundantes, estável desde então), build limpo (0
 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
 de docs). Nenhum achado do Round 11 ficou em aberto sem decisão.
+
+## Round 12 — 2026-08-24 (última rodada — critério de parada atingido)
+
+Usabilidade reduzida, observabilidade completa, desempenho verificação de
+regressão. Critério de parada definido ANTES de rodar: se usabilidade e
+observabilidade voltarem só com achado residual/trivial, a auditoria
+encerra ao final deste round.
+
+**Corrigidos nesta rodada** (1 Baixo + 1 Médio de usabilidade, 1 Baixo de
+observabilidade, todos correções factuais diretas, sem trade-off):
+
+- `usage-fixed-capacity.md:35` — "MinCapacity/MaxCapacity seriam sem
+  sentido" corrigido (não são opções de builder separadas, mas têm
+  significado real via o floor guard).
+- `usage-elastic-autoscale.md:30` — "amostra entra na janela em todo tick"
+  corrigido (falso quando `active`, achado do Round 11 não propagado a
+  este guia).
+- `RingBufferManager.cs`'s XML doc da propriedade `Elastic` (interna) —
+  agrupava o floor guard com backlog-reactive/Monitor como se os 3 fossem
+  gateados por `Elastic`; corrigido para refletir que o floor guard nunca
+  é gateado por essa propriedade.
+
+**Sem mudança de código, confirmado por desempenho**: Round 11 só mudou
+comentários/doc — "sem mudança de código executável nesta rodada, nada
+para medir."
+
+Verificado: 194/194 testes net10.0 (sem mudança), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks,
+gerador de docs). Nenhum achado do Round 12 ficou em aberto sem decisão.
+
+---
+
+## Encerramento da auditoria pré-release v6.0.0 (Rounds 1-12)
+
+**12 rounds, 2026-08-23 a 2026-08-24.** Convergência formal atingida para
+3 dos 6 pilares (estabilidade Round 6, resiliência Round 6, complexidade
+Round 10). Desempenho teve seu papel redefinido no Round 9 (verificação
+de regressão ligada a mudanças de código, não frente que converge por "N
+rounds sem achado") — mudança registrada permanentemente em
+`auditoria-desempenho.md` no repositório compartilhado `C:\Sources\EA4AI`.
+Usabilidade e observabilidade nunca bateram 2 rounds limpos consecutivos,
+mas o padrão dos últimos rounds (7 em diante) foi de achados cada vez mais
+residuais/auto-referenciais (correção de uma rodada não propagada a todos
+os lugares que fazem a mesma alegação) em vez de descoberta de problema
+novo no código original do v6 — o critério de parada definido antes do
+Round 12 capturou exatamente esse platô.
+
+**Nenhum Crítico desde o Round 1.** Zero bugs de comportamento genuinamente
+novos desde o Round 10 (o fix do latch do floor guard) — os achados do
+Round 11-12 foram todos de precisão de documentação/comentário, sem
+mudança de comportamento.
+
+Investigação paralela de resíduo de teste (fora do formato de round)
+removeu 1 arquivo de teste redundante; nenhum resíduo morto de v4/v5.0/
+v5.1(descontinuada) encontrado na suíte.
+
+Uma questão de design foi identificada, avaliada com custo explícito e
+deliberadamente adiada (não implementada): estreitar a condição `active`
+do Monitor para `waiting > 0` em vez de `waiting >= idle`, o que
+permitiria escalonamento preditivo mesmo em utilização plena sem fila —
+exigiria estender a ferramenta de simulação existente
+(`AutoScaleAlgorithmComparison.cs`), não é um fix mecânico.
+
+Todos os commits permanecem locais (branch `v6`) — nada foi enviado ao
+remoto durante esta auditoria.
