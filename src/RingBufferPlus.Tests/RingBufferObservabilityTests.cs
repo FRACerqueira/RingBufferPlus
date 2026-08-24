@@ -312,6 +312,50 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task HeartBeat_UnhealthyVerdict_RecordsInvalidationCounter()
+        {
+            // Round 9 (Observabilidade, v6 pre-release audit): the HeartBeat's "unhealthy" verdict
+            // (callback returns false, the item is Invalidate()'d and replaced) - the most common
+            // way a HeartBeat-configured pool actually operates - emitted no log, metric, or trace
+            // of its own. The pump's one log line ("Heart Beat pump iteration finished") fires
+            // identically whether the verdict was healthy or not, so an operator watching telemetry
+            // alone could not tell a pool that's constantly cycling items from a perfectly healthy
+            // one. Confirmed empirically: 11 pulses of an always-unhealthy callback produced the
+            // exact same log sequence a healthy callback would have.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+
+            var manager = new RingBufferManager<int>(CancellationToken.None)
+            {
+                Name = bufferName,
+                Capacity = 2,
+                MinCapacity = 2,
+                MaxCapacity = 2,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromMilliseconds(50),
+                SamplesBase = TimeSpan.FromSeconds(30),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromMilliseconds(150),
+                BufferHeartBeat = _ => false,
+                Factory = _ => Task.FromResult(1)
+            };
+            await manager.WarmupAsync();
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            List<Measurement> invalidations;
+            do
+            {
+                await Task.Delay(25);
+                invalidations = records.Where(r => r.InstrumentName == "ringbufferplus.heartbeat.invalidations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            } while (invalidations.Count < 3 && DateTime.UtcNow < deadline);
+
+            await manager.DisposeAsync();
+            meterListener.Dispose();
+
+            Assert.True(invalidations.Count >= 3, $"Expected at least 3 heartbeat.invalidations records from repeated unhealthy verdicts, got {invalidations.Count}.");
+        }
+
+        [Fact]
         public async Task WaitingCallers_TriggerBacklogReactiveAutoScale_RecordsScaleOperation_WithBacklogTrigger()
         {
             var bufferName = UniqueBufferName();

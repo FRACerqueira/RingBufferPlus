@@ -104,6 +104,7 @@ namespace RingBufferPlus.Core
         private readonly Counter<long> _acquireFaults;
         private readonly Counter<long> _scaleOperations;
         private readonly Histogram<double> _scaleDuration;
+        private readonly Counter<long> _heartbeatInvalidations;
 
         private Task? _heartbeatTask;
         private Task? _sampleTickTask;
@@ -295,6 +296,12 @@ namespace RingBufferPlus.Core
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
             _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by buffer.name, direction, trigger, target, success, and cancelled.");
             _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by buffer.name, direction, trigger, target, success, and cancelled.");
+            // Round 9 (Observabilidade, v6 pre-release audit): the HeartBeat's "unhealthy" verdict -
+            // the most common way a HeartBeat-configured pool actually operates - had no signal of
+            // its own on any channel; the pump's one log line fired identically whether the verdict
+            // was healthy or not, so an operator watching telemetry alone could not tell a pool
+            // that's constantly cycling items from a healthy one.
+            _heartbeatInvalidations = _meter.CreateCounter<long>("ringbufferplus.heartbeat.invalidations", description: "Count of HeartBeat callback verdicts that invalidated the inspected item for replacement, tagged by buffer.name.");
             // Round 4 (Estabilidade, v6 pre-release audit): RingBufferBuilder.BuildCore constructs
             // this manager via object-initializer syntax - Name/Capacity/etc. (all `required`, none
             // with an inline default) are only assigned by the C# compiler AFTER this constructor
@@ -1860,6 +1867,8 @@ namespace RingBufferPlus.Core
                         if (!healthy)
                         {
                             acquired.Invalidate();
+                            _heartbeatInvalidations.Add(1, new KeyValuePair<string, object?>("buffer.name", Name));
+                            LogMessage("Heart Beat item invalidated - replacement will follow.");
                         }
                         // Round 1 (Resiliência, v6 pre-release audit): unlike TurnbackAsync's general
                         // contract for an external caller's own DisposeAsync() call (a hang there is
