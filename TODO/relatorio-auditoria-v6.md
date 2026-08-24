@@ -380,6 +380,99 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 10 — 2026-08-24
+
+Objetivo: verificar se o fix do Round 9 (commits `487d877`..`ab3592b`) não
+introduziu regressão, e achar o que passou batido nas nove primeiras
+rodadas.
+
+**Mesmo enquadramento do Round 9, por decisão do usuário:**
+- **Complexidade**: enquadramento reduzido (1ª rodada genuinamente limpa
+  no Round 9 — precisa de uma 2ª seguida para convergência formal).
+- **Usabilidade**: enquadramento completo (1ª rodada limpa no Round 9 —
+  mesma lógica).
+- **Desempenho**: verificação de regressão ligada a mudanças de código
+  (papel permanente, já registrado em `auditoria-desempenho.md` no
+  `C:\Sources\EA4AI`) — escopo desta rodada é só o que o Round 9 mudou
+  (o novo contador `heartbeat.invalidations` + log).
+- **Observabilidade**: enquadramento completo normal (não repete o
+  checklist exaustivo do Round 9 — cobertura já provada naquela rodada;
+  volta ao formato incremental padrão, ainda sem 2 rodadas limpas).
+- Estabilidade/resiliência não disparadas.
+
+**Complexidade (reduzida)**: confirmou por leitura direta que o novo
+`_heartbeatInvalidations.Add(...)` (Round 9) não introduz alocação
+evitável (mesmo padrão de `Counter<long>.Add` de 1 tag já usado em
+`_acquireFaults`/`_scaleOperations`, fora de hot path). Passada fresca sem
+achado novo. **2ª rodada limpa consecutiva — critério formal de
+convergência atingido para este pilar.**
+
+**Desempenho (verificação de regressão)**: avaliou a mudança do Round 9
+(contador + log no pump do heartbeat) e concluiu, por leitura direta, que
+não há alvo plausível de medição — o código só roda no máximo 1x por
+`PulseHeartBeat` (default 10s), fora de qualquer hot path, sem
+acoplamento com `AcquireAsync`/`SwitchToAsync`/o loop do engine. **Não
+mediu, com justificativa explícita** ("não force uma medição sem alvo") —
+primeira vez que o pilar redefinido produz essa resposta na prática,
+confirmando que o novo enquadramento funciona como pretendido.
+
+**Usabilidade**: não veio limpa — achou 1 Baixo de instância única,
+introduzido pelo próprio fix do Round 9. `usage-observability.md` afirmava
+duas vezes que o contador `heartbeat.invalidations` era "o único sinal
+(métrica, trace ou log)" desse veredito, mas o mesmo commit do Round 9
+(`ce1e768`) também adicionou um `LogMessage` de Debug para o mesmo evento —
+a doc foi escrita como se só a opção "B: contador" tivesse sido escolhida,
+não a "C: os dois" que de fato foi. Corrigido diretamente (erro factual
+meu, não uma decisão de trade-off) nos 2 pontos onde a afirmação aparecia.
+Reinicia a contagem de rodadas limpas desta frente em 1 (não confirma
+convergência formal ainda) — mesmo padrão de auto-alimentação já visto em
+observabilidade nos Rounds 6→7→8, agora do lado doc/usabilidade.
+
+**Observabilidade**: confirmou o contador/log do Round 9 conectados e
+batendo com a doc (após a correção da usabilidade acima). **1 achado
+[Alto], 1 achado [Baixo]:**
+- **[Alto] `EvaluateFloorGuard`'s `LogError` sem latch, e ausente da seção
+  de Logging** — repetia em toda chamada subsequente enquanto a brecha
+  persistisse (cadência do backoff compartilhado de retry, 100ms dobrando
+  até 5s), contradizendo `usage-elastic-autoscale.md:28`'s "loga um erro
+  uma vez". Também nunca apareceu na seção de Logging do
+  `usage-observability.md`, que se declara um inventário completo.
+  Apresentei 4 opções (A: latch + repete como fallback; B: só corrigir a
+  doc para "repete", aceitando o comportamento atual; C: os dois; D: só
+  registrar como limitação) — **escolhida A, com a ressalva explícita do
+  usuário de manter a repetição como fallback** (não silenciar depois do
+  1º report). Corrigido com uma função pura nova,
+  `FloorGuardDecision.ShouldReportNow` (mesmo padrão isolado-primeiro já
+  usado por `EvaluateBreach`/`HasGraceWindowElapsed`), testada
+  deterministicamente (6 testes unitários, sem depender de timing real) em
+  vez de por um teste de integração sensível a tempo — decisão tomada no
+  meio do trabalho depois que uma 1ª tentativa de teste E2E baseado em
+  timing real se mostrou pouco confiável para distinguir o comportamento
+  antigo do novo (a cadência do backoff já auto-limita os retries a uma
+  taxa comparável à da janela de graça na prática, mascarando a diferença
+  num teste cronometrado). Doc corrigida em 2 lugares
+  (`usage-elastic-autoscale.md`, `usage-observability.md`'s Logging
+  section, agora com 6 mensagens catalogadas em vez de 5).
+- **[Baixo] Doc descreve errado quando a janela de amostras do Monitor é
+  limpa** — `usage-observability.md:44` dizia que a limpeza acontece
+  "enquanto a demanda satura a capacidade"; o código (`ProcessTick`) só
+  limpa no tick em que o episódio *termina*, não durante ele — confirmado
+  por 2 fontes no próprio repo concordando entre si (o comentário do
+  código e a lógica executável) contra a doc. Impacto prático baixo (a
+  conclusão visível ao operador continua válida), mas o guia
+  explicitamente convida o leitor a reproduzir contra
+  `AutoScaleMonitor.EvaluateTarget` diretamente — quem modelasse "limpa no
+  início" erraria o estado da janela para o episódio inteiro. Corrigido
+  diretamente (erro factual, não decisão).
+
+Verificado: 201/201 testes net10.0 (era 194, +7 novos), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks,
+gerador de docs).
+
+Status: **fechado**.
+
+---
+
 ## Round 9 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 8 (commits `5316a99`..`487d877`) não

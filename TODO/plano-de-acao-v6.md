@@ -486,3 +486,54 @@ série):
 Verificado: 194/194 testes net10.0 (era 193, +1 novo), build limpo (0
 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
 de docs). Nenhum achado do Round 9 ficou em aberto sem decisão.
+
+## Round 10 — 2026-08-24
+
+Mesmo enquadramento do Round 9 (complexidade reduzida, usabilidade
+completa, desempenho como verificação de regressão, observabilidade
+voltando ao formato incremental normal).
+
+**Corrigidos nesta rodada** (1 Alto, 1 Baixo de doc de observabilidade, 1
+Baixo de doc de usabilidade):
+
+- **[Alto, observabilidade] `EvaluateFloorGuard` sem latch no `LogError`**
+  — repetia em toda chamada subsequente enquanto a brecha persistisse,
+  contradizendo `usage-elastic-autoscale.md`'s "loga uma vez", e nem
+  aparecia na seção de Logging do `usage-observability.md`. Apresentei 4
+  opções (A: latch + mantém repetindo como fallback; B: só corrigir a doc;
+  C: os dois; D: só registrar) — **escolhida A**, com a ressalva explícita
+  do usuário de manter a repetição (não silenciar após o 1º report).
+  Implementado como função pura nova `FloorGuardDecision.ShouldReportNow`
+  (mesmo padrão isolado-primeiro de `EvaluateBreach`/
+  `HasGraceWindowElapsed`), com 6 testes unitários determinísticos. Uma 1ª
+  tentativa de teste de integração baseado em timing real foi descartada
+  no meio do trabalho — a cadência do backoff de retry já auto-limita os
+  retries a uma taxa parecida com a da janela de graça, mascarando a
+  diferença entre comportamento antigo/novo num teste cronometrado; a
+  função pura, testada deterministicamente, é a verificação real. Doc
+  corrigida em 2 arquivos.
+- **[Baixo, observabilidade]** `usage-observability.md:44` descrevia
+  errado quando a janela de amostras do Monitor é limpa ("durante a
+  saturação" em vez de "no tick em que o episódio termina") — corrigido
+  diretamente, sem decisão (erro factual, impacto prático baixo).
+- **[Baixo, usabilidade]** Meu próprio texto do Round 9 dizia que o
+  contador `heartbeat.invalidations` era "o único sinal (métrica, trace ou
+  log)" do veredito não saudável, mas o mesmo commit do Round 9 também
+  adicionou um log — a doc não foi atualizada para refletir a opção C
+  (contador + log) que de fato foi escolhida. Corrigido diretamente (erro
+  factual meu).
+
+**Sem achado, rodada limpa** (complexidade): confirmou que o novo
+`_heartbeatInvalidations.Add(...)` do Round 9 não introduz alocação
+evitável. **2ª rodada limpa consecutiva — critério formal de convergência
+atingido para este pilar.**
+
+**Sem medição, com justificativa** (desempenho): avaliou a mudança do
+Round 9 (contador + log no pump do heartbeat, roda no máximo 1x por
+`PulseHeartBeat`, fora de hot path) e concluiu que não há alvo plausível —
+primeira vez que o pilar redefinido no Round 9 produz essa resposta na
+prática.
+
+Verificado: 201/201 testes net10.0 (era 194, +7 novos), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs). Nenhum achado do Round 10 ficou em aberto sem decisão.
