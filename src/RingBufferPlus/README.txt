@@ -41,16 +41,21 @@ Features
 
 What's new in the latest version
 =================================
-- v5.0.0 (latest released version) - complete, coordinated product overhaul with sweeping breaking changes.
-  See CHANGELOG.md's "Breaking changes v5.0.0" section for the full list; highlights:
-    - Concurrency core rewritten on System.Threading.Channels as a single state machine - no lock/semaphore.
-    - IDisposable removed; IAsyncDisposable is now the sole disposal contract (await using / DisposeAsync()).
-    - Public fluent builder surface redesigned around explicit, mutually exclusive FixedCapacity/ElasticCapacity modes,
-      replacing Capacity/ScaleTimer/MinCapacity/MaxCapacity.
-    - AcquireTimeout's delayAttempts parameter removed - a Channel-based acquire has no polling loop to pace.
-    - Acquire no longer blocks while a scale operation is in progress, regardless of LockWhenScaling.
-    - Added native observability (Meter/ActivitySource) - see doc/guides/usage-observability.md.
-    - v4.x and earlier receive no further fixes now that v5.0.0 has shipped.
+- v6.0.0 (latest released version) - complete, coordinated product overhaul with sweeping breaking changes.
+  See CHANGELOG.md's "Breaking changes" section for v6.0.0 for the full list; highlights:
+    - Concurrency model redesigned around four cooperating roles (Orquestrador/Fabrica/Remocao/Monitor) -
+      scale-up and scale-down execution now run off the engine's own single-consumer thread.
+    - Autoscale algorithm replaced: a sliding-window percentile + linear-regression trend Monitor, which can
+      scale up predictively from a rising demand trend alone, plus an always-active floor guard and
+      backlog-reactive signal - there is no more separate "automatic vs. manual" mode to opt into.
+    - SwitchToAsync redefined as a temporary pin with a required duration; ElasticCapacity's parameters
+      reshaped to (minCapacity, maxCapacity, target).
+    - AutoScaleAcquireFault and BackgroundLogger removed entirely; OnError simplified to Action<Exception>.
+    - HeartBeat redesigned to Func<T, bool>: return false to discard the item (a replacement is created in
+      its place), true to keep it - there is no disposable object handed to the callback to manage.
+    - WarmupRingBufferAsync removed - AddRingBuffer<T> now registers an IHostedService that warms up
+      automatically during host startup.
+    - v5.x and earlier receive no further fixes now that v6.0.0 has shipped.
 
 Basic Usage
 ===========
