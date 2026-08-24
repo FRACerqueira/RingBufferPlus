@@ -113,5 +113,5 @@ Chosen option: "Two-stage regime", because it is the only option compatible with
 * Related: [ADR005](./ADR005V01-async-disposal-strategy-and-graceful-shutdown.md) — exclusive `IAsyncDisposable` is another change covered by stage (a).
 * Related: [ADR003](./ADR003V01-median-sample-autoscaling-algorithm.md) — observable behavior changes to scaling also follow stage (b) from v5.0.0 onward.
 * Related: [ADR007 V02](./ADR007V02-redesign-of-the-public-fluent-api-surface.md) — the specific breaking removal this ADR's 2026-08-20 version-numbering exception covers, and the sibling deprecation-cycle exception for the same symbol.
-* Related: [ADR010](./ADR010V01-allow-partial-capacity-gains-when-a-scale-up-cannot-fully-complete.md) — one of the non-breaking, minor-shaped changes bundled into the same 5.1.0 release.
-* Related: `TODO/relatorio-viabilidade-ringbufferplus-v5.md` and `TODO/plano-de-acao.md` — the audit and implementation record for the whole 5.1.0 batch.
+* Related: [ADR010](./ADR010V01-allow-partial-capacity-gains-when-a-scale-up-cannot-fully-complete.md) — one of the non-breaking, minor-shaped changes originally planned for the discontinued 5.1.0 release (see the 2026-08-24 amendment above); carried forward into v6.0.0 instead.
+* Related: the v5.0.0 product-viability audit (its working documents have since been removed from the repository along with the discontinued 5.1.0 plan they targeted) — the audit and implementation record behind the batch of changes referenced above.
