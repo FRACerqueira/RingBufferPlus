@@ -252,12 +252,16 @@ namespace RingBufferPlus.Core
         public int SamplesCount { get; init; }
 
         /// <summary>
-        /// True for an elastic pool (ADR001V03/ADR007V03): the floor guard, backlog-reactive
-        /// signal, and Monitor are all unconditionally active whenever this is true, and inactive
-        /// (Monitor: not even started; backlog-reactive: gated off) when this is false - a fixed
-        /// pool has nothing to scale. There is no further "automatic vs. manual" split within an
-        /// elastic pool; <see cref="SwitchToAsync(ScaleSwitch, TimeSpan)"/> is a temporary pin over
-        /// the same always-on Monitor, not an alternative mode.
+        /// True for an elastic pool (ADR001V03/ADR007V03): the backlog-reactive signal and Monitor
+        /// are unconditionally active whenever this is true, and inactive (Monitor: not even
+        /// started; backlog-reactive: gated off) when this is false - a fixed pool has no elastic
+        /// range for either of them to move within. The floor guard is different: it is never gated
+        /// by this property at all (see <see cref="FloorGuardDecision"/>'s own class remarks) - it
+        /// applies uniformly in every mode, including fixed capacity, since a failed replacement can
+        /// shrink even a fixed pool's actual capacity below its own single value. There is no
+        /// further "automatic vs. manual" split within an elastic pool;
+        /// <see cref="SwitchToAsync(ScaleSwitch, TimeSpan)"/> is a temporary pin over the same
+        /// always-on Monitor, not an alternative mode.
         /// </summary>
         public bool Elastic { get; init; }
 
