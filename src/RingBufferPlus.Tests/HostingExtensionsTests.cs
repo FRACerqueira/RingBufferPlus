@@ -53,7 +53,7 @@ namespace RingBufferPlus.Tests
             ringBufferServiceMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             var services = new ServiceCollection();
-            services.AddSingleton(ringBufferServiceMock.Object);
+            services.AddKeyedSingleton("testBuffer", ringBufferServiceMock.Object);
             var serviceProvider = services.BuildServiceProvider();
 
             var hostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "testBuffer");
@@ -75,6 +75,41 @@ namespace RingBufferPlus.Tests
             var hostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "missingBuffer");
 
             await Assert.ThrowsAsync<InvalidOperationException>(() => hostedService.StartAsync(CancellationToken.None));
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 1 (Resiliência, v6 pre-release audit): the hosted service used to look up its
+        // own buffer via GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name ==
+        // buffername) - which forces the DI container to construct EVERY registered
+        // IRingBufferService<T>, not just the named one, because FirstOrDefault must enumerate
+        // in registration order until it finds a match. "bad" is registered before "good" here
+        // specifically so that looking up "good" would have to pass through "bad"'s factory
+        // first under the old implementation, faulting an otherwise-healthy buffer's startup.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public async Task HostedService_StartAsync_ForOneBuffer_DoesNotConstructAnUnrelatedBufferOfTheSameType()
+        {
+            var badFactoryInvoked = false;
+            var goodMock = new Mock<IRingBufferService<int>>();
+            goodMock.Setup(x => x.Name).Returns("good");
+            goodMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddRingBuffer<int>("bad", (_, _) =>
+            {
+                badFactoryInvoked = true;
+                throw new InvalidOperationException("bad buffer is intentionally broken");
+            });
+            services.AddRingBuffer<int>("good", (_, _) => goodMock.Object);
+
+            var serviceProvider = services.BuildServiceProvider();
+            var goodHostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "good");
+
+            await goodHostedService.StartAsync(CancellationToken.None);
+
+            Assert.False(badFactoryInvoked, "Starting one buffer's hosted service must not construct an unrelated, differently-named buffer of the same T.");
+            goodMock.Verify(x => x.WarmupAsync(It.IsAny<CancellationToken>()), Times.Once);
         }
     }
 }

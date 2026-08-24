@@ -37,11 +37,20 @@ namespace Microsoft.Extensions.DependencyInjection
         {
             ArgumentNullException.ThrowIfNull(buffername);
 
-            serviceCollection.AddSingleton((service) =>
+            // Round 1 (Resiliência, v6 pre-release audit): registered under a DI key (buffername)
+            // so the hosted service below can resolve exactly this buffer without touching any
+            // other AddRingBuffer<T> registration of the same T - a broken userfunc for buffer "B"
+            // must not fault buffer "A"'s startup. The plain (unkeyed) singleton right after it is
+            // still registered, unchanged in spirit from before this fix, purely to preserve the
+            // documented IEnumerable<IRingBufferService<T>>/"last one wins" constructor-injection
+            // behavior (see usage-dependency-injection.md) - it just forwards to the same keyed
+            // instance instead of constructing a second, divergent one.
+            serviceCollection.AddKeyedSingleton(buffername, (service, _) =>
             {
                 var loggerFactory = service.GetService<ILoggerFactory>();
                 return userfunc.Invoke(new RingBufferBuilder<T>(buffername, loggerFactory), service);
             });
+            serviceCollection.AddSingleton(service => service.GetRequiredKeyedService<IRingBufferService<T>>(buffername));
             serviceCollection.AddHostedService(service => new RingBufferWarmupHostedService<T>(service, buffername));
             return serviceCollection;
         }
@@ -55,7 +64,10 @@ namespace Microsoft.Extensions.DependencyInjection
     {
         public Task StartAsync(CancellationToken cancellationToken)
         {
-            var rb = services.GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name == buffername);
+            // Round 1 (Resiliência, v6 pre-release audit): resolved by DI key, not by enumerating
+            // and filtering every IRingBufferService<T> - see AddRingBuffer<T>'s own comment for
+            // why (this is what stops one buffer's broken factory from faulting another's startup).
+            var rb = services.GetKeyedService<IRingBufferService<T>>(buffername);
             if (rb is null)
             {
                 throw new InvalidOperationException($"RingBuffer({buffername}) not found");
