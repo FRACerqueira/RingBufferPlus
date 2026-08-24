@@ -337,9 +337,14 @@ namespace RingBufferPlus.Core
                     // Round 2 (Observabilidade, v6 pre-release audit): passed null here instead of
                     // the real exception, unlike RingBufferManager's own LogError - a structured
                     // sink (Application Insights, Serilog) reading the canonical Exception field
-                    // got nothing for a builder validation error, only the text embedded in
-                    // message.ToString().
-                    SafeInvokeSink(() => logMessageForErr(_logger!, _uniqueName, message.ToString(), message));
+                    // got nothing for a builder validation error, only the text embedded in the
+                    // message. Round 3: that text was message.ToString() (type + message + stack
+                    // trace) - far more verbose than RingBufferManager.LogError's own text field
+                    // (just error.Message), a format asymmetry a structured sink reading the text
+                    // field alone would see as inconsistent between the two classes. Narrowed to
+                    // message.Message to match - the full exception (type, stack trace) is already
+                    // available via the Exception argument now passed alongside it.
+                    SafeInvokeSink(() => logMessageForErr(_logger!, _uniqueName, message.Message, message));
                 }
             }
             else
