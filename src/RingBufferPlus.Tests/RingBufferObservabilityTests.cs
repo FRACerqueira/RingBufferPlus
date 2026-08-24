@@ -122,6 +122,10 @@ namespace RingBufferPlus.Tests
                 r.Tags.ContainsKey("acquire.timed_out") && Equals(r.Tags["acquire.timed_out"], false) &&
                 r.Tags.ContainsKey("acquire.cancelled") && Equals(r.Tags["acquire.cancelled"], false));
 
+            // Round 8 (Observabilidade, v6 pre-release audit): acquire.warmup_failed belongs on
+            // every row too, same tag-contract principle as timed_out/cancelled above.
+            Assert.Contains(durations, r => r.Tags.ContainsKey("acquire.warmup_failed") && Equals(r.Tags["acquire.warmup_failed"], false));
+
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(true, acquireActivity.GetTagItem("success"));
             Assert.Equal(false, acquireActivity.GetTagItem("timed_out"));
@@ -130,6 +134,7 @@ namespace RingBufferPlus.Tests
             // gap the metric above already had before Round 4 - "cancelled" was only ever set on the
             // caller-cancellation catch, so it was absent (not false) on every other span.
             Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
+            Assert.Equal(false, acquireActivity.GetTagItem("warmup_failed"));
         }
 
         [Fact]
@@ -166,6 +171,7 @@ namespace RingBufferPlus.Tests
             // Round 5 (Observabilidade, v6 pre-release audit): same tag-contract gap as the success
             // path - "cancelled" belongs on this row too, not just the caller-cancellation one.
             Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
+            Assert.Equal(false, acquireActivity.GetTagItem("warmup_failed"));
         }
 
         [Fact]
@@ -211,8 +217,17 @@ namespace RingBufferPlus.Tests
             var durations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
             Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], false));
 
+            // Round 8 (Observabilidade, v6 pre-release audit): without a dedicated tag, this row's
+            // acquire.success/timed_out/cancelled combination (false/false/false) was byte-identical
+            // to an ordinary DisposeAsync() racing an in-flight call - a metrics-only consumer (no
+            // ActivityListener attached, a perfectly normal configuration) could not tell "the buffer
+            // is permanently broken, every call is failing" from "a benign, transient shutdown race".
+            // acquire.warmup_failed is the only tag true on this specific row.
+            Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], false) && r.Tags.ContainsKey("acquire.warmup_failed") && Equals(r.Tags["acquire.warmup_failed"], true));
+
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(false, acquireActivity.GetTagItem("success"));
+            Assert.Equal(true, acquireActivity.GetTagItem("warmup_failed"));
         }
 
         [Fact]
@@ -245,6 +260,7 @@ namespace RingBufferPlus.Tests
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(false, acquireActivity.GetTagItem("success"));
             Assert.Equal(true, acquireActivity.GetTagItem("cancelled"));
+            Assert.Equal(false, acquireActivity.GetTagItem("warmup_failed"));
 
             // No acquire.faults increment for a caller cancellation - that counter is reserved for
             // genuine AcquireTimeout expirations.

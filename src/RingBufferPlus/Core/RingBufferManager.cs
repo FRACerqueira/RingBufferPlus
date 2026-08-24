@@ -361,16 +361,26 @@ namespace RingBufferPlus.Core
                 // first time this same failure was reached) - repeating it on every implicit call
                 // would turn ordinary acquire traffic against a known-broken buffer into a log-volume
                 // storm, the same failure mode ADR011 already avoided for retries.
+                // Round 8 (Observabilidade, v6 pre-release audit): without a dedicated tag, this
+                // row's success/timed_out/cancelled combination (false/false/false) was byte-
+                // identical to an ordinary DisposeAsync() racing an in-flight call below - a
+                // metrics-only consumer (no ActivityListener attached, a perfectly normal setup)
+                // could not tell "the buffer is permanently broken, every call is failing" from "a
+                // benign, transient shutdown race". acquire.warmup_failed/warmup_failed is `true`
+                // only here, `false` on every other row/span - same always-present contract as the
+                // other 3 tags.
                 using var failedWarmupActivity = _activitySource.StartActivity("RingBufferPlus.Acquire");
                 failedWarmupActivity?.SetTag("buffer.name", Name);
                 _acquireDuration.Record(Stopwatch.GetElapsedTime(warmupStartTimestamp).TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", false),
                     new KeyValuePair<string, object?>("acquire.timed_out", false),
-                    new KeyValuePair<string, object?>("acquire.cancelled", false));
+                    new KeyValuePair<string, object?>("acquire.cancelled", false),
+                    new KeyValuePair<string, object?>("acquire.warmup_failed", true));
                 failedWarmupActivity?.SetTag("success", false);
                 failedWarmupActivity?.SetTag("timed_out", false);
                 failedWarmupActivity?.SetTag("cancelled", false);
+                failedWarmupActivity?.SetTag("warmup_failed", true);
                 failedWarmupActivity?.SetStatus(ActivityStatusCode.Error);
                 throw;
             }
@@ -455,7 +465,8 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", BoxedTrue),
                     new KeyValuePair<string, object?>("acquire.timed_out", BoxedFalse),
-                    new KeyValuePair<string, object?>("acquire.cancelled", BoxedFalse));
+                    new KeyValuePair<string, object?>("acquire.cancelled", BoxedFalse),
+                    new KeyValuePair<string, object?>("acquire.warmup_failed", BoxedFalse));
                 activity?.SetTag("success", BoxedTrue);
                 activity?.SetTag("timed_out", BoxedFalse);
                 // Round 5 (Observabilidade, v6 pre-release audit): "cancelled" was only ever set on
@@ -463,6 +474,7 @@ namespace RingBufferPlus.Core
                 // span, the same tag-contract gap the Round 4 fix already closed for the
                 // acquire.duration histogram's own "cancelled" key.
                 activity?.SetTag("cancelled", BoxedFalse);
+                activity?.SetTag("warmup_failed", BoxedFalse);
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 return new RingBufferValue<T>(Name, elapsed, true, item, _turnbackDelegate);
             }
@@ -488,13 +500,15 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", false),
                     new KeyValuePair<string, object?>("acquire.timed_out", timedOut),
-                    new KeyValuePair<string, object?>("acquire.cancelled", false));
+                    new KeyValuePair<string, object?>("acquire.cancelled", false),
+                    new KeyValuePair<string, object?>("acquire.warmup_failed", false));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", timedOut);
                 // Round 5 (Observabilidade, v6 pre-release audit): same tag-contract gap as the
                 // success path above - "cancelled" belongs on every row, not just the caller-
                 // cancellation one below.
                 activity?.SetTag("cancelled", false);
+                activity?.SetTag("warmup_failed", false);
                 // Only a genuine timeout is a health signal worth an Error status (Round 4,
                 // Observabilidade - finding O2) - reaching this catch without timedOut means
                 // _lifetime (an ordinary shutdown) is what ended the wait instead, same
@@ -511,10 +525,12 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", false),
                     new KeyValuePair<string, object?>("acquire.timed_out", false),
-                    new KeyValuePair<string, object?>("acquire.cancelled", true));
+                    new KeyValuePair<string, object?>("acquire.cancelled", true),
+                    new KeyValuePair<string, object?>("acquire.warmup_failed", false));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", false);
                 activity?.SetTag("cancelled", true);
+                activity?.SetTag("warmup_failed", false);
                 // The caller choosing to cancel their own call is not a buffer health problem.
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 throw;
