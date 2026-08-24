@@ -71,17 +71,28 @@ namespace RingBufferPlus.Core
         private readonly List<int> _samples = [];
 
         // Monitor (ADR001V03/ADR003V03): whether the LAST TICK THAT ACTUALLY RAN observed demand
-        // keeping pace with or exceeding capacity ("active"). Verified empirically (a temporary
-        // per-tick counter, run across the full test suite): this is true far less often than the
-        // validated simulation's own "active" predicate, because Tick is skipped entirely while
-        // _scaling is true (see the Tick case's own comment) - and any real backlog large enough to
-        // make demand >= capacity almost always already has a Fábrica batch in flight by the time
-        // Tick would otherwise run, from EvaluateBacklogReactive's own immediate (non-Tick-cadenced)
-        // dispatch. The only realistic path where a Tick actually observes active=true is a buffer
-        // pinned at MaxCapacity with genuine backlog (EvaluateBacklogReactive early-returns there
-        // without dispatching, so _scaling never blocks Tick) - narrow, and moot for scaling up
-        // (already at Max), but still meaningful for the window once that backlog eventually clears
-        // and a scale-down needs a clean read.
+        // keeping pace with or exceeding capacity ("active"). demand = CurrentCapacity - idle +
+        // waiting, so active (demand >= CurrentCapacity) reduces algebraically to waiting >= idle -
+        // which includes genuine backlog (idle=0, waiting>0), but is NOT limited to it: ordinary
+        // full utilization with nobody actually queued (idle=0, waiting=0) satisfies it too, since
+        // 0 >= 0. Round 11 (Observabilidade, v6 pre-release audit): this was previously believed to
+        // be reachable only in a narrow case (a buffer pinned at MaxCapacity with genuine backlog,
+        // reasoning that any other real backlog already has a Fábrica batch in flight - _scaling
+        // true - by the time Tick would run, per the Tick case's own comment) - confirmed wrong by
+        // a direct reproduction: an elastic buffer held at exactly 100% utilization with zero
+        // waiters, for several tick cycles, produced zero "Monitor tick" log lines and never scaled,
+        // because idle=0/waiting=0 is active too and _scaling is false the whole time (no backlog
+        // signal ever fires when nobody is actually waiting). So a pool that sits at exactly its
+        // current capacity - a common, ordinary state, not just the MaxCapacity-pinned edge case -
+        // pauses the Monitor's own sample collection for as long as that lasts. Decided with the
+        // maintainer: documented as a known, accepted characteristic (the reactive backlog signal
+        // already takes over the instant demand would exceed capacity, so evaluating the Monitor at
+        // exactly-at-capacity is redundant with it) rather than changed - narrowing this to a
+        // waiting-only condition would be a real algorithm change needing the same decision-quality
+        // simulation ADR003V03 itself was validated with, which the existing
+        // AutoScaleAlgorithmComparison tool does not currently model (it feeds a synthetic demand
+        // sequence directly, not a separate idle/waiting split) - out of scope for a documentation
+        // fix.
         //
         // MoveToCapacityAsync's and FactoryBatchCompleted's own finally blocks already
         // unconditionally clear _samples after any scale operation completes (F6, pre-existing
@@ -1394,8 +1405,9 @@ namespace RingBufferPlus.Core
         //
         // While demand keeps pace with or exceeds capacity ("active"), the window is paused
         // entirely and cleared the instant that episode ends - see _monitorActive's own remarks for
-        // why this specific check is only reachable in a narrow case (pinned at MaxCapacity with
-        // backlog), not the general "reactive episode" the validated simulation modeled, and why a
+        // exactly which states satisfy this (broader than just genuine backlog - ordinary full
+        // utilization with nobody waiting qualifies too, confirmed by direct reproduction in Round
+        // 11), not the general "reactive episode" the validated simulation modeled, and why a
         // genuinely steady period (no scale op at all, deadband absorbing every small drift) still
         // lets the window grow to SamplesCount before demand next moves - a real, accepted
         // trade-off of the shipped defaults, not something this field or the pre-existing
