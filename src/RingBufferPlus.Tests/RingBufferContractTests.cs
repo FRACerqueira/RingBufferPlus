@@ -3504,6 +3504,53 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Round 10, Observabilidade: EvaluateFloorGuard's LogError had no latch tied to the grace
+        // window - each call that found the window already elapsed logged again, so a persistently
+        // broken factory reports forever (throttled only by the shared factory-retry backoff, not
+        // by the guard itself). Decided with the maintainer: log once when the grace window first
+        // elapses, then keep re-alerting on the same cadence as a fallback so an ongoing outage
+        // never goes fully silent - see FloorGuardDecisionTests for the precise, deterministic
+        // latch behavior. This test only proves the end-to-end wiring: the report does repeat at
+        // least once more given enough elapsed time, it does not go silent after the first one.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task Invalidate_WhenTheReplacementFactoryStaysBroken_RepeatsBelowMinimumReport_AsAFallback()
+        {
+            var replacementShouldThrow = false;
+            var errors = new List<Exception>();
+            var factoryTimeout = TimeSpan.FromMilliseconds(150);
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFloorGuardRepeatsAsFallback", null);
+            var service = await builder
+                .Factory(_ => replacementShouldThrow ? throw new InvalidOperationException("factory down") : Task.FromResult(1), factoryTimeout)
+                .OnError(ex => { lock (errors) errors.Add(ex); })
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            var acquired = await service.AcquireAsync();
+            replacementShouldThrow = true;
+            acquired.Invalidate();
+            await acquired.DisposeAsync(); // triggers ReplaceOne -> CreateSingleReplacementAsync, which never recovers
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            int reportCount;
+            do
+            {
+                await Task.Delay(50);
+                lock (errors)
+                {
+                    reportCount = errors.Count(e => e is InvalidOperationException ioe && ioe.Message.Contains("below minimum capacity"));
+                }
+            } while (reportCount < 2 && DateTime.UtcNow < deadline);
+
+            await service.DisposeAsync();
+
+            Assert.True(reportCount >= 2, $"Expected the report to fire again after the first one (fallback alerting for an ongoing outage must not go silent). Actual reports within 5s: {reportCount}.");
+        }
+
+        // ---------------------------------------------------------------------
         // 1.42-1.43 - Round 8, Resiliência Achado 1: CreateItemsAsync passed Factory the batch-level
         // token (overall.Token) and CreateSingleReplacementAsync passed it the full-lifetime token
         // (_lifetime.Token) - neither is the token that actually fires at the per-item FactoryTimeout

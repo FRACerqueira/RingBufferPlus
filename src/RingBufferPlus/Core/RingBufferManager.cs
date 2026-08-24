@@ -156,6 +156,11 @@ namespace RingBufferPlus.Core
         // grace window (FactoryTimeout, reused per the ADR) measures time since the breach started,
         // not since the most recent retry attempt.
         private DateTime? _floorBreachDetectedAt;
+        // Round 10 (Observabilidade, v6 pre-release audit): the instant the "below minimum" report
+        // last fired, or null if it never has for the current breach - see
+        // FloorGuardDecision.ShouldReportNow. Cleared alongside _floorBreachDetectedAt once the
+        // breach resolves, so a later, unrelated breach starts its own fresh report cadence.
+        private DateTime? _floorBreachLastReportedAt;
 
         // Fábrica (ADR001V03): the currently in-flight background scale-up batch (DispatchScaleUp),
         // if any - only ever written by the engine thread (single consumer), and only ever one at
@@ -1115,12 +1120,15 @@ namespace RingBufferPlus.Core
             if (deficit is null)
             {
                 _floorBreachDetectedAt = null;
+                _floorBreachLastReportedAt = null;
                 return;
             }
             _floorBreachDetectedAt ??= DateTime.UtcNow;
-            if (FloorGuardDecision.HasGraceWindowElapsed(_floorBreachDetectedAt.Value, DateTime.UtcNow, FactoryTimeout))
+            var now = DateTime.UtcNow;
+            if (FloorGuardDecision.ShouldReportNow(_floorBreachDetectedAt.Value, _floorBreachLastReportedAt, now, FactoryTimeout))
             {
                 LogError(new InvalidOperationException($"RingBuffer below minimum capacity for longer than one FactoryTimeout cycle: current={CurrentCapacity}, minimum={MinCapacity}."));
+                _floorBreachLastReportedAt = now;
             }
             if (_scaling)
             {

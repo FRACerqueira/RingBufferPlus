@@ -80,5 +80,35 @@ namespace RingBufferPlus.Core
             }
             return elapsed >= factoryTimeout;
         }
+
+        /// <summary>
+        /// Decides whether the "below minimum" report should fire right now - once when the grace
+        /// window first elapses, then again on that same cadence as a fallback, so a persistently
+        /// broken factory is never reported exactly once and then goes silent for the rest of the
+        /// outage. Round 10 (Observabilidade, v6 pre-release audit): the caller previously re-fired
+        /// on every single evaluation once the grace window had elapsed, once per call - however
+        /// often that happened to be, driven by the unrelated factory-retry backoff cadence, not by
+        /// this guard's own grace window. This decouples the two: the report repeats on its own
+        /// clock, whatever the retry cadence around it does.
+        /// </summary>
+        /// <param name="breachDetectedAt">The instant <see cref="EvaluateBreach"/> first reported a breach.</param>
+        /// <param name="lastReportedAt">
+        /// The instant the report last fired, or <see langword="null"/> if it has never fired for
+        /// this breach.
+        /// </param>
+        /// <param name="now">The current instant - passed explicitly, so this stays a pure function.</param>
+        /// <param name="factoryTimeout">The grace window's duration, reused as the re-report cadence too.</param>
+        /// <returns>
+        /// <see langword="true"/> the first time the grace window elapses, then again every time a
+        /// further <paramref name="factoryTimeout"/> has elapsed since <paramref name="lastReportedAt"/>.
+        /// </returns>
+        public static bool ShouldReportNow(DateTime breachDetectedAt, DateTime? lastReportedAt, DateTime now, TimeSpan factoryTimeout)
+        {
+            if (!HasGraceWindowElapsed(breachDetectedAt, now, factoryTimeout))
+            {
+                return false;
+            }
+            return lastReportedAt is null || HasGraceWindowElapsed(lastReportedAt.Value, now, factoryTimeout);
+        }
     }
 }

@@ -106,5 +106,93 @@ namespace RingBufferPlus.Tests
             var now = breachDetectedAt - TimeSpan.FromSeconds(5);
             Assert.False(FloorGuardDecision.HasGraceWindowElapsed(breachDetectedAt, now, TimeSpan.FromSeconds(15)));
         }
+
+        // ---------------------------------------------------------------------
+        // ShouldReportNow (Round 10, Observabilidade): the "below minimum" report must fire once
+        // when the grace window first elapses, then again on that same cadence as a fallback -
+        // never on every single evaluation (that was the bug: unbounded repeats driven by whatever
+        // cadence the caller happened to re-evaluate at), and never silent forever after the first
+        // report either.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public void ShouldReportNow_BeforeGraceWindowElapses_ReturnsFalse_RegardlessOfLastReportedAt()
+        {
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var now = detectedAt + TimeSpan.FromMilliseconds(100);
+            Assert.False(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt: null, now, TimeSpan.FromMilliseconds(150)));
+        }
+
+        [Fact]
+        public void ShouldReportNow_GraceWindowJustElapsed_NeverReportedBefore_ReturnsTrue()
+        {
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var now = detectedAt + TimeSpan.FromMilliseconds(150);
+            Assert.True(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt: null, now, TimeSpan.FromMilliseconds(150)));
+        }
+
+        [Fact]
+        public void ShouldReportNow_SoonAfterTheFirstReport_ReturnsFalse()
+        {
+            // This is the exact bug: without a latch, this call - happening while the grace window
+            // was already elapsed since detection - would report again immediately. The fix's whole
+            // point is that "elapsed since detection" is no longer sufficient once a report has
+            // already fired; it must also be a fresh grace-window's worth of time since that report.
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var lastReportedAt = detectedAt + TimeSpan.FromMilliseconds(150);
+            var now = lastReportedAt + TimeSpan.FromMilliseconds(50);
+            Assert.False(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt, now, TimeSpan.FromMilliseconds(150)));
+        }
+
+        [Fact]
+        public void ShouldReportNow_ManyRapidRetriesWithinOneWindow_OnlyTheFirstReports()
+        {
+            // Simulates the real failure mode: several evaluations happening well inside a single
+            // grace-window's worth of time (e.g. a batch of concurrent retry attempts all completing
+            // in quick succession). Only the first should report; the rest, still within the same
+            // window since that report, must not.
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var factoryTimeout = TimeSpan.FromMilliseconds(150);
+            var firstReportAt = detectedAt + factoryTimeout;
+            Assert.True(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt: null, firstReportAt, factoryTimeout));
+
+            DateTime? lastReportedAt = firstReportAt;
+            foreach (var offsetMs in new[] { 10, 30, 60, 90, 120 })
+            {
+                var now = firstReportAt + TimeSpan.FromMilliseconds(offsetMs);
+                Assert.False(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt, now, factoryTimeout));
+            }
+        }
+
+        [Fact]
+        public void ShouldReportNow_ExactlyOneWindowAfterTheLastReport_ReturnsTrue_ProvingItIsNotSilentForever()
+        {
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var factoryTimeout = TimeSpan.FromMilliseconds(150);
+            var lastReportedAt = detectedAt + factoryTimeout;
+            var now = lastReportedAt + factoryTimeout;
+            Assert.True(FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt, now, factoryTimeout));
+        }
+
+        [Fact]
+        public void ShouldReportNow_ManyWindowsLater_KeepsRepeatingOnceMore_NotJustTwice()
+        {
+            // The fallback must keep going for the life of the outage, not just fire a 2nd time and
+            // then stop - simulates 5 consecutive grace-window cycles, each with its own report.
+            var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+            var factoryTimeout = TimeSpan.FromMilliseconds(150);
+            DateTime? lastReportedAt = null;
+            var reportCount = 0;
+            for (var cycle = 1; cycle <= 5; cycle++)
+            {
+                var now = detectedAt + TimeSpan.FromTicks(factoryTimeout.Ticks * cycle);
+                if (FloorGuardDecision.ShouldReportNow(detectedAt, lastReportedAt, now, factoryTimeout))
+                {
+                    reportCount++;
+                    lastReportedAt = now;
+                }
+            }
+            Assert.Equal(5, reportCount);
+        }
     }
 }
