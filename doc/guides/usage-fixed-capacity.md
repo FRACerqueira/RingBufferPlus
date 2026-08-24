@@ -36,7 +36,7 @@ await rb.DisposeAsync();
 
 ## What happens internally
 
-`BuildWarmupAsync` builds `n` items via `Factory` (respecting the per-call `Factory` timeout) and blocks asynchronously until all `n` are in the pool. From then on, `Capacity`, `MinCapacity`, and `MaxCapacity` all report the same value, and `IsInitCapacity`/`IsMinCapacity`/`IsMaxCapacity` are always `true` simultaneously — there is no scale engine activity beyond the optional heartbeat/logger background tasks.
+`BuildWarmupAsync` builds `n` items via `Factory` (respecting the per-call `Factory` timeout) and blocks asynchronously until all `n` are in the pool. From then on, `Capacity`, `MinCapacity`, and `MaxCapacity` all report the same value, and `IsInitCapacity`/`IsMinCapacity`/`IsMaxCapacity` are always `true` simultaneously — there is no *elastic* scale engine activity (no backlog-reactive signal, no Monitor, no `SwitchToAsync`) beyond the optional heartbeat/logger background tasks. The floor guard is the one exception: it still applies here too, and can produce real `scale.*` telemetry and the "below minimum capacity" log (see [the observability guide](usage-observability.md)) if a failed heartbeat- or `Invalidate()`-triggered replacement ever drops `CurrentCapacity` below this value.
 
 ## Trade-offs / limitations
 
