@@ -441,3 +441,48 @@ de descarte já usado para H1/H2).
 Verificado: 193/193 testes net10.0 (era 192, +1 novo), build limpo (0
 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
 de docs). Nenhum achado do Round 8 ficou em aberto sem decisão.
+
+## Round 9 — 2026-08-24
+
+Enquadramento ajustado por pilar após análise de tendência de 8 rounds:
+complexidade reduzida, usabilidade completa, desempenho redefinido como
+verificação de regressão ligada a mudanças de código (registrado também em
+`C:\Sources\EA4AI\agents\auditoria-desempenho.md`, compartilhado entre
+projetos), observabilidade em formato de checklist único em vez de mais
+uma rodada incremental. Estabilidade/resiliência não disparadas.
+
+**Corrigido nesta rodada** (1 Médio):
+
+- **[Médio, observabilidade] Contador `ringbufferplus.heartbeat.invalidations`
+  adicionado** — o veredito "não saudável" do `HeartBeat` (`Invalidate()`
+  + substituição, o modo de operação mais comum do recurso) não gerava
+  nenhum sinal distinto de um pulso saudável em log/métrica/trace.
+  Apresentei 4 opções (A: log Debug; B: contador dedicado; C: os dois; D:
+  só documentar) — **escolhida C**. Comecei a implementar antes do
+  resultado de desempenho voltar (área de código sem overlap com o que
+  estava sendo medido - confirmado com o usuário antes de prosseguir).
+  Red/green: novo teste `HeartBeat_UnhealthyVerdict_RecordsInvalidationCounter`
+  falhou com 0 registros (motivo previsto), passou após adicionar o
+  contador + log logo após `Invalidate()`.
+
+**Sem achado, rodadas genuinamente limpas** (1ª vez para as duas nesta
+série):
+- Complexidade: confirmou a troca do `ConcurrentBag` do Round 8 sem
+  candidato novo; passada fresca sem achado.
+- Usabilidade: passada completa sem achado (1 typo cosmético fora do
+  escopo formal, não reportado como achado).
+
+**Medido, sem trade-off a decidir** (desempenho):
+- `ConcurrentBag`→`lock`+`List<Task>` (Round 8): confirmado como ganho
+  puro (~3-5x mais rápido, 0B de alocação vs. 32-176B/pulso) - não é
+  regressão, nada para escalar.
+- Tag `acquire.warmup_failed` (Round 8): +40B/+39ns mensurável, mas
+  confinado ao caminho com listener anexado; caminho sem listener
+  (o caso comum) ficou inalterado. Não recomendado para escalar.
+- Desempenho corrigiu a própria metodologia no meio do trabalho (baseline
+  errado na 1ª tentativa; microbenchmark inicial media construção de
+  coleção em vez de poda) antes de reportar os números finais.
+
+Verificado: 194/194 testes net10.0 (era 193, +1 novo), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs). Nenhum achado do Round 9 ficou em aberto sem decisão.

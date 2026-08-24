@@ -380,6 +380,113 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 9 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 8 (commits `5316a99`..`487d877`) não
+introduziram regressão, e achar o que passou batido nas oito primeiras
+rodadas.
+
+**Enquadramento revisado, com base numa análise de tendência por pilar
+pedida pelo usuário depois de 8 rounds:**
+- **Complexidade**: enquadramento reduzido (como estabilidade/resiliência
+  tiveram antes de convergir) — 3 rounds seguidos (6, 7, 8) sem nenhum
+  achado que precisasse de decisão própria (só candidatos roteados ou
+  auto-descartados pela própria frente). Confirmar fixes do Round 8 +
+  passada fresca rápida, não repetição completa das 8 rodadas anteriores.
+- **Usabilidade**: enquadramento completo, sem mudança — gravidade caiu
+  (só Baixo desde o Round 7) mas frequência não, ainda sem rodada limpa.
+- **Desempenho**: mudança de enquadramento permanente, não só desta
+  rodada — registrada agora também em `auditoria-desempenho.md` (repo
+  `C:\Sources\EA4AI`, compartilhado entre projetos): este pilar é
+  verificação de regressão ligada a mudanças de código, não uma frente
+  que precisa convergir por "N rodadas sem achado". Escopo desta rodada:
+  só o que o Round 8 mudou (`git diff 1c0d0fa..HEAD`), com destaque para a
+  troca `ConcurrentBag`→`lock`+`List<Task>` (`b7055a9`), implementada
+  depois que desempenho já tinha rodado no Round 8 e portanto nunca
+  medida.
+- **Observabilidade**: mudança de formato, não só de escopo — em vez de
+  mais uma rodada incremental (o padrão dos Rounds 6→7→8 foi cada fix de
+  observabilidade abrir a lacuna que o round seguinte encontrava nela
+  mesma), uma varredura única e deliberada, tipo checklist, de toda a
+  superfície de telemetria de `AcquireAsync`/`SwitchToAsync`/Scale de
+  ponta a ponta.
+- **Estabilidade/resiliência**: não disparadas (convergência formal
+  mantida).
+
+**Complexidade (reduzida)**: rodada genuinamente limpa — confirmou que a
+troca `ConcurrentBag`→`lock`+`List<Task>` do Round 8 não introduziu
+candidato novo (o `RemoveAll(t => t.IsCompleted)` não aloca delegate por
+chamada, já que a lambda não captura estado; e a premissa "roda a cada
+pulso" estava errada — o padrão só roda no caminho excepcional de dispose
+travado, nunca no pulso saudável). Passada fresca rápida sem achado.
+**1ª rodada genuinamente limpa desta frente** (distinta das 3 anteriores,
+que tinham candidato roteado/auto-descartado).
+
+**Usabilidade**: confirmou os 2 fixes de doc do Round 8. Passada completa
+(README, README.txt, CONTRIBUTING.md, SECURITY.md, CHANGELOG.md, os 9
+guias, ADRs, os 5 samples completos, XML docs) sem achado novo. Achou um
+typo cosmético fora do escopo formal (`RingBufferExtension.cs`,
+"requeried"→"required") que a própria frente decidiu não reportar como
+achado de usabilidade (não é divergência doc-código). **1ª rodada limpa
+desta frente em toda a série** (Rounds 1-8 sempre tiveram pelo menos 1
+achado Baixo).
+
+**Desempenho (verificação de regressão)**: mediu as 2 mudanças do Round 8
+que ainda não tinham número (a tag `warmup_failed` foi medida no Round 8
+mas antes da troca do `ConcurrentBag` ser implementada; a troca em si
+nunca foi medida). Corrigiu a própria metodologia no meio do trabalho
+(baseline errado na 1ª tentativa; microbenchmark inicial media custo de
+construção de coleção, não de poda — descartados, re-medidos
+corretamente). Resultado: **`ConcurrentBag`→`lock`+`List<Task>` é ganho
+puro** (~3-5x mais rápido, 0 B de alocação vs. 32-176 B/pulso no padrão
+antigo) — não é trade-off, não precisa de decisão. **Tag
+`acquire.warmup_failed`**: +40 B (+3.7%)/+39ns (+7.0%) mensurável, mas
+confinado ao caminho COM `MeterListener`/`ActivityListener` anexado — no
+caminho sem listener (o caso comum sem tracing, exatamente o que
+`ObservabilityOverheadBenchmarks`/ADR008 medem como "pay for play"),
+alocação e tempo ficaram inalterados (472 B, dentro do ruído). Não
+recomendado para escalar como achado — pequeno, simétrico ao custo que as
+outras 3 tags do mesmo histograma/Activity já pagam.
+
+**Observabilidade (checklist completo)**: confirmou a tag `warmup_failed`
+do Round 8 conectada nos 4 pontos. Varredura sistemática de 26 caminhos de
+execução públicos (`AcquireAsync`, `WarmupAsync`, `SwitchToAsync`,
+`DisposeAsync`, todas as branches do pump de `HeartBeat`), com tabela
+completa span/métrica/log/suficiente para cada um — não só uma lista de
+problemas, uma prova de cobertura. **1 achado novo [Médio], confirmado por
+leitura + reprodução empírica**: o veredito "não saudável" do `HeartBeat`
+(`Invalidate()` + substituição bem-sucedida — o modo de operação mais
+comum do recurso) não gerava log, métrica ou trace algum distinto de um
+pulso saudável (a única linha de log do pump é idêntica nos dois casos).
+Apresentei 4 opções ao usuário (A: log Debug; B: contador dedicado; C:
+os dois; D: só documentar) — **escolhida C**. Corrigido com red/green:
+novo contador `ringbufferplus.heartbeat.invalidations` (tag
+`buffer.name`) + log Debug, ambos emitidos logo após `Invalidate()`.
+Início da correção não esperou o resultado de desempenho (área de código
+sem overlap com o que estava sendo medido). 3 outros candidatos
+investigados e descartados como limitação já aceita ou inalcançável na
+prática (`SwitchToAsync` sem sinal próprio, `ChannelClosedException`
+teórico mas inalcançável pela ordem real de `DisposeAsync`).
+
+**Tendência de convergência (8→9 rounds)**: 2 das 4 frentes ativas
+(complexidade, usabilidade) bateram rodada limpa pela primeira vez na
+série, confirmando a análise de tendência feita antes desta rodada.
+Desempenho teve seu papel formalmente redefinido (registrado também em
+`auditoria-desempenho.md`, repositório compartilhado `C:\Sources\EA4AI`):
+verificação de regressão ligada a mudanças de código, não frente medida
+por "N rounds sem achado". Observabilidade, no novo formato de checklist
+único, achou 1 Médio genuíno mas também entregou pela primeira vez uma
+prova de cobertura completa da superfície de telemetria - próxima rodada
+decide se isso é suficiente para considerar essa frente coberta por ora.
+
+Verificado: 194/194 testes net10.0 (era 193, +1 novo), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks,
+gerador de docs).
+
+Status: **fechado**.
+
+---
+
 ## Round 8 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 7 (commits `1c0d0fa`..`5316a99`) não
