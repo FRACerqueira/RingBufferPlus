@@ -42,13 +42,13 @@ If the callback does **not** return within `pulse`, there is no bool to interpre
 
 Any exception the callback throws, and a callback that doesn't finish within `pulse`, are both caught internally and routed through the configured error handler (`OnError`) — neither crashes the pump nor propagates to any caller. A thrown exception does **not** discard the item (it is returned to the pool normally, same as `true`) — only an explicit `false` return does.
 
-**A `false` verdict on an item whose own `Dispose()`/`DisposeAsync()` then hangs stalls this pump until it returns** (this is not new: it is the same shape of unbounded wait a caller's own `Invalidate()` already has). The engine's capacity bookkeeping is not blocked by this either way — the replacement is dispatched before that wait begins.
+**A `false` verdict on an item whose own `Dispose()`/`DisposeAsync()` then hangs delays this pump by at most one `pulse`, not forever.** The engine's capacity bookkeeping is not blocked by this either way — the replacement is dispatched before that wait begins. The dispose itself is bounded by `pulse`: if it hasn't finished by then, it's deferred (same mechanism as the orphaned-callback case above) and the pump moves on to its next tick; `DisposeAsync()` on the buffer itself still waits for that deferred disposal, bounded the same way. This differs from a caller's own `Invalidate()` + `DisposeAsync()` on their own `RingBufferValue<T>`, which still awaits the item's dispose directly and unbounded — a hang there is genuinely local to that caller's own call, not something the framework can bound on their behalf.
 
 ## Trade-offs / limitations
 
 - A heartbeat acquisition competes with real callers for a pool slot, the same as any `AcquireAsync` — under a fully saturated pool, a heartbeat tick can find nothing available and skip silently (best-effort, not guaranteed to run every `pulse`).
 - The pump awaits the callback (up to `pulse`) before scheduling the next tick — a slow callback delays subsequent pulses and, if it exceeds `pulse`, is abandoned and logged as a timeout. Keep it fast, or hand off long work to another task/queue from inside it. Abandoning it also means the slot is replaced (not just skipped) and the original item's disposal is deferred until the callback itself finishes — see "What happens internally" above.
-- Returning `false` for an item whose own dispose can hang (e.g. a stuck network connection) delays the *next* heartbeat pulse, not just this one — see "What happens internally" above for why that's a deliberate trade-off, not a bug.
+- Returning `false` for an item whose own dispose can hang (e.g. a stuck network connection) delays the pump by at most one `pulse` before the disposal is deferred and the pump moves on — see "What happens internally" above.
 
 ## Common errors
 
