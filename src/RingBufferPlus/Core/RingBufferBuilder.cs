@@ -312,7 +312,11 @@ namespace RingBufferPlus.Core
 
         private void LogMessage(string message)
         {
-            if (_logger is null || !_logger.IsEnabled(LogLevel.Debug)) return;
+            // Round 2 (Estabilidade, v6 pre-release audit): IsEnabled itself is a call into
+            // untrusted external code (same F23 class as SafeInvokeSink below) and can throw -
+            // guarded via SafeIsEnabled rather than called raw, same fix already applied to the
+            // sibling gap this one was modeled after in RingBufferManager.LogMessage.
+            if (_logger is null || !SafeIsEnabled(_logger, LogLevel.Debug)) return;
 
             SafeInvokeSink(() => logMessageForDbg(_logger, _uniqueName, message, null));
         }
@@ -328,14 +332,31 @@ namespace RingBufferPlus.Core
 
             if (_errorHandler is null)
             {
-                if (_logger!.IsEnabled(LogLevel.Error))
+                if (SafeIsEnabled(_logger!, LogLevel.Error))
                 {
-                    SafeInvokeSink(() => logMessageForErr(_logger, _uniqueName, message.ToString(), null));
+                    // Round 2 (Observabilidade, v6 pre-release audit): passed null here instead of
+                    // the real exception, unlike RingBufferManager's own LogError - a structured
+                    // sink (Application Insights, Serilog) reading the canonical Exception field
+                    // got nothing for a builder validation error, only the text embedded in
+                    // message.ToString().
+                    SafeInvokeSink(() => logMessageForErr(_logger!, _uniqueName, message.ToString(), message));
                 }
             }
             else
             {
                 SafeInvokeSink(() => _errorHandler.Invoke(message));
+            }
+        }
+
+        private static bool SafeIsEnabled(ILogger logger, LogLevel level)
+        {
+            try
+            {
+                return logger.IsEnabled(level);
+            }
+            catch
+            {
+                return false;
             }
         }
 

@@ -248,6 +248,29 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public void ValidateBuild_LogsTheRealValidationException_NotNull()
+        {
+            // Round 2 (Observabilidade, v6 pre-release audit): LogError passed null as the
+            // Exception parameter instead of the real exception, unlike RingBufferManager's own
+            // LogError - a structured logging sink (Application Insights, Serilog) reading the
+            // canonical Exception field got nothing for a builder validation error.
+            _loggerMock.Setup(l => l.IsEnabled(LogLevel.Error)).Returns(true);
+            Exception? capturedException = null;
+            _loggerMock.Setup(l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+                .Callback(new InvocationAction(invocation => capturedException = invocation.Arguments[3] as Exception));
+
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).FixedCapacity(1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+            Assert.NotNull(capturedException);
+        }
+
+        [Fact]
         public void ValidateBuild_ShouldThrowException_WhenPulseHeartBeatIsZero()
         {
             // Round 1 (Resiliência, v6 pre-release audit): PulseHeartBeat sustains several
