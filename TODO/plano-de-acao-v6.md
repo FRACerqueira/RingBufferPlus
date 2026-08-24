@@ -78,3 +78,39 @@ solução (3 TFMs, samples, benchmarks, gerador de docs) a cada etapa.
 complexidade (estruturas de dados do algoritmo Monitor, valor questionável nos
 defaults atuais), gaps de cobertura de benchmark (recomendação, não um fix de
 código existente).
+
+## Round 2 — 2026-08-24
+
+Todas as pendências acima resolvidas nesta rodada (corroborações rodadas, decisões
+tomadas — ver `relatorio-auditoria-v6.md` Round 1 para os detalhes). Round 2 em si:
+6 frentes fresh, mesmo enquadramento do Round 1, focadas em regressão + achados
+novos. 3/6 precisaram de retentativa por infra (mesma falha recorrente de stall/erro
+de API já vista no Round 1).
+
+**Achados fechados nesta rodada** (12 total: 2 Alto, 6 Médio, 4 Baixo — ver
+`relatorio-auditoria-v6.md` seção Round 2 para os detalhes completos de cada um):
+
+- 2 Alto: guard `IsEnabled` desprotegido (violação do invariante F23) — introduzido
+  pela própria correção desta sessão, achado pela estabilidade; `AddHostedService`
+  deduplicando por tipo (pré-existente desde ADR007V03, nunca antes pego) — só o 1º
+  buffer de cada T recebia warmup automático, achado pela resiliência após ~65min
+  de investigação real.
+- 2 Médio de código: falha tardia do dispose adiado do heartbeat não observada
+  (mesmo padrão `ContinueWith` da F12/F15 aplicado); duas imprecisões de mensagem
+  de log corrigidas junto.
+- Doc: 4 achados de usabilidade (guias desatualizados face aos fixes do Round 1),
+  overclaim do log do Monitor corroborado independentemente por 2 frentes com prova
+  empírica, assimetria target/trigger nos logs, e a recomendação de
+  `IEnumerable<IRingBufferService<T>>` substituída por `[FromKeyedServices]`
+  (verificado empiricamente que funciona por construtor plano em qualquer host).
+- 2 achados pré-existentes ao v6 (não regressão desta sessão, mas fechados por
+  decisão do usuário): mesma classe do bug do guard `IsEnabled` em
+  `RingBufferBuilder.cs`; `LogError` do builder passando `null` em vez da exceção
+  real para sinks estruturados.
+- Confirmação empírica de desempenho (Baixo, sem regressão): o fix do `LogMessage`
+  guard mede ~39x mais rápido no caminho gated, mas impacto absoluto desprezível.
+  Benchmark novo (`MonitorTickLogGuardBenchmarks.cs`) mantido no repo.
+
+Verificado: 186/186 testes net10.0 (era 183, +3 novos), build limpo (0 warnings,
+0 errors) em toda a solução a cada etapa. Nenhum achado do Round 2 ficou em aberto
+sem decisão.

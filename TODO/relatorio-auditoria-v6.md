@@ -368,3 +368,205 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
   empírica (2 `SwitchToAsync` sequenciais, activities vieram como raízes
   independentes) E por argumento estrutural (gate `_scaling` garante no máximo uma
   activity de Scale em voo por vez, sem caminho de burla).
+
+---
+
+## Round 2 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 1 (commits `a9eaac1`..`d87e90c`, ver
+`plano-de-acao-v6.md`) não introduziram regressão, e achar o que passou batido na
+primeira rodada. Mesmos 6 ângulos do Round 1. Grafo do graphify NÃO reatualizado
+desta vez (mudança incremental pequena — 6 commits de fix, não uma reestruturação;
+decisão de custo/benefício, não uma omissão).
+
+Status: em andamento.
+
+### auditoria-desempenho — concluída (retentativa)
+
+- ✅ **[BAIXO — confirmado com número real]** Confirmou empiricamente o achado da
+  complexidade sobre `LogMessage`: sem o guard `IsEnabled`, cada tick pagava
+  ~220ns/344B mesmo com Debug desligado; com o guard (já corrigido nesta sessão),
+  cai para ~5.6ns — ganho de ~39x em tempo, mas escala absoluta desprezível
+  (~0.7µs/s por buffer elástico). Não é regressão do v6 — o gap já existia, o
+  Round 1 só copiou o comentário errado para um call site de maior frequência.
+  Benchmark novo `MonitorTickLogGuardBenchmarks.cs` adicionado ao repo (mede o
+  guard isoladamente, sem depender de `RingBufferManager` inteiro).
+- Nenhuma regressão de desempenho encontrada nas mudanças do Round 1
+  (`DispatchScaleUp`/`DispatchScaleDown`'s tags novas, `LogWarning` condicional).
+
+### auditoria-estabilidade — concluída (retentativa)
+
+- ✅ **[ALTO — corrigido, encontrado no próprio fix desta sessão]** O guard novo
+  `!Logger.IsEnabled(LogLevel.Debug)` adicionado ao `LogMessage` (correção do achado
+  de complexidade acima) **não estava protegido por `SafeInvokeSink`** — violação do
+  invariante F23 já documentado no arquivo ("uma chamada para Logger/ErrorHandler do
+  consumidor é código não confiável, nunca pode escapar para quebrar um pump
+  compartilhado"). Confirmado empiricamente (sonda descartável) que
+  `Microsoft.Extensions.Logging.Logger.IsEnabled` (a implementação que a maioria dos
+  consumidores via DI usa) agrega e relança exceções de provider — um provider
+  disposado antes do manager (ordem de shutdown do host não é garantida) faria
+  `Logger.IsEnabled` lançar, matando `_engineTask` ou `_heartbeatTask`
+  permanentemente e silenciosamente (sem `ObjectDisposedException` visível ao
+  chamador — o buffer continua respondendo a `AcquireAsync` normalmente, só sem
+  escalar/heartbeat). Corrigido: novo `SafeIsEnabled(logger, level)` (mesmo padrão
+  `try/catch` de `SafeInvokeSink`, trata exceção como "não habilitado"). Mesma classe
+  de bug pré-existente (não desta sessão) em `RingBufferBuilder.cs:315,331` —
+  registrada mas não corrigida ainda (blast radius bem menor, só build-time).
+- ✅ **[MÉDIO/BAIXO — corrigido]** Duas imprecisões na mensagem `LogWarning` do fix
+  do heartbeat: "capacity was already corrected" só é verdade no caminho
+  `!healthy`/Invalidate (removida da mensagem); "orphaned heartbeat callback(s)" em
+  `DisposeAsync`'s warning de grace-period é impreciso para entradas vindas do novo
+  branch saudável (onde o callback já retornou, só o dispose está lento) — reescrita
+  para "pending heartbeat item dispose(s)", cobrindo os dois casos. Doc
+  (`usage-observability.md`) atualizada para bater com o texto novo.
+- Verificado e sem achado: `_disposed volatile`, padrão prune+re-add reaproveitado no
+  branch saudável (sem race nova), robustez da checagem `scaleTrigger == "manual"`
+  (confirmado que `DispatchScaleDown` só é chamado com `"manual"` ou `"auto"`, nunca
+  outro valor), thread-safety do campo `Logger` em si (imutável após construção,
+  `init`-only).
+- ✅ **[BAIXO, pré-existente — corrigido por decisão do usuário 2026-08-24]**
+  `RingBufferBuilder.cs`'s mesma classe de bug do guard `IsEnabled` desprotegido
+  (linhas 315, 331) — corrigido com o mesmo `SafeIsEnabled` já usado em
+  `RingBufferManager.cs`. Fechou a classe completa nesta sessão, não só a instância
+  de maior blast radius.
+
+### auditoria-resiliencia — concluída (a mais demorada, ~65min de investigação real)
+
+- ✅ **[ALTO — corrigido, achado NOVO não relacionado ao Round 1]** `AddHostedService<T>(factory)`
+  registra via `TryAddEnumerable`, que deduplica por `(ServiceType, ImplementationType)`.
+  Como `RingBufferWarmupHostedService<T>` é o MESMO tipo fechado para todo
+  `AddRingBuffer<T>` do mesmo `T` (independente do `buffername`), toda chamada além
+  da primeira para um dado `T` registrava **zero** `IHostedService` de verdade —
+  silenciosamente, sem exceção, sem log. Confirmado lendo o código-fonte real do
+  runtime (`dotnet/runtime`) e empiricamente (probe: 2 buffers do mesmo T → só 1
+  `IHostedService` registrado, só o 1º recebe warmup automático). Pré-existente desde
+  `de5d8ce` (ADR007V03), não uma regressão do Round 1 — mas é exatamente o tipo de
+  "miss" que o Round 2 existe para pegar (o teste de regressão do Round 1 não via
+  esse bug porque constrói o hosted service manualmente em vez de resolver via DI).
+  Severidade Alto porque `EnsureWarmupAsync` (o warmup implícito de
+  `AcquireAsync`/`SwitchToAsync`) não tem retry — um buffer que nunca recebeu o
+  warmup automático fica com `_warmup` permanentemente faltado se a 1ª tentativa real
+  tiver um hiccup transiente, e `usage-dependency-injection.md` documentava esse
+  cenário (múltiplos buffers do mesmo T) como suportado, afirmando "warmup é
+  automático" — falso para todos além do 1º. Corrigido: `AddSingleton<IHostedService>`
+  (aditivo, não deduplica por tipo) em vez de `AddHostedService`. Red/green feito.
+- ✅ **[MÉDIO — corrigido, confirmado 2/2 já que a estabilidade também achou o mesmo
+  guard desprotegido por outro ângulo]** Falha tardia do dispose adiado no branch
+  saudável do heartbeat (mesmo fix do Round 1) não era observada — ao contrário do
+  branch F12/F15 irmão (que envolve seu dispose adiado num `ContinueWith` que loga a
+  falha), a task crua era adicionada direto no bag. Confirmado empiricamente com um
+  probe cuidadosamente isolado (flag de hang por instância, não um evento
+  compartilhado — evita que o outro item idle do pool mascare o resultado via seu
+  próprio observador já correto). Corrigido: mesmo padrão `ContinueWith` da F12/F15.
+  Red/green feito (isolando a mesma armadilha de mascaramento que a auditoria
+  descreveu).
+- ✅ **[MÉDIO — resolvido via doc, decisão do usuário 2026-08-24]** O padrão
+  documentado `IEnumerable<IRingBufferService<T>>` (workaround para resolver
+  múltiplos buffers do mesmo T por construtor plano) ainda constrói TODOS os buffers
+  registrados daquele T quando resolvido — undermina o próprio propósito do fix de
+  acoplamento do Round 1 (commit `50a2f9b`) para esse caminho específico de acesso.
+  Confirmado empiricamente: um buffer "bad2" quebrado faz
+  `GetServices<IRingBufferService<int>>()` lançar mesmo quando o consumidor só
+  queria "good2". Não é um "bug de DI" no sentido usual — `IEnumerable<T>` construir
+  todas as implementações é semântica padrão de DI — mas contradizia a documentação
+  que recomendava esse padrão como "a" forma de resolver múltiplos buffers. Usuário
+  decidiu remover a recomendação de `IEnumerable`. Fui além do "só remover": propus
+  e verifiquei empiricamente (probe descartável, console app puro sem ASP.NET Core)
+  que `[FromKeyedServices(buffername)]` — usando a MESMA chave de DI que o hosted
+  service já usa — resolve corretamente por construtor plano em qualquer host
+  (não é feature exclusiva de MVC), dando isolamento de verdade nesse caminho.
+  `usage-dependency-injection.md` atualizado com a alternativa correta.
+- Verificado e sem achado: o fix do hang do `DisposeAsync` em si (confirmado via
+  teste existente + leitura, retorna em ~2×`PulseHeartBeat` no pior caso);
+  `_disposed volatile`; validação `PulseHeartBeat > 0` (grep na suíte inteira, nenhum
+  uso legítimo de zero); duas chamadas `AddRingBuffer<T>` com o MESMO `buffername`
+  (seguro, "last wins" via keyed DI, na prática subsumido pelo Achado 1 de qualquer
+  forma); coexistência de singleton keyed/não-keyed e double-disposal (`_disposeGuard`
+  já cobre).
+
+### auditoria-usabilidade — concluída
+
+- ✅ **[MÉDIO-ALTO — corrigido]** `usage-dependency-injection.md:49` ainda descrevia o
+  mecanismo de lookup PRÉ-fix ("looks up the singleton by name among every
+  `IRingBufferService<T>`"), exatamente o que o fix do acoplamento de DI do Round 1
+  eliminou — o texto usava quase as palavras invertidas do próprio comentário do fix
+  ("not by enumerating and filtering every..."). Doc não tocada no Round 1, achado
+  exatamente do tipo que a tarefa pediu para caçar. Corrigido para descrever a
+  garantia de isolamento nova.
+- ✅ **[MÉDIO — corrigido]** `usage-heartbeat.md:45,51` ainda afirmava que um `false`
+  com `Dispose()` travando "stalls this pump until it returns" e é "the same shape of
+  unbounded wait" que `Invalidate()` — ambas as frases contradiziam diretamente o fix
+  do hang de `DisposeAsync` do Round 1 (agora limitado a `PulseHeartBeat`). Corrigido
+  para descrever o comportamento limitado e deferido atual.
+- ✅ **[BAIXO-MÉDIO — corrigido]** A nova mensagem `LogWarning` do fix do heartbeat
+  ("Heart Beat item dispose did not complete within one pulse...") não aparecia em
+  nenhum guia — `usage-observability.md`'s seção de Logging enumerava só 4 categorias.
+  Adicionada como 5ª categoria.
+- ✅ **[MÉDIO — corrigido, corroborado independentemente pela observabilidade com
+  prova empírica]** `usage-observability.md:43` superestimava a cobertura do log de
+  Debug do Monitor ("this is the only way to answer why didn't it scale") — na
+  verdade não loga nada durante um episódio "ativo" (demanda saturando capacidade),
+  nem quando o Tick é pulado por `_scaling`/pin manual ativos. Corrigido.
+- Verificado e sem achado: README.txt, overview.md, concepts.md, ADR007V03,
+  usage-elastic-autoscale.md, usage-rabbitmq.md, OnError nas 3 interfaces, docs de
+  API geradas, os 5 samples, todos os benchmarks — nenhuma referência a API removida
+  ou comportamento desatualizado além dos achados acima.
+
+### auditoria-complexidade — concluída
+
+- ✅ **[BAIXA, corrigido imediatamente — não é trade-off, é bug]** Comentário do
+  Round 1 em `ProcessTick`'s `LogMessage` afirmava incorretamente que `LogMessage` já
+  checava `IsEnabled(Debug)` — na verdade só checava `Logger is null`. Como o Round 1
+  passou a chamar `LogMessage` a cada tick do Monitor (~300ms por padrão, pela vida
+  inteira de todo buffer elástico, não só por operação de scale como as chamadas
+  pré-existentes), isso significava formatar uma string + criar um closure sem
+  necessidade sempre que um `Logger` está configurado, mesmo com nível mínimo acima
+  de Debug. Corrigido: `!Logger.IsEnabled(LogLevel.Debug)` adicionado ao guard de
+  `LogMessage` (mesmo padrão já usado em `RingBufferBuilder.cs`), comentário
+  corrigido.
+- **[BAIXA-MÉDIA, não medida — encaminhado]** Varredura fresca encontrou um padrão
+  pré-existente (não tocado pelo Round 1) de "CTS/timer por requisição" em
+  `AcquireCoreAsync` (`RingBufferManager.cs:297-299`) — potencialmente o único
+  caminho verdadeiramente quente-por-requisição da biblioteca. `AcquireThroughputBenchmarks.cs`
+  já existe e já tem `[MemoryDiagnoser]`, cobrindo exatamente esse caminho —
+  encaminhado para `auditoria-desempenho` ler a coluna `Allocated` antes de decidir
+  se vale investigar mais. Se virar proposta de fix, precisa de `auditoria-estabilidade`
+  primeiro (mexe em cancelamento/timeout).
+- H1/H2/H3 revisitados só para confirmar que não foram alterados pelo Round 1 —
+  decisões anteriores permanecem válidas, nenhum motivo novo para reabrir.
+
+### auditoria-observabilidade — concluída
+
+- Verificação item a item de todas as 6 mudanças de telemetria do Round 1 (tag
+  `target`, tag `trigger` em `scale.duration`, `scaleTrigger` nos logs, 3 logs de
+  Debug do `ProcessTick`, `LogWarning` do pin, doc do `OnError`) — **todas corretas**,
+  confirmadas lendo o código real ponto a ponto (arquivo:linha citado para cada uma).
+  `LogWarning` do pin confirmado disparar se e somente se `!scaledDown &&
+  scaleTrigger == "manual"` — "nem mais, nem menos", já que `floor`/`backlog` nunca
+  chegam a scale-down.
+- Suspeita de parent-chaining de `Activity` reinvestigada de forma independente
+  (4 `SwitchToAsync` sequenciais) — refutada de novo, corrobora a conclusão do
+  Round 1.
+- ✅ **[MÉDIO — mesmo achado do overclaim do log do Monitor acima, corroborado
+  independentemente com prova empírica mais forte]** Probe com `Logger` real
+  capturando Debug: fase idle capturou 21 linhas "Monitor tick" (prova que o pump
+  está vivo); fase saturada (`CurrentCapacity` já em `MaxCapacity`, ~30 ciclos de
+  tick em 3s) capturou **zero** linhas novas — falsificação direta e discriminada
+  (não "log ausente", mas "log ausente com o pump comprovadamente processando
+  ticks"). Também identificou 2 pontos adicionais de "skip" (Tick pulado por
+  `_scaling` ativo, e por pin manual ativo) que também nunca passam pelos 3
+  `LogMessage` — mesma causa raiz, já coberto pela correção de doc acima.
+- ✅ **[BAIXO — corrigido]** Assimetria: os 4 logs de texto livre de scale agora
+  interpolam `trigger` mas não `target`, enquanto as métricas/Activity carregam
+  ambos. A mesma justificativa do Round 1 para adicionar `trigger` ao texto se aplica
+  a `target`.
+- ✅ **[BAIXO, pré-existente ao v6 — corrigido por decisão do usuário 2026-08-24]**
+  `RingBufferBuilder.cs:333`'s `LogError` sempre passava `null` como o parâmetro
+  `Exception?` do `LoggerMessage.Define`, mesmo quando a exceção real está
+  disponível — `RingBufferManager.cs:1863`'s `LogError` passa corretamente. Confirmado
+  via `git log -L` que a diferença é pré-existente (commit `d10d2ee`, antes do v6
+  audit), não regressão do Round 1. Gap real para sinks estruturados (Application
+  Insights, Serilog) que dependem do campo `Exception` canônico. Corrigido: passa a
+  exceção real. Red/green feito (captura via Moq do argumento `Exception?` real
+  passado a `ILogger.Log`). Corrigiu de brinde um warning de nulidade que o próprio
+  refactor do guard `IsEnabled` (achado acima) tinha introduzido.
