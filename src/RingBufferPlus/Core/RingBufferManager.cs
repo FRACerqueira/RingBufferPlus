@@ -293,6 +293,30 @@ namespace RingBufferPlus.Core
         private ValueTask<RingBufferValue<T>> AcquireForHeartbeatAsync(CancellationToken cancellation) =>
             AcquireCoreAsync(countsTowardFaultBudget: false, cancellation);
 
+        // Round 4 (Resiliência, v6 pre-release audit): _disposed is set synchronously as the very
+        // first step of DisposeAsync, but _lifetime.Dispose() only runs at the end of its finally,
+        // after awaiting in-flight engine/heartbeat/sample-tick work - a TOCTOU window between a
+        // caller's ObjectDisposedException.ThrowIf(_disposed, this) guard passing and its next
+        // _lifetime.Token access. CancellationTokenSource.Token's getter (and CreateLinkedTokenSource
+        // over it) throws ObjectDisposedException on an already-disposed source regardless of this
+        // check, but with ObjectName pointing at CancellationTokenSource instead of this manager -
+        // still the right exception type, just a confusing identity for anyone reading it as an
+        // unrelated internal failure during an otherwise-ordinary graceful shutdown. Since _disposed
+        // flips to true strictly before _lifetime is ever disposed, catching that specific case here
+        // and re-throwing through the same guard restores the identity a caller already expects.
+        private CancellationToken LifetimeToken()
+        {
+            try
+            {
+                return _lifetime.Token;
+            }
+            catch (ObjectDisposedException)
+            {
+                ObjectDisposedException.ThrowIf(_disposed, this);
+                throw;
+            }
+        }
+
         private async ValueTask<RingBufferValue<T>> AcquireCoreAsync(bool countsTowardFaultBudget, CancellationToken cancellation)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -318,7 +342,7 @@ namespace RingBufferPlus.Core
             // not worth the risk of reopening one of those classes of bug for it. Same "keep as-is"
             // trade-off shape as the 4x amplification decision in CreateItemsAsync.
             using var timeoutCts = new CancellationTokenSource(AcquireTimeout);
-            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _lifetime.Token, cancellation);
+            using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, LifetimeToken(), cancellation);
             var isWaiting = false;
             try
             {
@@ -441,12 +465,12 @@ namespace RingBufferPlus.Core
 
                 var accepted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                await _commands.Writer.WriteAsync(EngineCommand.Switch(value, pinDuration, accepted, completion), _lifetime.Token).ConfigureAwait(false);
+                await _commands.Writer.WriteAsync(EngineCommand.Switch(value, pinDuration, accepted, completion), LifetimeToken()).ConfigureAwait(false);
 
                 // Both bounded by _lifetime.Token: if this command loses its race against disposal
                 // and is abandoned unread in the channel, this must not hang forever waiting for
                 // signals nobody will ever send.
-                var wasAccepted = await accepted.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+                var wasAccepted = await accepted.Task.WaitAsync(LifetimeToken()).ConfigureAwait(false);
                 if (!wasAccepted)
                 {
                     return false;
@@ -462,7 +486,7 @@ namespace RingBufferPlus.Core
                     _ = completion.Task.ContinueWith(static t => { _ = t.Exception; }, TaskContinuationOptions.OnlyOnFaulted);
                     return true;
                 }
-                return await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+                return await completion.Task.WaitAsync(LifetimeToken()).ConfigureAwait(false);
             }
             // R24 (Round 7, Resiliência): only an ordinary shutdown of this buffer's own lifetime
             // resolves to a plain `false` here - a raw OperationCanceledException/TaskCanceledException
@@ -656,11 +680,11 @@ namespace RingBufferPlus.Core
             try
             {
                 var completion = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
-                await _commands.Writer.WriteAsync(EngineCommand.Warmup(completion), _lifetime.Token).ConfigureAwait(false);
+                await _commands.Writer.WriteAsync(EngineCommand.Warmup(completion), LifetimeToken()).ConfigureAwait(false);
                 // Bounded by _lifetime.Token: if this command loses its race against disposal and is
                 // abandoned unread in the channel, this must not hang forever waiting for a completion
                 // signal nobody will ever send.
-                reached = await completion.Task.WaitAsync(_lifetime.Token).ConfigureAwait(false);
+                reached = await completion.Task.WaitAsync(LifetimeToken()).ConfigureAwait(false);
             }
             // R23 (Round 7, Resiliência): only an ordinary shutdown of this buffer's own lifetime
             // resolves to reached=false here - a raw OperationCanceledException/TaskCanceledException

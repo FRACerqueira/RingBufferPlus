@@ -998,6 +998,43 @@ namespace RingBufferPlus.Tests
             Assert.Equal(2, probe.DisposeCount);
         }
 
+        // Round 4 (Resiliência, v6 pre-release audit): _disposed flips to true synchronously as
+        // the first step of DisposeAsync, but _lifetime.Dispose() only runs once its finally has
+        // awaited in-flight engine/heartbeat/sample-tick work - a caller that already passed
+        // AcquireCoreAsync/SwitchToAsync/WarmupCoreAsync's ObjectDisposedException.ThrowIf(_disposed,
+        // this) guard can still observe _lifetime already disposed by the time it reaches
+        // _lifetime.Token, which throws ObjectDisposedException with the CancellationTokenSource's
+        // identity instead of this manager's - a correct exception type with a confusing identity.
+        // No corruption, leak, or hang results (TurnbackAsync already handles the concurrent-drain
+        // ChannelClosedException case) - only a misleading exception message under an otherwise
+        // ordinary graceful shutdown racing a caller.
+        //
+        // The race window itself is a handful of CPU instructions between two field reads inside
+        // the same async method and cannot be forced deterministically without instrumenting
+        // production code, so a true end-to-end red-then-green against the original bug is not
+        // achievable here (a probabilistic stress test racing AcquireAsync against DisposeAsync
+        // was run manually during the audit and did reproduce it, but is too flaky/slow to commit
+        // as a permanent regression test). This test instead pins the fix's actual contract
+        // deterministically: reflectively invoke the private LifetimeToken() helper the three call
+        // sites now route every _lifetime.Token access through, once the manager has already
+        // completed a real DisposeAsync() - the exact end-state the race exposes early - and assert
+        // the exception it throws identifies this manager, not the CancellationTokenSource.
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task LifetimeToken_AfterDisposeAsync_ThrowsWithTheManagersIdentity_NotTheCancellationTokenSources()
+        {
+            var manager = CreateFixedManager(1, _ => Task.FromResult(1));
+            await manager.WarmupAsync();
+            await manager.DisposeAsync();
+
+            var lifetimeTokenMethod = manager.GetType().GetMethod("LifetimeToken", BindingFlags.NonPublic | BindingFlags.Instance)
+                ?? throw new InvalidOperationException("Method 'LifetimeToken' not found.");
+
+            var thrown = Assert.Throws<TargetInvocationException>(() => lifetimeTokenMethod.Invoke(manager, null));
+            var ex = Assert.IsType<ObjectDisposedException>(thrown.InnerException);
+            Assert.DoesNotContain("CancellationTokenSource", ex.Message);
+        }
+
         // ---------------------------------------------------------------------
         // v6.0.0 / ADR001V03 pre-work (Round 8 blast-radius sweep, paused finding): unlike its two
         // siblings (DisposeAsync()'s drain loop, RemoveItemsAsync via DisposeItemsDefensivelyAsync),
