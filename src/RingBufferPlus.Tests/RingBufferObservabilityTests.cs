@@ -169,6 +169,53 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task AcquireAsync_AfterWarmupFailureIsCached_StillRecordsDurationAndActivity()
+        {
+            // Round 7 (Observabilidade, v6 pre-release audit): EnsureWarmupAsync's Lazy<Task> caches
+            // a failed initial warmup attempt (ADR011 - only an explicit WarmupAsync() call installs
+            // a fresh attempt and retries). Before this fix, every implicit AcquireAsync call after
+            // that first failure rethrew the cached exception before ever reaching
+            // _activitySource.StartActivity, leaving zero telemetry (no span, no acquire.duration
+            // row) on every one of those calls - a dashboard would show total silence, not a fault
+            // spike, during exactly the window every single AcquireAsync call is failing.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            var manager = new RingBufferManager<int>(CancellationToken.None)
+            {
+                Name = bufferName,
+                Capacity = 2,
+                MinCapacity = 1,
+                MaxCapacity = 4,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromSeconds(30),
+                SamplesBase = TimeSpan.FromSeconds(30),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromMilliseconds(150),
+                Elastic = false,
+                Factory = _ => throw new InvalidOperationException("boom")
+            };
+
+            // The explicit call gets the one-time LogError inside WarmupCoreAsync - not under test here.
+            await Assert.ThrowsAsync<InvalidOperationException>(() => manager.WarmupAsync());
+
+            // Act: an implicit call through AcquireAsync rethrows the same cached failure...
+            await Assert.ThrowsAsync<InvalidOperationException>(() => manager.AcquireAsync().AsTask());
+
+            await manager.DisposeAsync();
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            // ...but must still leave a trace on both signals: this is the fix under test.
+            var durations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], false));
+
+            var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
+            Assert.Equal(false, acquireActivity.GetTagItem("success"));
+        }
+
+        [Fact]
         public async Task AcquireAsync_CallerCancellation_StillRecordsAnOutcome_BeforeRethrowing()
         {
             var bufferName = UniqueBufferName();

@@ -343,7 +343,37 @@ namespace RingBufferPlus.Core
         private async ValueTask<RingBufferValue<T>> AcquireCoreAsync(bool countsTowardFaultBudget, CancellationToken cancellation)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            await EnsureWarmupAsync().ConfigureAwait(false);
+            var warmupStartTimestamp = Stopwatch.GetTimestamp();
+            try
+            {
+                await EnsureWarmupAsync().ConfigureAwait(false);
+            }
+            catch
+            {
+                // Round 7 (Observabilidade, v6 pre-release audit): EnsureWarmupAsync's Lazy<Task>
+                // caches a failed initial warmup attempt (ADR011 - only an explicit WarmupAsync()
+                // call installs a fresh attempt and retries). Every implicit call through here keeps
+                // rethrowing that same cached exception - before this fix, that rethrow happened
+                // before _activitySource.StartActivity even ran, so a sustained warmup failure
+                // produced zero telemetry on every channel (no span, no acquire.duration row) for as
+                // long as it lasted, even though every single call was genuinely failing. Deliberately
+                // NOT calling LogError here (that already happened once, inside WarmupCoreAsync, the
+                // first time this same failure was reached) - repeating it on every implicit call
+                // would turn ordinary acquire traffic against a known-broken buffer into a log-volume
+                // storm, the same failure mode ADR011 already avoided for retries.
+                using var failedWarmupActivity = _activitySource.StartActivity("RingBufferPlus.Acquire");
+                failedWarmupActivity?.SetTag("buffer.name", Name);
+                _acquireDuration.Record(Stopwatch.GetElapsedTime(warmupStartTimestamp).TotalSeconds,
+                    new KeyValuePair<string, object?>("buffer.name", Name),
+                    new KeyValuePair<string, object?>("acquire.success", false),
+                    new KeyValuePair<string, object?>("acquire.timed_out", false),
+                    new KeyValuePair<string, object?>("acquire.cancelled", false));
+                failedWarmupActivity?.SetTag("success", false);
+                failedWarmupActivity?.SetTag("timed_out", false);
+                failedWarmupActivity?.SetTag("cancelled", false);
+                failedWarmupActivity?.SetStatus(ActivityStatusCode.Error);
+                throw;
+            }
 
             using var activity = _activitySource.StartActivity("RingBufferPlus.Acquire");
             activity?.SetTag("buffer.name", Name);
