@@ -21,7 +21,7 @@ RingBufferPlus is a bounded, thread-safe pool of reusable instances of `T` — b
 
 Full version history has moved to [CHANGELOG.md](CHANGELOG.md).
 
-**v5.0.0 (latest released version)** is a complete, coordinated product overhaul with sweeping breaking changes, plus one additive feature carried forward without a breaking change: native OpenTelemetry-compatible observability (metrics and tracing, see [ADR008](doc/adr/ADR008V01-native-observability-via-open-telemetry-compatible-metrics-and-tracing.md)) — see the [ADRs](doc/adr/indexadrs.md) and the CHANGELOG's "Breaking changes v5.0.0" section (the sole migration reference — no separate migration guide is provided) for full context. v4.x no longer receives fixes now that v5.0.0 has shipped.
+**v6.0.0 (latest released version)** is a complete, coordinated product overhaul with sweeping breaking changes to the concurrency model, autoscale algorithm, and public fluent API surface — see the [ADRs](doc/adr/indexadrs.md), the CHANGELOG's "Breaking changes" section for v6.0.0 (the sole migration reference — no separate migration guide is provided), and the [pre-release audit report](doc/audits/v6.0.0-pre-release-audit.md) for full context. v5.x no longer receives fixes now that v6.0.0 has shipped.
 
 ## Installing
 
