@@ -1,5 +1,11 @@
 # RingBufferPlus v6.0.0 — Design Proposal (Consolidated)
 
+> **SUPERSEDED.** This is a point-in-time analysis from before v6.0.0 implementation began. The
+> ADRs it fed into (see the mapping table at the end) are the current source of truth and have
+> since been revised past what's described here (e.g. ADR004/ADR006/ADR007 are now at V02/V03).
+> Kept for the reasoning trail, not as an accurate description of v6.0.0 today — if this document
+> and an ADR disagree, the ADR is right (Round 6, v6 pre-release audit - usabilidade).
+
 This document consolidates a full design analysis conducted before any v6.0.0 implementation work started. It exists to carry the reasoning behind each decision into the ADRs that formalize them (see the mapping table at the end). Once those ADRs are accepted, this document is a narrative companion, not the source of truth — the ADRs are, following this project's own established convention (see ADR006's revision note on `doc/action-plan.md`).
 
 ## 1. Context: three generations, not two
