@@ -421,7 +421,23 @@ com o comentário reescrito para descrever o mecanismo que **previne** o bug
 **Resiliência** (enquadramento reduzido): nenhum achado novo, fixes do Round 5
 confirmados sem regressão — **2ª rodada consecutiva sem achado**, critério de
 convergência por frente atingido (junto com estabilidade, cujo único achado
-desta rodada foi investigado e refutado, não um bug confirmado).
+desta rodada foi investigado e refutado, não um bug confirmado). *Verificação:
+este parágrafo foi conferido diretamente contra o relatório bruto do subagente
+no transcript desta sessão (não inferido da ausência do achado na lista de
+pendências pós-compactação) — o subagente de fato reportou "nenhum achado
+novo" de forma explícita.*
+
+**Nota sobre o achado de estabilidade**: o próprio subagente classificou a
+suspeita de leak de `Activity.Current` como achado de instância única
+(reportado por apenas 1 das 6 frentes nesta rodada) e sinalizou
+explicitamente que precisava de corroboração 2-de-3 antes de ser tratado como
+confirmado, em vez de resolvido unilateralmente. Nenhuma outra frente desta
+rodada corroborou o achado independentemente. Em vez de esperar por votos de
+outras frentes, resolvi diretamente por reprodução empírica no
+`RingBufferManager` real (teste `ConsecutiveScaleOperations_...`) — um padrão
+de evidência mais forte que contagem de corroboração, e que produziu um
+resultado definitivo (refutado, com mecanismo identificado), não apenas um
+placar de votos.
 
 **Observabilidade** (achados O9/O10/O11, todos decididos/corrigidos nesta
 mesma sessão):
