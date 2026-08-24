@@ -284,6 +284,21 @@ namespace RingBufferPlus.Core
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
             _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction, trigger, and success.");
             _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by direction, trigger, and success.");
+            // Round 4 (Estabilidade, v6 pre-release audit): RingBufferBuilder.BuildCore constructs
+            // this manager via object-initializer syntax - Name/Capacity/etc. (all `required`, none
+            // with an inline default) are only assigned by the C# compiler AFTER this constructor
+            // already returns, but the gauge callback above closes over `Name`/`CurrentCapacity` and
+            // _engineTask starts below, both before that assignment happens. A MeterListener that
+            // polls this ObservableGauge in the few-CPU-instruction window between this constructor
+            // returning and BuildCore's object initializer finishing would read `buffer.name: null`
+            // - a spurious telemetry reading, not a state corruption (CurrentCapacity's backing
+            // field is already a valid 0 at this point, same as before warmup). Left as-is rather
+            // than restructured: closing this for real means decoupling engine-start/gauge-registration
+            // from the builder's object-initializer pattern - e.g. taking Name/Capacity/etc. as
+            // constructor parameters instead - which is a change to how every RingBufferManager<T> is
+            // constructed, not a one-line fix, for a narrow window with only a cosmetic failure mode.
+            // Same "keep as-is, document as a trade-off" shape as the CTS/timer decision in
+            // AcquireCoreAsync below.
             _meter.CreateObservableGauge("ringbufferplus.capacity.current",
                 () => new Measurement<int>(CurrentCapacity, new KeyValuePair<string, object?>("buffer.name", Name)),
                 description: "Current capacity of the buffer.");
