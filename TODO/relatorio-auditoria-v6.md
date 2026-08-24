@@ -371,6 +371,175 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 4 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 3 (commits `af84bd1`..`8990c78`) não
+introduziram regressão, e achar o que passou batido nas três primeiras rodadas.
+**Atenção redobrada desta vez**: os Rounds 2 e 3 tiveram cada um um caso de fix
+"confirmado como corrigido" que na verdade não estava — o helper `SafeIsEnabled`
+foi criado no Round 2 mas só conectado de fato no Round 3, e isso só foi pego
+porque 3 frentes reproduziram empiricamente o cenário, não porque testes/build
+falharam. Cada frente deste Round 4 foi instruída a não confiar em comentários
+de código/relatório que dizem "corrigido" — reler o código real e, quando fizer
+sentido, reproduzir empiricamente antes de aceitar. Mesmos 6 ângulos. Grafo do
+graphify não reatualizado (mesma decisão de custo/benefício das rodadas
+anteriores).
+
+### Confirmação dos 4 fixes do Round 3 (por leitura direta + reprodução, não por confiar no relatório)
+
+Nenhuma repetição do padrão "comentário diz corrigido, código não conecta" dos
+Rounds 2/3 — cada um dos 4 fixes foi confirmado por pelo menos 2 frentes
+independentes, e o guard `SafeIsEnabled` foi confirmado com vermelho→verde real
+(estabilidade e resiliência reverteram temporariamente a linha, reproduziram a
+falha, restauraram e reconfirmaram verde):
+
+- `SafeIsEnabled` conectado em `RingBufferManager.LogMessage` — confirmado por
+  estabilidade (vermelho→verde), resiliência (vermelho→verde + teste existente),
+  desempenho (fora do caminho quente), observabilidade (leitura + teste).
+- `Stopwatch.GetTimestamp`/`GetElapsedTime` + delegate `_turnbackDelegate`
+  cacheado — confirmado por estabilidade (sem race, campo `readonly` setado antes
+  de qualquer uso), resiliência (sem mudança de comportamento sob shutdown),
+  complexidade (conectado, sem custo novo), desempenho (496 B confirmado com
+  medição própria em 2 processos independentes, redução real de 104 B/17,3%).
+- Comentário sobre CTS/timer eager permanecer como está — confirmado consistente
+  com o código real (`!linked.IsCancellationRequested` antes do fast path
+  intacto) por resiliência e complexidade; observabilidade e usabilidade
+  concordam que não precisa de reflexo em guia público (mesmo precedente do "4x
+  amplification").
+- `RingBufferBuilder.LogError` usando `message.Message` — confirmado por
+  resiliência e observabilidade (exceção completa ainda anexada, `ReferenceEquals`
+  verificado); observabilidade nota que a alegação de "paridade" do commit não é
+  literalmente exata (ver achado O3 abaixo).
+
+### Achados novos
+
+- ✅ **[ALTO — usabilidade, corrigido]** `src/RingBufferPlus/README.txt:44,50`
+  ("What's new"): afirma "v5.0.0 (latest version)" e que `AutoScaleAcquireFault`/
+  `SwitchToAsync` manual são "mutually exclusive at the type level" — os dois
+  falsos sob v6 (`AutoScaleAcquireFault` foi removido inteiramente; todo pool
+  elástico suporta `SwitchToAsync` incondicionalmente). O arquivo se
+  autocontradiz: 37 linhas depois (`:87`) já descreve corretamente o
+  comportamento v6. Miss do próprio Round 3 (`relatorio-auditoria-v6.md:467`
+  registrou "lido integralmente, sem achado" — o conteúdo já estava lá).
+  Empacotado no `.nupkg` (`RingBufferPlus.csproj:58-61`, `Pack=True`) — superfície
+  visível de usuário real, não só doc interna.
+- ✅ **[ALTO — observabilidade, corrigido via doc]** `doc/adr/ADR007V03-redesign-of-the-public-fluent-api-surface.md:52`
+  e `doc/guides/usage-observability.md:57-65` ainda descrevem `Logger`/`OnError`
+  como um par que entrega o mesmo evento junto — mas o código
+  (`RingBufferManager.cs:1910-1922`, `RingBufferBuilder.cs:324-354`) implementa os
+  dois como **mutuamente exclusivos** para eventos de erro: com `OnError`
+  configurado, `Logger` nunca recebe nada de nível Error. Essa semântica de
+  substituição já tinha sido decidida e fixada nos XML docs das 3 interfaces
+  (`IRingBufferBuilder`/`IRingBufferFixedBuilder`/`IRingBufferElasticBuilder`) no
+  Round 1 — o gap é que o ADR e o guia de observability nunca foram atualizados
+  para bater com essa decisão já tomada, não uma decisão nova. Confirmado
+  empiricamente pela frente (harness standalone, Logger recebe 0 mensagens Error
+  quando OnError está configurado). Não é uma mudança de comportamento — é
+  alinhar 2 docs à decisão do Round 1.
+- ✅ **[MÉDIO — resiliência, corrigido]** TOCTOU entre o guard
+  `ObjectDisposedException.ThrowIf(_disposed, this)` e o uso subsequente de
+  `_lifetime.Token` em `AcquireCoreAsync` (`RingBufferManager.cs:298→321`),
+  `SwitchToAsync` (`:437→444`) e `WarmupAsync`/`WarmupCoreAsync` (`:481→659,663`).
+  `DisposeAsync` seta `_disposed=true` de forma síncrona (linha 504) mas só chama
+  `_lifetime.Dispose()` no fim do `finally` (linha 643), depois de aguardar tasks
+  em voo. Um chamador que passa pelo guard antes de `_disposed` virar true, mas
+  cuja continuação só executa depois de `_lifetime.Dispose()` já ter corrido
+  (starvation de thread pool, ou `DisposeAsync` terminando rápido sem heartbeat
+  pendente), encontra `_lifetime.Token` já descartado —
+  `CancellationTokenSource.get_Token()`/`CreateLinkedTokenSource` lançam
+  `ObjectDisposedException`, mas com `ObjectName` referenciando o
+  `CancellationTokenSource` em vez do `RingBufferManager`. Sem leak/corrupção/hang
+  (`TurnbackAsync` já trata `ChannelClosedException` no caminho concorrente de
+  drain) — só uma mensagem de exceção confusa que pode ser lida como bug interno
+  em vez de shutdown gracioso esperado. Reproduzido empiricamente pela frente
+  (probe descartável, 8 `AcquireAsync` concorrentes vs. `DisposeAsync`, removido
+  após o teste).
+- ✅ **[MÉDIO — observabilidade, corrigido]** `ringbufferplus.acquire.duration`:
+  o caminho de sucesso (`RingBufferManager.cs:361-363`) emite só `buffer.name` e
+  `acquire.success=true` — sem as chaves `acquire.timed_out`/`acquire.cancelled`,
+  que os dois caminhos de falha sempre emitem. Viola o próprio princípio já
+  declarado no código para `scale.*`
+  (`DispatchScaleDown`/`RingBufferManager.cs:1154-1156`: "'cancelled' is still
+  always emitted (false) to preserve the existing tag contract... not just the
+  ones where it can actually be true"), só que esse princípio nunca foi aplicado
+  a `acquire.duration`. Um consumidor Prometheus/OTLP filtrando
+  `acquire.timed_out="false"` esperando capturar "chamadas sem timeout" obtém
+  zero resultados para todo acquire bem-sucedido (a maioria do tráfego), porque o
+  rótulo simplesmente não existe nessas séries em vez de existir como `false`.
+  Confirmado empiricamente via `MeterListener` num harness standalone.
+- **[BAIXO — estabilidade, documentado como limitação conhecida, não corrigido]**
+  `RingBufferBuilder.BuildCore` (`RingBufferBuilder.cs:182-201`) constrói o
+  manager via sintaxe de inicializador de objeto — o construtor
+  (`RingBufferManager.cs:269-284`) já inicia `_engineTask` e registra o
+  `ObservableGauge` de `ringbufferplus.capacity.current` **antes** que `Name`/
+  `Capacity`/demais propriedades `required` (sem inicializador inline) sejam
+  atribuídas pelo inicializador de objeto externo. Se um `MeterListener` ativo
+  fizer uma coleta de background exatamente nessa janela de poucas instruções,
+  a medição resultante tem `buffer.name=null`. Sem corrupção de estado nem crash
+  — só uma leitura de telemetria espúria. Instância única (não corroborado por
+  outra frente), janela impossível de forçar sem instrumentar produção (violaria
+  o mandato read-only). Fechar isso de verdade exigiria desacoplar o início do
+  engine/registro do gauge da sintaxe de inicializador de objeto do builder —
+  redesenho do acoplamento builder↔manager, não um fix pontual. Mesmo formato de
+  decisão do trade-off "CTS/timer eager" do Round 3: documentado como comentário
+  no código, não elevado a ADR.
+- ✅ **[BAIXO — usabilidade, corrigido]** `doc/guides/usage-observability.md:48-50`
+  cita 592 B/1216 B para overhead de listener sem ancorar a um commit, mas o
+  caminho medido (`AcquireCoreAsync`) mudou nesta mesma sessão (fix de alocação
+  do Round 3, 600 B→496 B) sem os números deste guia terem sido re-medidos.
+  Re-medido nesta sessão (ver Round 4 fechamento) e atualizado.
+- **[BAIXO — observabilidade, não corrigido — nuance textual, não funcional]**
+  O comentário do commit `df50203` (Round 3) que justificou `message.Message` em
+  `RingBufferBuilder.LogError` como alcançando "paridade" com
+  `RingBufferManager.LogError` não é literalmente exato — o texto do
+  `RingBufferManager` (`RingBufferManager.cs:1915`) continua sendo uma string
+  composta com timestamp manual e prefixo de nome
+  (`$"{DateTime.Now:...} {Name}: {error.Message} "`), não um `error.Message` cru.
+  Nenhuma perda funcional (a `Exception` completa continua anexada nos dois
+  casos) — é só uma imprecisão na justificativa do commit, não no comportamento.
+  Não corrigido: mudar `RingBufferManager.LogError` para bater literalmente
+  exigiria remover o timestamp manual, o que é uma mudança de formato de log
+  observável para consumidores existentes, fora do escopo deste achado.
+- ✅ **[H-A — complexidade, corrigido]** boxing de `bool` nas tags de métrica do
+  caminho de sucesso de `AcquireCoreAsync` — agravado pelo próprio fix da tag
+  symmetry acima (2 chaves novas, medidas em +48 B/op). Corrigido: dois campos
+  estáticos `BoxedTrue`/`BoxedFalse` reutilizados nas 3 `KeyValuePair`s e nas 2
+  chamadas `activity?.SetTag` do caminho de sucesso — escopo deliberadamente
+  restrito a esse caminho (medido), não estendido aos branches de falha/`scale.*`
+  (frios, sem benefício medido). Medido com `AcquireThroughputBenchmarks -i`:
+  544 B (pós tag-symmetry, pré cache) → **472 B** — líquido abaixo dos 496 B do
+  Round 3, apesar das 2 tags novas.
+- **[H-B — sem ação]** `EngineCommand.Backlog()`/`ReplaceOne()`/`Tick()` alocando
+  um record sem estado por chamada (`RingBufferManager.cs:347,731,1793,1875`) —
+  confirmado fora do caminho rápido medido (ramo de suspensão em `ReadAsync`);
+  valor questionável nos defaults atuais, mesmo padrão de descarte do H1/H2 do
+  Round 1.
+- **[H-C — sem ação, corretamente descartado pela própria frente]**
+  `RingBufferValue<T>` não pode virar `struct` — bloqueado por correção, não por
+  desempenho: o guard de dispose atômico (`Interlocked.Exchange(ref _disposed, 1)`,
+  `CHANGELOG.md:53`) depende de identidade única por lease; uma cópia por valor
+  reabriria a corrida de double-turnback já fechada.
+
+### Fechamento do Round 4
+
+Todos os achados decididos/corrigidos nesta mesma sessão (10 achados: 2 Alto,
+2 Médio, 1 Baixo corrigido, 1 Baixo documentado como limitação conhecida, 1 Baixo
+sem ação por trade-off de escopo, 1 H corrigido, 2 H sem ação). Nenhum ficou em
+aberto sem decisão. Verificado: 188/188 testes net10.0 (era 187, +1 novo — o
+teste de identidade da `ObjectDisposedException`; o teste de tag symmetry
+estendeu um teste já existente), build limpo (0 warnings, 0 errors) em toda a
+solução (3 TFMs, samples, benchmarks, gerador de docs). Red/green feito para os
+2 achados de comportamento (TOCTOU de exceção, tag symmetry) — o primeiro via
+reprodução determinística do contrato do fix (`LifetimeToken()` via reflection,
+já que a janela de corrida real não é forçável deterministicamente sem
+instrumentar produção) mais uma validação empírica probabilística descartável
+(3842 hits, 0 identidade errada pós-fix; 1 identidade errada pré-fix em volume
+comparável) que não foi commitada por ser lenta/instável como teste permanente.
+
+Status: concluído.
+
+---
+
 ## Round 3 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 2 (commits `29cbcf0`..`cf067b2`) não
@@ -378,7 +547,7 @@ introduziram regressão, e achar o que passou batido nas duas primeiras rodadas.
 Mesmos 6 ângulos. Grafo do graphify não reatualizado (mesma decisão de custo/
 benefício do Round 2 — mudança incremental).
 
-Status: em andamento.
+Status: concluído (todos os 7 achados decididos/corrigidos).
 
 ### auditoria-complexidade — concluída
 

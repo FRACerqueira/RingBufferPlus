@@ -139,3 +139,57 @@ padrão do trade-off "4x amplification" já usado no projeto — não é escala 
 Verificado: 187/187 testes net10.0 (era 186, +1 novo), build limpo (0 warnings,
 0 errors) em toda a solução a cada etapa. Nenhum achado do Round 3 ficou em aberto
 sem decisão.
+
+## Round 4 — 2026-08-24
+
+Mesmo enquadramento, com atenção redobrada aos fixes "confirmados" de rodadas
+anteriores (Rounds 2 e 3 tiveram cada um um caso de fix incompleto não pego por
+testes/build). Todos os 4 fixes do Round 3 confirmados de fato conectados por
+pelo menos 2 frentes independentes — sem repetição do padrão.
+
+**Corrigidos nesta rodada** (2 Alto, 2 Médio, 1 Baixo, 1 achado de complexidade
+não medido virado fix):
+
+- Doc: `README.txt` (Alto) — "What's new" ainda afirmava v5.0.0 como versão
+  atual e uma exclusividade `AutoScaleAcquireFault`/`SwitchToAsync` removida
+  inteiramente em v6; miss do próprio Round 3. `ADR007V03`/`usage-observability.md`
+  (Alto) — alinhados à semântica de substituição `Logger`/`OnError` já decidida
+  e fixada nos XML docs no Round 1, nunca propagada a esses dois documentos.
+  `usage-observability.md` (Baixo) — números de overhead de listener re-medidos
+  (`ObservabilityOverheadBenchmarks -i`: 592B/1216B → 544B/1168B, refletindo o
+  fix de alocação do Round 3).
+- Código, com red/green completo: TOCTOU de identidade de exceção (Médio) entre
+  o guard `ObjectDisposedException.ThrowIf(_disposed, this)` e o acesso
+  subsequente a `_lifetime.Token` em `AcquireCoreAsync`/`SwitchToAsync`/
+  `WarmupCoreAsync` — corrigido com um helper `LifetimeToken()` que normaliza a
+  identidade da exceção nos 6 pontos de acesso vulneráveis. Red/green: reprodução
+  determinística via reflection do contrato do helper (a janela de corrida real
+  não é forçável deterministicamente sem instrumentar produção — documentado
+  explicitamente no teste) + validação empírica probabilística descartável
+  (3842 hits pós-fix, 0 identidade errada; pré-fix, 1 identidade errada em volume
+  comparável). Assimetria de tags (Médio) em `ringbufferplus.acquire.duration` —
+  caminho de sucesso não emitia `acquire.timed_out`/`acquire.cancelled`, violando
+  o próprio princípio de tag contract já declarado para `scale.*`; corrigido,
+  red/green feito estendendo um teste existente.
+- Código, seguindo diretamente da complexidade (H-A, não era achado formal, mas
+  virou fix de baixo risco): boxing de `bool` nas tags de métrica do caminho de
+  sucesso de `AcquireCoreAsync`, agravado pelo próprio fix de tag symmetry acima
+  (+48B/op medido). Corrigido com 2 campos estáticos cacheados
+  (`BoxedTrue`/`BoxedFalse`), escopo restrito ao caminho medido. Medido:
+  544B → 472B — líquido abaixo dos 496B do Round 3, apesar das 2 tags novas.
+
+**Documentado como limitação conhecida, não corrigido** (mesmo formato do
+trade-off CTS/timer do Round 3 — comentário no código, não ADR): janela
+construtor-vs-inicializador-de-objeto em `RingBufferManager` que pode expor
+`buffer.name: null` a um `MeterListener` que colete durante a construção
+(Baixo, instância única).
+
+**Sem ação** (achados frios/descartados, achados que se limitam a uma nuance
+textual sem impacto funcional): imprecisão na justificativa do commit `df50203`
+sobre "paridade" de `LogError` (Baixo, textual); H-B (`EngineCommand` alocado
+fora do caminho quente); H-C (`RingBufferValue<T>` bloqueado de virar `struct`
+por correção, não por desempenho).
+
+Verificado: 188/188 testes net10.0 (era 187, +1 novo), build limpo (0 warnings,
+0 errors) em toda a solução a cada etapa. Nenhum achado do Round 4 ficou em
+aberto sem decisão.
