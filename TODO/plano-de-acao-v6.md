@@ -114,3 +114,28 @@ de API já vista no Round 1).
 Verificado: 186/186 testes net10.0 (era 183, +3 novos), build limpo (0 warnings,
 0 errors) em toda a solução a cada etapa. Nenhum achado do Round 2 ficou em aberto
 sem decisão.
+
+## Round 3 — 2026-08-24
+
+Mesmo enquadramento, focado em regressão do Round 2 + achados novos. Achado mais
+importante da rodada: **o fix `SafeIsEnabled` do Round 2 nunca foi de fato conectado**
+em `RingBufferManager.cs` — o helper foi criado mas o call site continuava usando
+`Logger.IsEnabled` cru. Confirmado de forma **independente por 3 das 6 frentes**
+(estabilidade, resiliência, observabilidade), cada uma reproduzindo empiricamente o
+mesmo cenário (Logger cujo `IsEnabled` lança derruba `WarmupCoreAsync`). Corrigido
+(uma linha) com red/green.
+
+Também corrigidos: 4 achados de doc da usabilidade (ordem de parâmetros
+desatualizada em `concepts.md`, redação obsoleta em `usage-dependency-injection.md`,
+4ª ramificação faltante no catálogo de mensagens de heartbeat, link cruzado
+incorreto). Desempenho fechou a pendência do CTS/timer (Round 2/3 de complexidade)
+com número real: 69% da alocação do caminho rápido de `AcquireAsync` é overhead do
+CTS/timer nunca consultado. Duas das três causas de alocação nesse trecho corrigidas
+com baixo risco (Stopwatch sem alocação, delegate `TurnbackAsync` cacheado) —
+medido: 496B, redução real de ~104B/operação. A terceira (CTS/timer preguiçoso) foi
+decidida como "manter como está", documentada como comentário no código (mesmo
+padrão do trade-off "4x amplification" já usado no projeto — não é escala de ADR).
+
+Verificado: 187/187 testes net10.0 (era 186, +1 novo), build limpo (0 warnings,
+0 errors) em toda a solução a cada etapa. Nenhum achado do Round 3 ficou em aberto
+sem decisão.

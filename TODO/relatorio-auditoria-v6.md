@@ -371,6 +371,149 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 3 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 2 (commits `29cbcf0`..`cf067b2`) não
+introduziram regressão, e achar o que passou batido nas duas primeiras rodadas.
+Mesmos 6 ângulos. Grafo do graphify não reatualizado (mesma decisão de custo/
+benefício do Round 2 — mudança incremental).
+
+Status: em andamento.
+
+### auditoria-complexidade — concluída
+
+- Verificadas as 4 mudanças de código do Round 2 (`SafeIsEnabled`,
+  `ContinueWith` novo no dispose adiado, `AddSingleton<IHostedService>`,
+  `LogError` passando exceção real) — **nenhuma introduziu custo por operação
+  novo**. `SafeIsEnabled` só é chamado a cada ~300ms (Monitor) ou no build-time,
+  nunca no caminho de sucesso de `AcquireAsync`.
+- **[BAIXA-MÉDIA, 2ª derivação independente da mesma hipótese do Round 2, ainda
+  não medida]** Reforçou o achado do "CTS/timer por requisição" em
+  `AcquireCoreAsync` (`RingBufferManager.cs:297-299`) — confirmou que o
+  benchmark citado no Round 2 (`AcquireThroughputBenchmarks`, 592B/331.7ns) é de
+  **2026-08-12, anterior a toda a auditoria**, nunca re-rodado especificamente
+  para essa pergunta. Achou 2 fontes adicionais de alocação no mesmo trecho
+  quente: `Stopwatch.StartNew()` (linha 297, aloca objeto — trocável por
+  `Stopwatch.GetTimestamp()`/`GetElapsedTime`, sem alocação) e o delegate de
+  `TurnbackAsync` (linha 344, conversão de grupo de método captura `this` a
+  cada chamada de sucesso, não cacheado em campo). Propôs um experimento A/B de
+  3 braços (Stopwatch, delegate, CTS preguiçoso) para `auditoria-desempenho`
+  medir isoladamente, e sinalizou que uma versão "CTS preguiçoso" do fix
+  precisaria preservar a checagem de cancelamento na linha 309 (risco de
+  correção, não só desempenho) — `auditoria-estabilidade` precisa revisar isso
+  antes de qualquer fix nessa parte específica.
+- Sem achado: caminho feliz de `TurnbackAsync`, `FloorGuardDecision.cs`, loops
+  de drenagem/prune (todos limitados por quantidade requisitada, não por
+  crescimento contínuo).
+
+### auditoria-estabilidade, auditoria-resiliencia, auditoria-observabilidade — CONFIRMADO 3/3 INDEPENDENTES
+
+- ✅ **[CRÍTICO/ALTO — corrigido, 3/3 confirmações independentes]** O fix
+  `SafeIsEnabled` do Round 2 foi **escrito mas nunca conectado** no call site
+  que deveria proteger: `LogMessage` em `RingBufferManager.cs:1874` continuava
+  chamando `Logger.IsEnabled(LogLevel.Debug)` cru — o helper `SafeIsEnabled`
+  existia (linha 1929) mas era código morto (zero call sites, confirmado por
+  `grep` em 3 frentes independentes). O commit `41ef798` e o relatório desta
+  auditoria afirmavam esse achado como fechado — **estava errado**: só
+  `RingBufferBuilder.cs` foi corrigido de fato, não `RingBufferManager.cs` (o
+  arquivo com o maior blast radius). As 3 frentes reproduziram empiricamente,
+  de forma independente, o mesmo cenário: um `Logger` cujo `IsEnabled` lança
+  derruba `WarmupCoreAsync`/`BuildWarmupAsync` inteira (pior que o cenário
+  original do comentário, que citava só `ProcessTick`/`RunHeartbeatAsync`) —
+  e mataria `_engineTask`/`_heartbeatTask` permanentemente e silenciosamente
+  nesses dois casos. Nenhuma das duas rodadas anteriores tinha um teste
+  cobrindo "IsEnabled lançando" — por isso o build limpo (0 warnings) e os
+  186/186 testes verdes não pegaram a regressão. Corrigido (uma linha:
+  `SafeIsEnabled(Logger, LogLevel.Debug)`). Red/green feito
+  (`WarmupAsync_WhenLoggerIsEnabledThrows_StillCompletes`).
+- Confirmado (resiliência, 3 buffers do mesmo T): o fix `AddSingleton<IHostedService>`
+  funciona corretamente — todos recebem hosted service e warmup.
+- Confirmado (resiliência): `[FromKeyedServices]` isola corretamente, não
+  constrói o buffer irmão quebrado.
+- Investigado e descartado (resiliência): double-dispose via singleton
+  "encaminhador" + keyed apontando pra mesma instância — acontece a nível de
+  container, mas `_disposeGuard` já absorve com segurança (idempotência
+  pré-existente, não um bug).
+- ✅ **[BAIXO, pré-existente — corrigido 2026-08-24]** (observabilidade)
+  Assimetria de formato entre `RingBufferBuilder.LogError` (gravava
+  `Exception.ToString()` completo: tipo + mensagem + stack trace) e
+  `RingBufferManager.LogError` (grava só `error.Message`) — ambos internamente
+  consistentes, mas verbosidade diferente entre as duas classes para um sink
+  estruturado lendo o campo de texto. Corrigido: `RingBufferBuilder.LogError`
+  agora usa `message.Message` (curto), igual ao irmão — a exceção completa
+  (tipo, stack trace) já está disponível via o parâmetro `Exception` anexado
+  separadamente (fix do Round 2). Não é regressão desta sessão.
+
+### auditoria-usabilidade — concluída
+
+- ✅ **[MÉDIO — corrigido]** `doc/guides/concepts.md:52` ainda usava a ordem
+  antiga de parâmetros `ElasticCapacity(init, min, max, ...)` — contradiz o
+  próprio arquivo (diagrama mermaid 14 linhas acima já usa a ordem certa),
+  o `CHANGELOG.md` (que documenta a mudança de ordem explicitamente), e todos
+  os outros guias/samples. Única ocorrência restante da ordem antiga no repo.
+- ✅ **[BAIXO — corrigido]** `usage-dependency-injection.md:56` tinha redação
+  remanescente ("searches among services registered") quase idêntica à frase
+  que a correção da linha 49 (Round 2) explicitamente descartou como o
+  mecanismo antigo — a conclusão continua verdadeira, só a redação ficou
+  desatualizada ao lado do fix.
+- ✅ **[BAIXO — corrigido]** `usage-observability.md:57-63` catálogo de
+  mensagens do heartbeat estava incompleto — faltava a 4ª ramificação
+  (`"Heart Beat cancelled by shutdown after the callback had already
+  finished."`, `RingBufferManager.cs:1801-1811`, quando o shutdown ocorre mas
+  o callback já tinha terminado).
+- ✅ **[BAIXO, fraco/opcional — corrigido junto]** `concepts.md:24` linkava
+  `ElasticCapacity` para o guia de pin manual em vez do guia de autoscale
+  (que é o dedicado a explicar `ElasticCapacity` em si).
+- Verificado e sem achado: README.txt (lido integralmente), overview.md,
+  ADR007V03, todos os outros guias, todos os samples, docs de API geradas,
+  CHANGELOG.md (seção Unreleased não precisa listar fixes internos do audit
+  de uma versão ainda não lançada).
+
+### auditoria-desempenho — concluída
+
+- ✅ **[MÉDIO — pendência do Round 2/3 de complexidade fechada com número
+  real, não é regressão]** O padrão CTS/timer por requisição em
+  `AcquireCoreAsync` (`RingBufferManager.cs:297-299`) responde por **~416 dos
+  600 bytes/operação (≈69%)** no caminho rápido (`AcquireThroughputBenchmarks`,
+  sem contenção) — decompôs isoladamente: `new CancellationTokenSource(timeout)`
+  (144B) + `CreateLinkedTokenSource` de 3 tokens (128B), com efeito de sinergia
+  levando a 416B juntos (mais que a soma das partes). No caminho rápido, o
+  CTS/timer é criado e descartado **sem nunca ser efetivamente consultado**
+  (`TryRead` tem sucesso antes de qualquer wait) — overhead puro nesse caso.
+  Não é regressão do Round 2/3 (código pré-existente, nunca medido antes desta
+  auditoria).
+
+  ✅ **Fixes de baixo risco aplicados nesta sessão** (parte do risco identificado
+  pela complexidade, sem mexer em semântica de cancelamento): `Stopwatch.StartNew()`
+  → `Stopwatch.GetTimestamp()`/`GetElapsedTime` (elimina alocação do objeto
+  `Stopwatch`) e delegate de `TurnbackAsync` cacheado em campo `readonly`
+  (elimina alocação de closure por chamada de sucesso). Medido: **496B, redução
+  real de ~104B/operação** (de 600B). A parte de maior risco (construir o
+  CTS/timer de forma preguiçosa, só quando o fast path falha) — decisão do
+  usuário (2026-08-24): **manter como está, comentário no código** (mesmo
+  padrão do trade-off "4x amplification" em `CreateItemsAsync` — não é escala
+  de ADR, não introduz nada novo). Refatorar exigiria hoisting de
+  `timeoutCts`/`linked` para fora do escopo condicional (os `catch` abaixo
+  precisam inspecionar `timeoutCts.IsCancellationRequested`) e trocar a
+  checagem `!linked.IsCancellationRequested` pré-fast-path por uma nos tokens
+  crus — em um método com histórico extenso de fixes de corretude de
+  cancelamento (R11/R15/R17/O1/O2/O6 citados nos próprios comentários).
+  Comentário adicionado em `RingBufferManager.cs` (linha ~304) documentando o
+  número medido e o raciocínio, para não ser re-perguntado no futuro.
+- Reconfirmado com número próprio (não copiado): fix `SafeIsEnabled`/guard
+  ~38x mais rápido no caminho gated (5.6ns vs 212ns), impacto absoluto
+  desprezível — bate com o Round 2.
+- **[BAIXO]** Custo marginal do `ContinueWith` novo no dispose adiado do
+  heartbeat: ~57B/op, mas só no branch de timeout (raro, limitado pela
+  cadência do heartbeat, não pelo throughput de requisições) — irrelevante.
+- `AddSingleton<IHostedService>` (Round 2): não é um caminho de execução
+  repetido (roda uma vez por `AddRingBuffer<T>` na composição de DI), não
+  mensurável como "custo de runtime" — caracterizado honestamente como
+  trade-off aceito (mais trabalho real no startup, correção restaurada vs.
+  antes), não pendência de desempenho.
+
+---
+
 ## Round 2 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 1 (commits `a9eaac1`..`d87e90c`, ver
