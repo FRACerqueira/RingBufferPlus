@@ -51,6 +51,12 @@ namespace RingBufferPlus.Core
         private readonly Channel<EngineCommand> _commands = Channel.CreateUnbounded<EngineCommand>();
         private Lazy<Task> _warmup;
         private readonly Task _engineTask;
+        // Round 3 (Complexidade/Desempenho, v6 pre-release audit): cached once instead of a fresh
+        // method-group-to-delegate conversion on every successful AcquireAsync (the conversion
+        // captures `this` and cannot be cached by the compiler itself since TurnbackAsync is an
+        // instance method) - a small, semantically-inert allocation removed from the one path that
+        // runs per request, not per scale operation.
+        private readonly Func<RingBufferValue<T>, ValueTask> _turnbackDelegate;
 
         // Monitor's sliding demand window (ADR001V03/ADR003V03) - bounded to SamplesCount, engine-
         // thread-only (only ProcessTick and the scale-completion cleanup paths touch it).
@@ -264,6 +270,7 @@ namespace RingBufferPlus.Core
         {
             _lifetime = CancellationTokenSource.CreateLinkedTokenSource(lifetimecancellation);
             _warmup = new Lazy<Task>(WarmupCoreAsync, LazyThreadSafetyMode.ExecutionAndPublication);
+            _turnbackDelegate = TurnbackAsync;
 
             _acquireDuration = _meter.CreateHistogram<double>("ringbufferplus.acquire.duration", unit: "s", description: "Duration of AcquireAsync calls, in seconds.");
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
@@ -294,7 +301,22 @@ namespace RingBufferPlus.Core
             using var activity = _activitySource.StartActivity("RingBufferPlus.Acquire");
             activity?.SetTag("buffer.name", Name);
 
-            var sw = Stopwatch.StartNew();
+            var startTimestamp = Stopwatch.GetTimestamp();
+            // Round 3 (v6 pre-release audit): measured (auditoria-desempenho) at ~416 of ~600 B/op
+            // on the uncontended fast path - the CTS/timer here is built and torn down even when
+            // the immediate TryRead below succeeds and this timeout is never actually consulted.
+            // Deliberately left as eager construction, not made lazy (only build it in the else
+            // branch, once the fast path has already failed): doing so would require hoisting
+            // timeoutCts/linked out of that branch's scope so the catch blocks below can still
+            // inspect timeoutCts.IsCancellationRequested, replacing the clean `using var` pattern
+            // with manual disposal in a finally, and replacing the pre-fast-path
+            // `!linked.IsCancellationRequested` check with one against the raw cancellation/
+            // _lifetime tokens instead - in a method whose comments already document a long history
+            // of subtle cancellation-correctness fixes (R11/R15/R17/O1/O2/O6). The allocation here
+            // is real but not the actual bottleneck for this library's use case (pooling
+            // network/DB resources, where Factory's own I/O dominates by orders of magnitude) -
+            // not worth the risk of reopening one of those classes of bug for it. Same "keep as-is"
+            // trade-off shape as the 4x amplification decision in CreateItemsAsync.
             using var timeoutCts = new CancellationTokenSource(AcquireTimeout);
             using var linked = CancellationTokenSource.CreateLinkedTokenSource(timeoutCts.Token, _lifetime.Token, cancellation);
             var isWaiting = false;
@@ -335,13 +357,14 @@ namespace RingBufferPlus.Core
                     Interlocked.Decrement(ref _waitingCount);
                     isWaiting = false;
                 }
-                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+                _acquireDuration.Record(elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", true));
                 activity?.SetTag("success", true);
                 activity?.SetTag("timed_out", false);
                 activity?.SetStatus(ActivityStatusCode.Ok);
-                return new RingBufferValue<T>(Name, sw.Elapsed, true, item, TurnbackAsync);
+                return new RingBufferValue<T>(Name, elapsed, true, item, _turnbackDelegate);
             }
             catch (OperationCanceledException) when (!cancellation.IsCancellationRequested)
             {
@@ -360,7 +383,8 @@ namespace RingBufferPlus.Core
                 // Observabilidade - finding O6): without it, this histogram's failed rows can't be
                 // told apart from an ordinary shutdown/caller-cancellation, same gap O1/O2 already
                 // closed on the metrics/activity side of Scale/Acquire elsewhere.
-                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+                _acquireDuration.Record(elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", false),
                     new KeyValuePair<string, object?>("acquire.timed_out", timedOut),
@@ -372,14 +396,14 @@ namespace RingBufferPlus.Core
                 // _lifetime (an ordinary shutdown) is what ended the wait instead, same
                 // distinction R15/F15/R17/O1 already make elsewhere.
                 activity?.SetStatus(timedOut ? ActivityStatusCode.Error : ActivityStatusCode.Ok);
-                return new RingBufferValue<T>(Name, sw.Elapsed, false, default!, null);
+                return new RingBufferValue<T>(Name, elapsed, false, default!, null);
             }
             catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
             {
                 // The caller's own token fired, not a timeout/disposal - this rethrows unchanged
                 // (see the sibling catch above), but the activity/duration must still record an
                 // outcome before it does, or a trace shows an outcome-less span for this call.
-                _acquireDuration.Record(sw.Elapsed.TotalSeconds,
+                _acquireDuration.Record(Stopwatch.GetElapsedTime(startTimestamp).TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("acquire.success", false),
                     new KeyValuePair<string, object?>("acquire.timed_out", false),
