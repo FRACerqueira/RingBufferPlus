@@ -248,6 +248,18 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenPulseHeartBeatIsZero()
+        {
+            // Round 1 (Resiliência, v6 pre-release audit): PulseHeartBeat sustains several
+            // disposal bounds regardless of Elastic/HeartBeat configuration - a zero value made it
+            // through Build() unvalidated before this fix, making every defensive dispose expire
+            // instantly.
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).HeartBeat(_ => true, TimeSpan.Zero).FixedCapacity(2);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsLessThanTwo()
         {
             var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(1, 10, 5);

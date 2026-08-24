@@ -219,6 +219,18 @@ namespace RingBufferPlus.Core
                 LogError(err);
                 throw err;
             }
+            // Round 1 (Resiliência, v6 pre-release audit): PulseHeartBeat now sustains three
+            // separate disposal bounds (DisposeOneItemDefensivelyAsync's grace period, the
+            // heartbeat pump's own dispose bound, and the pulse timeout itself), for every buffer
+            // regardless of Elastic/HeartBeat configuration (DisposeAsync's own drain loop uses it
+            // too) - an explicit zero/negative value (a plausible unit mistake) would make every
+            // defensive dispose expire instantly, treating ordinary disposal as hung.
+            if (_pulseHeartBeat <= TimeSpan.Zero)
+            {
+                var err = new InvalidOperationException("The pulse (PulseHeartBeat) must be greater than zero.");
+                LogError(err);
+                throw err;
+            }
             if (_elastic)
             {
                 if (_minCapacity < 2)
