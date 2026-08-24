@@ -71,12 +71,12 @@ One known, accepted limitation of the generated reference: a type declared in a 
 
 ## API stability policy
 
-Starting from **v5.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md)):
+Starting from **v6.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md)):
 
 * No public symbol (type, member, or overload) is removed, or has its behavior changed in a breaking way, without first being marked `[Obsolete("migration message")]` for at least one full release cycle.
 * A breaking change without a prior deprecation cycle is not a default option — it requires its own ADR explicitly justifying the exception.
-* v5.0.0 itself is exempt from this policy: it is a single, deliberate "clean slate" reset explicitly authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md), with no `[Obsolete]` bridge from v4.x. This exemption applies only to that one release and does not repeat for any future major.
-* v4.x and earlier receive no further fixes once v5.0.0 ships (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V02-semantic-versioning-policy-and-fluent-api-stability.md).
+* v5.0.0 and v6.0.0 are each exempt from this policy: v5.0.0 was a single, deliberate "clean slate" reset authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md); v6.0.0 is a second, independently justified reset authorized by [ADR006V02](doc/adr/ADR006V02-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) (real evidence of a structural autoscaling defect, not a citation of precedent), moving the deprecation cycle's resumption point from v5.0.0 to v6.0.0 (see [ADR004V03](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md)). Per that ADR, this is the **last** such reset without its own fresh justification meeting the same evidentiary bar — a third is not to be assumed.
+* v5.x and earlier receive no further fixes once v6.0.0 ships (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md).
 
 If your contribution removes or changes the behavior of a public symbol, call this out explicitly in the pull request description so it can be checked against this policy.
 
