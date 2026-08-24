@@ -388,3 +388,56 @@ Verificado: 192/192 testes net10.0 (era 190, +2 novos), build limpo (0
 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
 de docs). Nenhum achado do Round 7 ficou em aberto sem decisão (H-D é
 explicitamente um candidato deferido, não um achado pendente).
+
+## Round 8 — 2026-08-24
+
+4 frentes completas (usabilidade, complexidade, desempenho, observabilidade)
++ estabilidade em escopo pontual (só o candidato H-D roteado no Round 7).
+Resiliência não disparada.
+
+**Corrigidos nesta rodada** (1 Alto de comportamento, 1 candidato de
+complexidade implementado, 1 achado Médio refutado):
+
+- **[Alto, observabilidade] Tag `acquire.warmup_failed` adicionada** — a
+  linha nova de falha de warmup cacheada (fix do Round 7) era idêntica em
+  tags a um shutdown comum, anulando o propósito do próprio fix do Round 7
+  para quem só usa métricas. Apresentei 3 opções (A: nova tag; B: estender
+  telemetria a `SwitchToAsync` também; C: não mexer) — **escolhida A**.
+  Red/green: 4 testes de desfecho de `AcquireAsync` estendidos com a nova
+  tag (`false` nos 3 desfechos existentes, `true` só no novo). Resolve
+  também o achado equivalente de usabilidade na doc (invariante
+  `Error ⇔ timed_out=true` quebrada). `SwitchToAsync`'s lacuna (nunca
+  recebeu telemetria própria por chamada, nem antes nem depois do Round 7)
+  documentada como limitação conhecida, não corrigida em código.
+- **[H-D, complexidade→estabilidade] `ConcurrentBag` → `lock`+`List<Task>`
+  implementado** — estabilidade revisou e liberou como seguro (nenhum
+  outro escritor além de `RunHeartbeatAsync`, garantias de correção vêm do
+  `await _heartbeatTask`, não do tipo da coleção), com 2 recomendações de
+  implementação seguidas (lock também na leitura; `RemoveAll` em vez do
+  padrão take/re-add) e um bônus: fecha um hazard latente de perda de
+  entrada sob exceção entre os loops de drenagem/reinserção do padrão
+  antigo. Decisão do usuário: implementar agora, sem esperar desempenho
+  medir o ganho (dado o baixo risco já confirmado e o bônus de correção).
+- **[Médio, observabilidade, investigado e REFUTADO]** suspeita de que
+  `SwitchToAsync` manual com `LockWhenScaling=false` nunca logava uma
+  falha genuína de factory — refutado por reprodução empírica (4 chamadas
+  de `LogError`, uma por tentativa concorrente, já fazendo isso via o
+  `catch` por tentativa dentro de `CreateItemsAsync`, independente de
+  quem/se alguém espera o resultado do batch). Teste mantido como guarda
+  de regressão permanente.
+
+**Achado de desempenho, sem fix nesta rodada** [Baixo]: o
+`Stopwatch.GetTimestamp()` extra do fix do Round 7 custa +20 a +24ns
+(+7-8%) no caminho comum de `AcquireAsync`, medido com A/B contra o commit
+anterior ao Round 7. Decisão do usuário: **aceitar como está** (opção 1A
+de 3 apresentadas) — negligível frente a qualquer I/O real de Factory.
+
+**Sem achado após investigação**: candidato de complexidade sobre o
+padrão "drenar e reconstruir" de `_pendingHeartbeatDisposals` (O(n) por
+inserção) — a própria frente rebaixou a "registrado, sem ação" dado que a
+taxa de chegada é limitada pela cadência do heartbeat (mesmo enquadramento
+de descarte já usado para H1/H2).
+
+Verificado: 193/193 testes net10.0 (era 192, +1 novo), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs). Nenhum achado do Round 8 ficou em aberto sem decisão.

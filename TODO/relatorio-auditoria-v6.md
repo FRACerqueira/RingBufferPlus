@@ -380,6 +380,99 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 8 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 7 (commits `1c0d0fa`..`5316a99`) não
+introduziram regressão, e achar o que passou batido nas sete primeiras
+rodadas.
+
+**Escopo**: usabilidade, complexidade, desempenho, observabilidade com
+enquadramento completo (nenhuma bateu 2 rodadas consecutivas sem achado
+ainda). **Estabilidade disparada com escopo pontual, não completo**: só
+para revisar o candidato H-D roteado pelo complexidade no Round 7
+(`_pendingHeartbeatDisposals` como `ConcurrentBag<Task>` sem afinidade de
+thread real) antes de qualquer decisão de troca estrutural — não é um
+retorno ao enquadramento completo dessa frente, que segue formalmente
+convergida. Resiliência não disparada.
+
+**Estabilidade (escopo pontual)**: veredito "seguro trocar `ConcurrentBag`
+por `lock`+`List<Task>`" — nenhum risco de correção identificado, com 2
+recomendações de implementação (lock também na leitura, não só na escrita;
+`RemoveAll` em vez do padrão take/re-add) e um bônus (fecha um hazard latente
+de perda de entrada sob exceção entre os loops de drenagem/reinserção do
+padrão antigo). Implementado.
+
+**Complexidade**: revalidou H1-H4/H-A/H-B/H-C por leitura fresca completa,
+incluindo 2 arquivos de produção nunca lidos antes nesta série
+(`RingBufferDefault.cs`, `RingBufferExtension.cs`) — sem mudança de
+conclusão. **Achado novo [Baixo, não medido]**: o try/catch do Round 7 em
+`AcquireCoreAsync` adicionou um `Stopwatch.GetTimestamp()` incondicional
+antes do `try`, pago em toda chamada (não só na falha) — invisível ao
+`MemoryDiagnoser` que esta série usa para validar esse método, já que é
+custo só de tempo, sem alocação. Roteado para desempenho medir antes de
+qualquer decisão. Um segundo candidato (padrão "drenar e reconstruir" de
+`_pendingHeartbeatDisposals`, O(n) por inserção) foi considerado e
+rebaixado a "registrado, sem ação" pela própria frente — taxa de chegada
+limitada pela cadência do heartbeat torna o efeito irrelevante nos
+defaults, mesmo enquadramento de descarte já usado para H1/H2.
+
+**Desempenho**: mediu com rebuild limpo e A/B contra o commit anterior ao
+Round 7 (`9f708d4`) que o `Stopwatch.GetTimestamp()` extra do candidato de
+complexidade custa **+20 a +24ns (+7-8%)** no caminho comum de
+`AcquireAsync` — real, medido, causa isolada por probe reversível (mover o
+timestamp para dentro do `catch` volta ao baseline). Zero regressão de
+alocação. Também mediu (inconclusivo por ruído de máquina, não por falha
+de medição) o branch do gate de `_waitingCount` — por inspeção de código, a
+regressão não é fisicamente esperável nessa escala para o caminho comum
+(`countsTowardFaultBudget == true`). Nota de processo relevante: a
+checagem "não regrediu" do próprio Round 7 comparou contra o número já
+documentado (uma cifra pós-mudança, rotulada como ordem de grandeza) —
+estruturalmente incapaz de detectar um delta de ~22ns; a doc está correta,
+o método de comparação é que precisava de A/B contra o commit anterior.
+
+**Observabilidade**: confirmou os 2 fixes do Round 7 conectados. **2
+achados Alto + 1 achado Médio, todos decididos com o usuário:**
+- **Alto**: `SwitchToAsync` nunca recebeu o fix do Round 7 (o relatório
+  daquela rodada afirmou incorretamente que sim — o commit só tocou
+  `AcquireCoreAsync`). Decisão: não estender o mecanismo de telemetria a
+  `SwitchToAsync` agora (ele nunca teve sinal próprio por chamada, só o
+  eventual `"RingBufferPlus.Scale"` de um dispatch bem-sucedido) —
+  documentado como limitação conhecida, não corrigido em código.
+- **Alto**: a linha nova de falha de warmup cacheada era idêntica, em
+  tags, a um shutdown comum (`success=false`/`timed_out=false`/
+  `cancelled=false` nos dois casos) — um consumidor só de métricas não
+  conseguia distinguir "buffer permanentemente quebrado" de "shutdown
+  benigno". Corrigido com a 4ª tag `acquire.warmup_failed`/`warmup_failed`
+  (red/green, estendendo os 4 testes de desfecho de `AcquireAsync`
+  existentes). Resolve também o achado equivalente de usabilidade (doc:
+  invariante `Error ⇔ timed_out=true` quebrada pela Activity nova).
+- **Médio, investigado e REFUTADO**: suspeita de que `SwitchToAsync`
+  manual com `LockWhenScaling=false` nunca logava uma falha genuína de
+  factory. Reprodução empírica mostrou 4 chamadas de `LogError`
+  (`MaxConcurrentFactoryCalls`), uma por tentativa concorrente — o
+  `catch` por tentativa dentro de `CreateItemsAsync` já loga
+  incondicionalmente, antes de qualquer agregação em nível de batch. Uma
+  1ª sonda (com factory síncrono) sugeriu falsamente que só 1 tentativa
+  rodava — artefato da própria sonda, corrigido com um factory
+  genuinamente assíncrono. Mantido como guarda de regressão permanente.
+
+**Usabilidade**: confirmou as 4 correções do Round 7. **2 achados novos,
+instância única, ambos correspondendo (por ângulos diferentes) aos achados
+de observabilidade acima** — não tratados como achados separados adicionais
+na consolidação, já que a mesma tag nova (`warmup_failed`) e a mesma
+decisão sobre `SwitchToAsync` os resolvem. Reconfirmou (via `git blame`,
+desta vez também de minha parte) que comentários "Round 7/8,
+Resiliência/Estabilidade" já existentes no código são da série de
+auditoria pré-v6 (2026-08-21), não vazamento desta série.
+
+Verificado: 193/193 testes net10.0 (era 192, +1 novo), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks,
+gerador de docs).
+
+Status: **fechado**.
+
+---
+
 ## Round 7 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 6 (commits `ed72f67`..`1c0d0fa`) não
