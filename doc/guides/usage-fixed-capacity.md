@@ -32,7 +32,7 @@ await using (var buffer = await rb.AcquireAsync(cancellation))
 await rb.DisposeAsync();
 ```
 
-`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MinCapacity`/`MaxCapacity`/`MonitorTuning`/`LockWhenScaling`/`SwitchToAsync` are not offered as options: they would be meaningless for a fixed pool.
+`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MonitorTuning`/`LockWhenScaling`/`SwitchToAsync` are not offered as options: they would be meaningless for a fixed pool, which has no elastic range to tune, pin, or switch within. `MinCapacity`/`MaxCapacity` are not offered as separate *options* either, but that's a different reason: there's only one capacity value to configure here, not that they're meaningless — both still exist on the built service (equal to `Capacity`), and the floor guard still reads and acts on them (see below).
 
 ## What happens internally
 
