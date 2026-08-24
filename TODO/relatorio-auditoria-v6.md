@@ -380,6 +380,101 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 11 — 2026-08-24
+
+Objetivo: verificar se o fix do Round 10 (commits `ab3592b`..`821e4e7`) não
+introduziu regressão, e achar o que passou batido nas dez primeiras
+rodadas.
+
+**Enquadramento:**
+- **Complexidade**: sai da rotação — atingiu convergência formal completa
+  no Round 10 (2 rodadas consecutivas sem achado, sem enquadramento
+  reduzido envolvido). Mesmo tratamento dado a estabilidade/resiliência
+  após a convergência delas.
+- **Usabilidade**: enquadramento completo (reiniciou a contagem de
+  rodadas limpas em 1 no Round 10).
+- **Desempenho**: verificação de regressão ligada a mudanças de código
+  (papel permanente) — escopo desta rodada é o que o Round 10 mudou (a
+  função pura `ShouldReportNow` + o latch em `EvaluateFloorGuard`).
+- **Observabilidade**: enquadramento completo normal.
+- Estabilidade/resiliência não disparadas.
+
+Em paralelo, uma investigação read-only (fora do formato de rodada) está
+em andamento sobre resíduo de teste das transições v4→v5.0→v5.1
+(descontinuada)→v6 — não faz parte deste round, resultado será tratado
+separadamente.
+
+**Investigação de resíduo de teste (fora do round, resultado consolidado
+aqui)**: `src/RingBufferPlus.Tests/RingBufferManager.cs` (classe
+`RingBufferManagerTests`, 7 testes) era coberto de forma estrita e mais
+rigorosa por `RingBufferContractTests.cs` — não era resíduo de v4/v5
+(usava símbolos atuais do v6), só cobertura totalmente superada nunca
+removida quando a suíte de contrato foi construída. **Removido**
+(confirmado: 194/194 depois da remoção, mesmo total de antes menos os 7).
+`RingBufferExtension.cs` (mesmo problema de nome de arquivo) tem cobertura
+única (validação de argumento nulo de `RingBuffer<T>.New`) — mantido.
+Nenhum resíduo morto/duplicado de v4/v5.0/v5.1 encontrado além disso — a
+suíte foi escrita direto contra a superfície final do v6.
+
+**Desempenho**: avaliou a mudança do Round 10 (`ShouldReportNow` + latch
+em `EvaluateFloorGuard`) e concluiu, por prova dedutiva (não só "sem
+alvo"), que não pode ser regressão — o novo predicado é um estreitamento
+estrito do antigo (`new==true` implica `old==true`, nunca o contrário),
+então sob brecha persistente é estritamente menos trabalho (menos
+`LogError`/exceções alocadas), nunca mais. Não mediu.
+
+**Usabilidade**: não veio limpa (reinicia contagem em 1, pela 2ª vez
+seguida). Confirmou os 2 fixes do Round 10. **1 achado [Médio]**:
+`concepts.md`/`usage-fixed-capacity.md` afirmavam que `MinCapacity`/
+`MaxCapacity` "só existem" em modo elástico e que um buffer `FixedCapacity`
+"nunca escala"/"não tem atividade de scale engine" — contradito pelo
+próprio comentário de classe de `FloorGuardDecision.cs` ("applies
+uniformly in any mode, including fixed capacity"), por
+`EvaluateFloorGuard` sendo despachado incondicionalmente do caso
+`ReplaceOne` (sem gate por `Elastic`), e pelo próprio teste do Round 10
+(`Invalidate_WhenTheReplacementFactoryStaysBroken_RepeatsBelowMinimumReport_AsAFallback`)
+usar `.FixedCapacity(2)` especificamente para provar o floor guard nesse
+modo. Corrigido diretamente (evidência sólida o suficiente para não
+esperar corroboração formal).
+
+**Observabilidade**: confirmou o fix do Round 10 (`ShouldReportNow`)
+conectado e a doc batendo com o código. **1 achado novo [Alto]**: o
+comentário de `_monitorActive` e o de `ProcessTick` (mais
+`usage-observability.md:44`) caracterizavam o estado "active" (que pausa
+a coleta/avaliação do Monitor) como um "caso estreito" (só buffer pinado
+no `MaxCapacity` com backlog genuíno) — mas `active = (demand >=
+CurrentCapacity)` reduz algebricamente a `waiting >= idle`, que também é
+verdadeiro em `idle=0, waiting=0` (utilização plena comum, sem ninguém
+esperando), não só em backlog real. **Confirmado por reprodução empírica**
+antes de decidir: buffer elástico com 100% de utilização e zero
+esperadores por ~1.2s (3 ciclos de tick) produziu **0 linhas de log
+"Monitor tick"** e nenhuma tentativa de scale-up. Apresentei 4 opções
+(A: só corrigir doc/comentários, aceitando o comportamento atual por
+design; B: estreitar `active` para `waiting > 0`, mudança de algoritmo
+que precisaria da mesma simulação de qualidade de decisão do ADR003V03;
+C: investigar empiricamente antes de decidir; D: não mexer) — o usuário
+escolheu C primeiro (investigação confirmou o achado), depois pediu uma
+avaliação detalhada do custo/impacto da opção B antes de decidir entre A
+e B. Avaliação: a ferramenta de simulação existente
+(`AutoScaleAlgorithmComparison.cs`) não modela `idle`/`waiting`
+separadamente hoje, então B exigiria estendê-la, não só rodá-la — custo
+real de projeto à parte, não um fix. Dado que o backlog-reactive já cobre
+o caso de demanda genuinamente excedendo capacidade instantaneamente, e
+que o cenário do achado (utilização plena sustentada, sem nunca haver
+espera) é provavelmente raro em tráfego real, **decisão final: opção A**
+— corrigidos os 2 comentários de código e a doc para descrever a condição
+real; opção B fica registrada como questão de design avaliada e
+deliberadamente adiada, não como achado pendente.
+
+Verificado: 194/194 testes net10.0 (era 201 no fechamento do Round 10,
+-7 pela remoção de `RingBufferManagerTests.cs`, então estável desde
+então), build limpo (0 warnings, 0 errors) em toda a solução (3 TFMs,
+samples, benchmarks, gerador de docs).
+
+Status: **fechado**.
+
+---
+
 ## Round 10 — 2026-08-24
 
 Objetivo: verificar se o fix do Round 9 (commits `487d877`..`ab3592b`) não

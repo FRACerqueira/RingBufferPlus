@@ -537,3 +537,51 @@ prática.
 Verificado: 201/201 testes net10.0 (era 194, +7 novos), build limpo (0
 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
 de docs). Nenhum achado do Round 10 ficou em aberto sem decisão.
+
+## Round 11 — 2026-08-24
+
+Complexidade sai da rotação (convergência formal completa no Round 10).
+Usabilidade completa, desempenho como verificação de regressão,
+observabilidade completa normal.
+
+**Investigação paralela de resíduo de teste** (fora do formato de round,
+pedida separadamente): `RingBufferManagerTests.cs` removido (7 testes,
+totalmente superados por `RingBufferContractTests.cs`, não era resíduo
+de v4/v5 - só cobertura duplicada nunca limpa). `RingBufferExtension.cs`
+(cobertura única de validação de argumento) mantido. Nenhum resíduo morto
+de v4/v5.0/v5.1 encontrado.
+
+**Corrigidos nesta rodada** (1 Alto, 1 Médio):
+
+- **[Alto, observabilidade] Caracterização de "active" do Monitor como
+  "caso estreito"** — `active = waiting >= idle` algebricamente, também
+  verdadeiro em utilização plena comum (idle=0, waiting=0), não só em
+  backlog genuíno. Confirmado por reprodução empírica antes de decidir
+  (pedido do usuário): buffer 100% utilizado por ~1.2s produziu 0 linhas
+  de log "Monitor tick", nenhum scale-up. Apresentei 4 opções (A: doc-only;
+  B: estreitar `active` para `waiting>0`, mudança de algoritmo; C:
+  investigar antes; D: não mexer). Fluxo: C primeiro (confirmou o
+  achado), depois pedido de avaliação detalhada do custo/impacto de B
+  antes da decisão final. Avaliação: a ferramenta de simulação existente
+  (`AutoScaleAlgorithmComparison.cs`) não modela `idle`/`waiting`
+  separadamente — B exigiria estendê-la, não só rodá-la. **Decisão final:
+  A** — 2 comentários de código + `usage-observability.md` corrigidos
+  para descrever a condição real; B fica registrado como questão de
+  design avaliada e adiada, não como achado pendente.
+- **[Médio, usabilidade] `concepts.md`/`usage-fixed-capacity.md`
+  afirmavam que `FixedCapacity` "nunca escala"** — contradito pelo
+  próprio comentário de `FloorGuardDecision.cs`, pelo dispatch
+  incondicional de `EvaluateFloorGuard`, e por um teste do próprio Round
+  10 que usa `.FixedCapacity(2)` para provar o floor guard nesse modo.
+  Corrigido diretamente (evidência sólida, sem esperar corroboração).
+
+**Sem medição, com prova dedutiva** (desempenho): avaliou a mudança do
+Round 10 (`ShouldReportNow`) e concluiu que é um estreitamento estrito do
+predicado antigo — sob brecha persistente, estritamente menos trabalho
+(menos `LogError` alocado), nunca mais. Não é possível ser regressão por
+construção; não mediu.
+
+Verificado: 194/194 testes net10.0 (201 no fechamento do Round 10, -7 pela
+remoção de testes redundantes, estável desde então), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs). Nenhum achado do Round 11 ficou em aberto sem decisão.
