@@ -24,7 +24,7 @@ public interface IRingBufferFixedBuilder<T>
 | [Factory](IRingBufferFixedBuilder-1/Factory.md)(…) | Sets the factory (required) to create an instance in the ring buffer asynchronously. |
 | [HeartBeat](IRingBufferFixedBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer: periodically inspects a live item's health. |
 | [Logger](IRingBufferFixedBuilder-1/Logger.md)(…) | Sets the logger. |
-| [OnError](IRingBufferFixedBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline whenever this buffer logs an error internally. |
+| [OnError](IRingBufferFixedBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline instead of this buffer's own Error-level logging whenever it would otherwise log an error internally. |
 
 ### See Also
 

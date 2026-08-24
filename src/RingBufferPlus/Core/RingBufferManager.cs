@@ -99,7 +99,11 @@ namespace RingBufferPlus.Core
         // DisposeAsync before this bag is snapshotted) has completed, no more entries can arrive.
         private readonly ConcurrentBag<Task> _pendingHeartbeatDisposals = new();
 
-        private bool _disposed;
+        // Round 1 (Estabilidade, v6 pre-release audit): volatile, not a plain bool - written once,
+        // synchronously, as the first instruction of DisposeAsync, then read from other threads
+        // (AcquireCoreAsync, SwitchToAsync, WarmupAsync/WarmupCoreAsync) with no other memory
+        // barrier guaranteeing its visibility to them.
+        private volatile bool _disposed;
         private int _disposeGuard;
         private int _currentCapacity;
         private volatile bool _scaling;
@@ -264,7 +268,7 @@ namespace RingBufferPlus.Core
             _acquireDuration = _meter.CreateHistogram<double>("ringbufferplus.acquire.duration", unit: "s", description: "Duration of AcquireAsync calls, in seconds.");
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
             _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction, trigger, and success.");
-            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by direction and success.");
+            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by direction, trigger, and success.");
             _meter.CreateObservableGauge("ringbufferplus.capacity.current",
                 () => new Measurement<int>(CurrentCapacity, new KeyValuePair<string, object?>("buffer.name", Name)),
                 description: "Current capacity of the buffer.");
@@ -1020,8 +1024,9 @@ namespace RingBufferPlus.Core
             activity?.SetTag("buffer.name", Name);
             activity?.SetTag("direction", "up");
             activity?.SetTag("trigger", scaleTrigger);
+            activity?.SetTag("target", target);
             var sw = Stopwatch.StartNew();
-            LogMessage($"Starting ScaleUp {quantity}.");
+            LogMessage($"Starting ScaleUp {quantity}. Trigger: {scaleTrigger}.");
 
             _factoryBatchTask = Task.Run(async () =>
             {
@@ -1043,7 +1048,7 @@ namespace RingBufferPlus.Core
                     threw = ex;
                 }
                 sw.Stop();
-                LogMessage("End ScaleUp.");
+                LogMessage($"End ScaleUp. Trigger: {scaleTrigger}.");
 
                 // Telemetry (activity/meter) is finalized here, unconditionally, rather than
                 // deferred to the FactoryBatchCompleted command below: it is independent,
@@ -1062,11 +1067,14 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("direction", "up"),
                     new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("target", target),
                     new KeyValuePair<string, object?>("success", scaledUp),
                     new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
                 _scaleDuration.Record(sw.Elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("direction", "up"),
+                    new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("target", target),
                     new KeyValuePair<string, object?>("success", scaledUp),
                     new KeyValuePair<string, object?>("cancelled", cancelledByShutdown));
 
@@ -1112,8 +1120,9 @@ namespace RingBufferPlus.Core
             activity?.SetTag("buffer.name", Name);
             activity?.SetTag("direction", "down");
             activity?.SetTag("trigger", scaleTrigger);
+            activity?.SetTag("target", target);
             var sw = Stopwatch.StartNew();
-            LogMessage($"Starting ScaleDown {quantity}.");
+            LogMessage($"Starting ScaleDown {quantity}. Trigger: {scaleTrigger}.");
 
             _removalBatchTask = Task.Run(async () =>
             {
@@ -1122,7 +1131,7 @@ namespace RingBufferPlus.Core
                     await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
                 }
                 sw.Stop();
-                LogMessage("End ScaleDown.");
+                LogMessage($"End ScaleDown. Trigger: {scaleTrigger}.");
 
                 // Telemetry (activity/meter) is finalized here, unconditionally, same reasoning as
                 // DispatchScaleUp's own comment: independent, thread-safe instrumentation, not
@@ -1141,6 +1150,21 @@ namespace RingBufferPlus.Core
                 // still always emitted (false) to preserve the existing tag contract every scale
                 // operation carries, not just the ones where it can actually be true.
                 var scaledDown = removed.Count == quantity;
+                // Round 1 (Estabilidade, v6 pre-release audit, confirmed by 2 independent
+                // instances): a manual (pinned) scale-down that only partially completes (not
+                // enough idle items were available right now) has nothing retrying it while the
+                // pin is active - the Monitor is the only signal that would otherwise finish the
+                // reduction as retained items become idle again, and it stays suppressed for the
+                // whole pin duration. Accepted as known behavior (not fixed): the pool is never
+                // corrupted (CurrentCapacity stays truthful, invariants hold) and it self-corrects
+                // once the pin expires and ordinary Monitor ticks resume - but until then it is
+                // silent otherwise, so surface it here. Not relevant for an "auto"-triggered
+                // (Monitor-driven) scale-down: that path re-evaluates on every subsequent tick on
+                // its own, with no pin ever suppressing it.
+                if (!scaledDown && scaleTrigger == "manual")
+                {
+                    LogWarning($"ScaleDown to {target} only partially completed ({removed.Count}/{quantity} items removed) while a manual pin is active - the remaining reduction will not be retried until the pin expires.");
+                }
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 activity?.SetTag("cancelled", false);
                 activity?.Dispose();
@@ -1148,11 +1172,14 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("direction", "down"),
                     new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("target", target),
                     new KeyValuePair<string, object?>("success", scaledDown),
                     new KeyValuePair<string, object?>("cancelled", false));
                 _scaleDuration.Record(sw.Elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
                     new KeyValuePair<string, object?>("direction", "down"),
+                    new KeyValuePair<string, object?>("trigger", scaleTrigger),
+                    new KeyValuePair<string, object?>("target", target),
                     new KeyValuePair<string, object?>("success", scaledDown),
                     new KeyValuePair<string, object?>("cancelled", false));
 
@@ -1224,6 +1251,12 @@ namespace RingBufferPlus.Core
             var target = AutoScaleMonitor.EvaluateTarget(_samples, MonitorPercentileP, MonitorSafetyBuffer, MonitorHorizon, MinCapacity, MaxCapacity);
             if (target == CurrentCapacity)
             {
+                // Round 1 (Observabilidade, v6 pre-release audit): the Monitor's own tick decision
+                // otherwise left no trace at all when it decided NOT to scale - the scale.*
+                // telemetry only exists for a dispatched operation, and this method had no logging
+                // of its own. Debug-gated (LogMessage already checks IsEnabled), so this costs
+                // nothing when the caller hasn't opted into Debug-level logs.
+                LogMessage($"Monitor tick: demand={demand}, target={target} equals current capacity {CurrentCapacity} - no scale.");
                 return;
             }
             // Reachability cap (same principle as the old median algorithm's R18/R19 threshold
@@ -1236,8 +1269,10 @@ namespace RingBufferPlus.Core
             var effectiveDeadband = Math.Min(MonitorDeadband, maxReachableDelta);
             if (Math.Abs(target - CurrentCapacity) < effectiveDeadband)
             {
+                LogMessage($"Monitor tick: demand={demand}, target={target}, current={CurrentCapacity} - within deadband ({effectiveDeadband}), no scale.");
                 return;
             }
+            LogMessage($"Monitor tick: demand={demand}, target={target}, current={CurrentCapacity} - dispatching {(target > CurrentCapacity ? "scale-up" : "scale-down")}.");
             if (target > CurrentCapacity)
             {
                 DispatchScaleUp(target, scaleTrigger: "auto", completion: null);
@@ -1647,20 +1682,42 @@ namespace RingBufferPlus.Core
                     var heartbeatWork = Task.Run(() => BufferHeartBeat is null || BufferHeartBeat(acquired.Current));
                     try
                     {
-                        // Deliberate design choice, not an oversight: if the item is unhealthy
-                        // (false) and its own Dispose()/DisposeAsync() then hangs, TurnbackAsync's
-                        // Invalidate branch awaits that unbounded (unlike the timeout path below,
-                        // which is itself bounded by PulseHeartBeat via the deferred-dispose
-                        // machinery) - this pump stalls until it returns. The engine itself stays
-                        // free either way: ReplaceOne is posted to the command channel before that
-                        // await, inside TurnbackAsync, so capacity is corrected regardless of how
-                        // long this specific await takes.
                         var healthy = await heartbeatWork.WaitAsync(pulseTimeout.Token).ConfigureAwait(false);
                         if (!healthy)
                         {
                             acquired.Invalidate();
                         }
-                        await acquired.DisposeAsync().ConfigureAwait(false);
+                        // Round 1 (Resiliência, v6 pre-release audit): unlike TurnbackAsync's general
+                        // contract for an external caller's own DisposeAsync() call (a hang there is
+                        // genuinely local to them - their own await, their own problem), "the caller"
+                        // here is this pump itself. An unbounded await would let a single hanging
+                        // Dispose() (on an item this same pump just invalidated) stall _heartbeatTask
+                        // forever - and DisposeAsync() awaits _heartbeatTask via Task.WhenAll(pending)
+                        // BEFORE its own cleanup (draining _availableItems, disposing _lifetime/
+                        // _meter/_activitySource) runs, so the whole manager's shutdown would never
+                        // complete, and _disposeGuard (already set) would make a retry a permanent
+                        // silent no-op. Bounded the same way the F12/F15 timeout branch below already
+                        // bounds a stuck callback's own dispose: PulseHeartBeat as grace period,
+                        // deferred into _pendingHeartbeatDisposals (drained by DisposeAsync's own
+                        // cleanup) if it doesn't finish in time. TurnbackAsync already posts
+                        // ReplaceOne before this dispose even starts, so capacity is corrected either
+                        // way, regardless of how long the underlying Dispose() actually takes.
+                        var disposeTask = acquired.DisposeAsync().AsTask();
+                        try
+                        {
+                            await disposeTask.WaitAsync(PulseHeartBeat).ConfigureAwait(false);
+                        }
+                        catch (TimeoutException)
+                        {
+                            LogWarning("Heart Beat item dispose did not complete within one pulse - deferring, capacity was already corrected.");
+                            var stillPendingDispose = new List<Task>();
+                            while (_pendingHeartbeatDisposals.TryTake(out var previousDispose))
+                            {
+                                if (!previousDispose.IsCompleted) stillPendingDispose.Add(previousDispose);
+                            }
+                            foreach (var previousDispose in stillPendingDispose) _pendingHeartbeatDisposals.Add(previousDispose);
+                            _pendingHeartbeatDisposals.Add(disposeTask);
+                        }
                     }
                     catch (OperationCanceledException) when (!heartbeatWork.IsCompleted)
                     {

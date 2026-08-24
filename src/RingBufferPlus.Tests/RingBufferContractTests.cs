@@ -1064,6 +1064,51 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Round 1 (Resiliência, v6 pre-release audit): RunHeartbeatAsync's own
+        // `await acquired.DisposeAsync()` (the healthy-verdict-arrived-in-time path, distinct from
+        // the F12/F15 timeout branch below it, which is already bounded via
+        // _pendingHeartbeatDisposals+PulseHeartBeat) is unbounded when the verdict is `false`: it
+        // routes through TurnbackAsync's Invalidate branch, which awaits the old item's own
+        // Dispose()/DisposeAsync() directly. That await hanging blocks _heartbeatTask forever, and
+        // DisposeAsync() awaits _heartbeatTask via Task.WhenAll(pending) BEFORE its own cleanup
+        // (draining _availableItems, disposing _lifetime/_meter/_activitySource) - so the whole
+        // manager's DisposeAsync() never returns, and _disposeGuard (already set) makes a retry a
+        // permanent silent no-op. Unlike the sibling case fixed for TurnbackAsync's general callers
+        // (Invalidate_WhenItemDisposeHangs_StillReplacesTheSlot_WithoutWaitingForIt above, where a
+        // hang is genuinely local to that caller's own DisposeAsync() call), here "the caller" is
+        // the framework's own heartbeat pump - its hang is everyone's problem, not just its own.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeatInvalidate_WhenItemDisposeHangs_ManagerDisposeAsyncStillReturnsPromptly()
+        {
+            using var release = new ManualResetEventSlim(false);
+            IRingBufferBuilder<HangingDisposeProbe> builder = new RingBufferBuilder<HangingDisposeProbe>("ContractHeartbeatInvalidateHangingDispose", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new HangingDisposeProbe(release)))
+                .HeartBeat(_ => false, pulse: TimeSpan.FromMilliseconds(50))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            // Let at least one pulse fire, acquire an idle item, get the unhealthy verdict, and
+            // start hanging inside its Dispose() via TurnbackAsync's Invalidate branch.
+            await Task.Delay(300);
+
+            try
+            {
+                var disposeTask = service.DisposeAsync().AsTask();
+                var completedInTime = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromSeconds(2))) == disposeTask;
+                Assert.True(completedInTime, "Expected the manager's DisposeAsync() to return promptly even though the heartbeat-invalidated item's own Dispose() is hanging.");
+            }
+            finally
+            {
+                // Let the probe's background dispose finish so it doesn't linger past the test.
+                release.Set();
+            }
+        }
+
+        // ---------------------------------------------------------------------
         // 1.14 - The scale-up deadline must scale with the work requested (quantity * FactoryTimeout),
         // not with the sampling cadence (SamplesBase) - and a scale-up that still can't finish in
         // time must keep whatever capacity it already gained instead of discarding it. See TODO/
@@ -1385,6 +1430,51 @@ namespace RingBufferPlus.Tests
             await service.SwitchToAsync(ScaleSwitch.InitCapacity, TimeSpan.FromMinutes(1));
             sw.Stop();
             Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(500), $"Expected the engine to process (accept or reject) the second command promptly instead of being stuck behind the first scale-down's wait for busy items - took {sw.Elapsed}.");
+
+            foreach (var value in held)
+            {
+                await value.DisposeAsync();
+            }
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 1 (Estabilidade, v6 pre-release audit, confirmed by 2 independent instances):
+        // accepted as known behavior, not fixed - a manual (pinned) scale-down that only partially
+        // completes has nothing retrying it while the pin suppresses the Monitor. Surfaced via a
+        // LogWarning instead of staying silent; the pool itself is never corrupted and self-corrects
+        // once the pin expires.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleDown_PartialUnderActivePin_LogsWarning()
+        {
+            var logger = new CapturingLogger();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleDownPartialPinWarning", null);
+            var service = builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(logger)
+                .ElasticCapacity(2, 5, 5, 5, TimeSpan.FromSeconds(2))
+                .LockWhenScaling()
+                .Build();
+            await service.WarmupAsync();
+
+            // Hold 3 of the 5 items - only 2 remain idle, one short of what a scale-down to
+            // MinCapacity (2) needs to remove (3).
+            var held = new List<RingBufferValue<int>>();
+            for (var i = 0; i < 3; i++)
+            {
+                held.Add(await service.AcquireAsync());
+            }
+
+            var reached = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
+            Assert.False(reached, "Expected the scale-down to only partially complete (3 of 5 items held).");
+
+            lock (logger.Messages)
+            {
+                Assert.Contains(logger.Messages, m => m.Contains("only partially completed") && m.Contains("manual pin"));
+            }
 
             foreach (var value in held)
             {
@@ -2219,6 +2309,45 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Round 1 (Observabilidade, v6 pre-release audit): ProcessTick had no logging of its own -
+        // a tick that decided NOT to scale (target already equals CurrentCapacity, or the change is
+        // within MonitorDeadband) left no trace anywhere. This buffer stays fully idle at its own
+        // MinCapacity/target the whole time, so the Monitor's target should converge to (and stay
+        // at) CurrentCapacity almost immediately, making the "no scale" tick log reliably reachable.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task MonitorTick_WhenTargetEqualsCurrentCapacity_LogsTheNoScaleDecision()
+        {
+            var logger = new CapturingLogger();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractMonitorTickNoScaleLog", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(logger)
+                .ElasticCapacity(2, 5, 2, 4, TimeSpan.FromMilliseconds(800))
+                .BuildWarmupAsync();
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            var found = false;
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (logger.Messages)
+                {
+                    if (logger.Messages.Any(m => m.Contains("Monitor tick") && m.Contains("no scale")))
+                    {
+                        found = true;
+                        break;
+                    }
+                }
+                await Task.Delay(50);
+            }
+            Assert.True(found, "Expected a Debug-level Monitor tick log explaining why it did not scale.");
+
+            await service.DisposeAsync();
+        }
+
+        // ---------------------------------------------------------------------
         // 1.26 - A fault-triggered scale-up that only partially succeeds (R14's tolerated
         // failures) can land off-tier, strictly between Capacity and MaxCapacity. Idleness there
         // must still eventually trigger a scale-down (R16, Rodada 3) instead of getting stuck at
@@ -2732,6 +2861,39 @@ namespace RingBufferPlus.Tests
             {
                 Assert.Contains(errors, e => e is InvalidOperationException ioe && ioe.Message.Contains("Simulated late dispose failure"));
             }
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 1 (Observabilidade, v6 pre-release audit): the plain-text scale log messages
+        // ("Starting ScaleUp N."/"End ScaleUp.") never interpolated scaleTrigger, even though it
+        // was already in scope - a consumer using only ILogger (no Meter/Activity listener) could
+        // not tell a manual switch apart from a floor-guard/backlog-reactive/Monitor-driven scale
+        // from the log stream alone.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task ScaleLogMessages_IncludeTheTriggerThatCausedThem()
+        {
+            var logger = new CapturingLogger();
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractScaleLogIncludesTrigger", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(logger)
+                .ElasticCapacity(2, 5, 2)
+                .LockWhenScaling()
+                .BuildWarmupAsync();
+
+            var reached = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            Assert.True(reached);
+
+            lock (logger.Messages)
+            {
+                Assert.Contains(logger.Messages, m => m.Contains("Starting ScaleUp") && m.Contains("Trigger: manual"));
+                Assert.Contains(logger.Messages, m => m.Contains("End ScaleUp") && m.Contains("Trigger: manual"));
+            }
+
+            await service.DisposeAsync();
         }
 
         // ---------------------------------------------------------------------

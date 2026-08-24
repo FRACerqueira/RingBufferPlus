@@ -24,7 +24,7 @@ public interface IRingBufferBuilder<T>
 | [FixedCapacity](IRingBufferBuilder-1/FixedCapacity.md)(…) | Sets a fixed capacity for the ring buffer: no autoscale, no manual switch, no min/max range. |
 | [HeartBeat](IRingBufferBuilder-1/HeartBeat.md)(…) | Sets the HeartBeat in the ring buffer: periodically inspects a live item's health. |
 | [Logger](IRingBufferBuilder-1/Logger.md)(…) | Sets the logger. |
-| [OnError](IRingBufferBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline whenever this buffer logs an error internally. |
+| [OnError](IRingBufferBuilder-1/OnError.md)(…) | Sets the error handler, invoked inline instead of this buffer's own Error-level logging whenever it would otherwise log an error internally. |
 
 ### See Also
 

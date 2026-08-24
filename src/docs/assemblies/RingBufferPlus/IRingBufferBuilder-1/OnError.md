@@ -4,7 +4,7 @@
 </br>
 
 
-#### Sets the error handler, invoked inline whenever this buffer logs an error internally.
+#### Sets the error handler, invoked inline instead of this buffer's own Error-level logging whenever it would otherwise log an error internally.
 
 ```csharp
 public IRingBufferBuilder OnError(Action<Exception> errorHandler)
@@ -12,7 +12,7 @@ public IRingBufferBuilder OnError(Action<Exception> errorHandler)
 
 | parameter | description |
 | --- | --- |
-| errorHandler | The handler to invoke with the error. Called synchronously, inline (ADR007V03) - no background queue. The logger configured via [`Logger`](./Logger.md) is a separate concern; this handler does not receive it. |
+| errorHandler | The handler to invoke with the error. Called synchronously, inline (ADR007V03) - no background queue. Substitutes for the logger configured via [`Logger`](./Logger.md) at Error level, it does not add to it: once this is set, the configured ILogger no longer receives Error-level messages from this buffer at all (it still receives every other level unaffected). If you need the error surfaced through both your own sink and the standard logger, call the logger yourself from inside this handler - it is not done for you. |
 
 ### Return Value
 

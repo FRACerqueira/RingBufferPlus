@@ -86,11 +86,16 @@ namespace RingBufferPlus
         IRingBufferBuilder<T> AcquireTimeout(TimeSpan value);
 
         /// <summary>
-        /// Sets the error handler, invoked inline whenever this buffer logs an error internally.
+        /// Sets the error handler, invoked inline instead of this buffer's own Error-level logging
+        /// whenever it would otherwise log an error internally.
         /// </summary>
         /// <param name="errorHandler">The handler to invoke with the error. Called synchronously,
-        /// inline (ADR007V03) - no background queue. The logger configured via <see cref="Logger(ILogger?)"/>
-        /// is a separate concern; this handler does not receive it.</param>
+        /// inline (ADR007V03) - no background queue. Substitutes for the logger configured via
+        /// <see cref="Logger(ILogger?)"/> at Error level, it does not add to it: once this is set,
+        /// the configured <see cref="ILogger"/> no longer receives Error-level messages from this
+        /// buffer at all (it still receives every other level unaffected). If you need the error
+        /// surfaced through both your own sink and the standard logger, call the logger yourself
+        /// from inside this handler - it is not done for you.</param>
         /// <returns><see cref="IRingBufferBuilder{T}"/>.</returns>
         IRingBufferBuilder<T> OnError(Action<Exception> errorHandler);
 

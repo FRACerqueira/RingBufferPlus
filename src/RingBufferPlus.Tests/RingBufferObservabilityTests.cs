@@ -527,6 +527,61 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task SwitchToAsync_RecordsScaleDurationTaggedByTrigger()
+        {
+            // Round 1 (Observabilidade, v6 pre-release audit): scale.duration used to omit the
+            // trigger tag entirely (only scale.operations carried it), making it impossible to
+            // slice scale latency by which signal (manual/floor/backlog/auto) caused it.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 5, 2)
+                .LockWhenScaling()
+                .BuildWarmupAsync();
+
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+
+            var scaleDuration = records.Where(r => r.InstrumentName == "ringbufferplus.scale.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleDuration, r => Equals(r.Tags.GetValueOrDefault("trigger"), "manual"));
+        }
+
+        [Fact]
+        public async Task SwitchToAsync_RecordsTargetTagOnScaleOperationsAndActivity()
+        {
+            // Round 1 (Observabilidade, v6 pre-release audit): neither scale.operations/
+            // scale.duration nor the "RingBufferPlus.Scale" activity carried the target capacity
+            // the operation was aiming for - useful for any trigger, not just the Monitor.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 5, 2)
+                .LockWhenScaling()
+                .BuildWarmupAsync();
+
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleOps = records.Where(r => r.InstrumentName == "ringbufferplus.scale.operations" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
+            Assert.Contains(scaleOps, r => Equals(r.Tags.GetValueOrDefault("target"), 5));
+
+            var scaleActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName));
+            Assert.Equal(5, scaleActivity.GetTagItem("target"));
+        }
+
+        [Fact]
         public async Task AcquireAsync_RacingDisposeAsync_RecordsOkStatus_NotError()
         {
             // Round 4, Observabilidade (finding O2): AcquireCoreAsync never set an ActivityStatusCode
