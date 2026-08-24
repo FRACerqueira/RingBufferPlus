@@ -58,6 +58,14 @@ namespace RingBufferPlus.Core
         // runs per request, not per scale operation.
         private readonly Func<RingBufferValue<T>, ValueTask> _turnbackDelegate;
 
+        // Round 4 (Complexidade/Desempenho, v6 pre-release audit): boxing `true`/`false` as the
+        // `object?` tag value for a metric/activity call allocates a fresh box per call even though
+        // the two possible values never change - reusing these on the AcquireCoreAsync success path
+        // (the one path measured as hot) avoids that. Scoped to just that path: the failure catch
+        // blocks and scale.* tags below are cold paths with no measured benefit from the same change.
+        private static readonly object BoxedTrue = true;
+        private static readonly object BoxedFalse = false;
+
         // Monitor's sliding demand window (ADR001V03/ADR003V03) - bounded to SamplesCount, engine-
         // thread-only (only ProcessTick and the scale-completion cleanup paths touch it).
         private readonly List<int> _samples = [];
@@ -390,11 +398,11 @@ namespace RingBufferPlus.Core
                 // timeout" they'd expect.
                 _acquireDuration.Record(elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
-                    new KeyValuePair<string, object?>("acquire.success", true),
-                    new KeyValuePair<string, object?>("acquire.timed_out", false),
-                    new KeyValuePair<string, object?>("acquire.cancelled", false));
-                activity?.SetTag("success", true);
-                activity?.SetTag("timed_out", false);
+                    new KeyValuePair<string, object?>("acquire.success", BoxedTrue),
+                    new KeyValuePair<string, object?>("acquire.timed_out", BoxedFalse),
+                    new KeyValuePair<string, object?>("acquire.cancelled", BoxedFalse));
+                activity?.SetTag("success", BoxedTrue);
+                activity?.SetTag("timed_out", BoxedFalse);
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 return new RingBufferValue<T>(Name, elapsed, true, item, _turnbackDelegate);
             }
