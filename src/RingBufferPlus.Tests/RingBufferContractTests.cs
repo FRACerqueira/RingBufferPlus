@@ -3839,5 +3839,40 @@ namespace RingBufferPlus.Tests
 
             await service.DisposeAsync();
         }
+
+        // ---------------------------------------------------------------------
+        // 1.42 - Round 7, Observabilidade: a comment above the backlog-reactive signal in
+        // AcquireCoreAsync claimed the heartbeat's own internal acquire "must not count" toward
+        // it, but only the EngineCommand.Backlog() dispatch was actually gated by
+        // countsTowardFaultBudget - Interlocked.Increment(ref _waitingCount) itself ran
+        // unconditionally, so a heartbeat blocked waiting for an item still inflated the same
+        // counter EvaluateBacklogReactive/ProcessTick read to size a scale-up. Fixed by gating the
+        // increment (and its matching decrement) on countsTowardFaultBudget too, so the comment's
+        // stated intent actually holds.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartbeatAcquireWaiting_DoesNotInflateWaitingCount()
+        {
+            var manager = CreateFixedManager(1, _ => Task.FromResult(1));
+            await manager.WarmupAsync();
+
+            // Drain the only item so the heartbeat-style acquire below genuinely blocks on ReadAsync.
+            var held = await manager.AcquireAsync();
+
+            var acquireForHeartbeatAsync = manager.GetType().GetMethod("AcquireForHeartbeatAsync", BindingFlags.NonPublic | BindingFlags.Instance)
+                ?? throw new InvalidOperationException("Method 'AcquireForHeartbeatAsync' not found.");
+            var heartbeatTask = (ValueTask<RingBufferValue<int>>)acquireForHeartbeatAsync.Invoke(manager, [CancellationToken.None])!;
+
+            // Give the heartbeat-style acquire time to actually reach the blocking ReadAsync.
+            await Task.Delay(50);
+            Assert.Equal(0, (int)GetPrivateField(manager, "_waitingCount"));
+
+            await held.DisposeAsync(); // returns the item, unblocking the heartbeat-style acquire
+            var heartbeatValue = await heartbeatTask;
+            await heartbeatValue.DisposeAsync();
+            await manager.DisposeAsync();
+        }
     }
 }

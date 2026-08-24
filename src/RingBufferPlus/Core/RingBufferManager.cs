@@ -416,12 +416,19 @@ namespace RingBufferPlus.Core
                     // before AcquireTimeout has any chance to elapse (the old fault-count trigger
                     // below only reacts after that timeout already happened). Same R11 reasoning
                     // as the fault path: the heartbeat's own internal acquire is a health check,
-                    // not consumer demand, so it must not count here either.
-                    Interlocked.Increment(ref _waitingCount);
-                    isWaiting = true;
-                    if (Elastic && countsTowardFaultBudget)
+                    // not consumer demand, so it must not count here either - gating just the
+                    // Backlog() dispatch below was not enough on its own (Round 7, Observabilidade):
+                    // _waitingCount itself is also read directly by EvaluateBacklogReactive/
+                    // ProcessTick, so a heartbeat blocked waiting still inflated it even though it
+                    // never triggered anything.
+                    if (countsTowardFaultBudget)
                     {
-                        _commands.Writer.TryWrite(EngineCommand.Backlog());
+                        Interlocked.Increment(ref _waitingCount);
+                        isWaiting = true;
+                        if (Elastic)
+                        {
+                            _commands.Writer.TryWrite(EngineCommand.Backlog());
+                        }
                     }
                     item = await _availableItems.Reader.ReadAsync(linked.Token).ConfigureAwait(false);
                     // Decrement right here, not in the shared finally below: this caller is no
@@ -431,8 +438,11 @@ namespace RingBufferPlus.Core
                     // in between would otherwise still see this already-served caller as backlog -
                     // narrowing that window is what keeps the documented approximation in
                     // EvaluateBacklogReactive small in practice, not just tolerated in theory.
-                    Interlocked.Decrement(ref _waitingCount);
-                    isWaiting = false;
+                    if (isWaiting)
+                    {
+                        Interlocked.Decrement(ref _waitingCount);
+                        isWaiting = false;
+                    }
                 }
                 var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
                 // Round 4 (Observabilidade, v6 pre-release audit): acquire.timed_out/acquire.cancelled
