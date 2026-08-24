@@ -38,12 +38,6 @@ A complete, coordinated product overhaul authorized by [ADR006 V02](doc/adr/ADR0
 - A `HeartBeat` callback's "unhealthy" verdict (triggering an item replacement) is now observable on its own via a new `ringbufferplus.heartbeat.invalidations` counter and log message, instead of being indistinguishable from a healthy pump iteration.
 - The `acquire.*`/`scale.*` trace `Activity`s now carry the same `success`/`warmup_failed` tags already present on their corresponding metrics - the two signals had drifted out of sync for several outcome paths.
 
-### Known issues
-
-- `SwitchToAsync`'s unlocked path has no per-call telemetry of its own (it never had one); factory attempts made on that path are still visible via the existing per-attempt logging.
-- A gauge registered in the constructor can observe capacity state before the constructor has fully returned; documented, not fixed, as a narrow and harmless ordering window.
-- The Monitor's `active` condition is broader than "genuine backlog while pinned at `MaxCapacity`" - it also holds under ordinary full utilization with no waiters, silencing a sampling tick in that case too. Narrowing it would be a real autoscale algorithm change requiring the existing decision-quality simulation tool to model `idle`/`waiting` separately first; deliberately deferred, not a defect in this release. See [the audit report](doc/audits/v6.0.0-pre-release-audit.md#a-deliberately-deferred-design-question).
-
 ## [5.0.0] - 2026-08-12
 
 v5.0.0 is a complete, coordinated product overhaul with sweeping breaking changes — see the ADRs in [doc/adr](doc/adr/indexadrs.md) for full context.
