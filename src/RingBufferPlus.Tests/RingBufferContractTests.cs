@@ -2878,8 +2878,13 @@ namespace RingBufferPlus.Tests
             // steady-state bag size rather than catching it mid-cycle.
             await Task.Delay(50);
 
-            var bag = (System.Collections.Concurrent.ConcurrentBag<Task>)GetPrivateField(service, "_pendingHeartbeatDisposals");
-            Assert.True(bag.Count <= 2, $"Expected the deferred-disposal bag to stay bounded despite {callbackCount} timed-out pulses, but it grew to {bag.Count} entries.");
+            var pending = (List<Task>)GetPrivateField(service, "_pendingHeartbeatDisposals");
+            int pendingCount;
+            lock (GetPrivateField(service, "_pendingHeartbeatDisposalsGate"))
+            {
+                pendingCount = pending.Count;
+            }
+            Assert.True(pendingCount <= 2, $"Expected the deferred-disposal list to stay bounded despite {callbackCount} timed-out pulses, but it grew to {pendingCount} entries.");
 
             await service.DisposeAsync();
         }

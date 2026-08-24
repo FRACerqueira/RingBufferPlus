@@ -110,8 +110,19 @@ namespace RingBufferPlus.Core
 
         // Deferred dispose continuations from an orphaned heartbeat callback (F12/F15) - added
         // only from RunHeartbeatAsync's own loop, so by the time _heartbeatTask (awaited in
-        // DisposeAsync before this bag is snapshotted) has completed, no more entries can arrive.
-        private readonly ConcurrentBag<Task> _pendingHeartbeatDisposals = new();
+        // DisposeAsync before this list is snapshotted) has completed, no more entries can arrive.
+        // Round 8 (Complexidade/Estabilidade, v6 pre-release audit): was a ConcurrentBag<Task>,
+        // optimized for genuine multi-producer thread affinity that this single logical writer
+        // (RunHeartbeatAsync, which resumes on an arbitrary pool thread after each await, not a
+        // fixed thread) never actually had - a lock plus a plain list is both simpler and, per
+        // estabilidade's review, no less correct: nothing else writes here (confirmed by grep),
+        // and every correctness guarantee this bag provides (F12/F15) comes from awaiting
+        // _heartbeatTask itself, not from any property of the collection type. Also closes a
+        // latent hazard the old take/re-add pattern had: an exception between the drain loop and
+        // the re-add loop below would have silently lost every entry that loop had already taken
+        // out - a single lock scope can't leave that gap.
+        private readonly object _pendingHeartbeatDisposalsGate = new();
+        private readonly List<Task> _pendingHeartbeatDisposals = new();
 
         // Round 1 (Estabilidade, v6 pre-release audit): volatile, not a plain bool - written once,
         // synchronously, as the first instruction of DisposeAsync, then read from other threads
@@ -707,9 +718,13 @@ namespace RingBufferPlus.Core
                 // heartbeat callback (F12/F15) was still holding had not yet actually been
                 // disposed - a real leak if the process exits shortly after DisposeAsync returns,
                 // not merely a delay.
-                if (!_pendingHeartbeatDisposals.IsEmpty)
+                List<Task> deferredDisposals;
+                lock (_pendingHeartbeatDisposalsGate)
                 {
-                    var deferredDisposals = _pendingHeartbeatDisposals.ToArray();
+                    deferredDisposals = _pendingHeartbeatDisposals.ToList();
+                }
+                if (deferredDisposals.Count > 0)
+                {
                     try
                     {
                         // Bounded, not indefinite: the orphaned callback that owns these can never
@@ -730,7 +745,7 @@ namespace RingBufferPlus.Core
                         // now also receives entries whose callback already returned a verdict and
                         // it's only the item's own Dispose() still running - reworded to cover both
                         // without implying the callback itself is still orphaned in every case.
-                        LogWarning($"DisposeAsync did not wait for {deferredDisposals.Length} pending heartbeat item dispose(s) still running past the grace period - their resource(s) will be disposed once/if they finish, but not before this DisposeAsync() call returned.");
+                        LogWarning($"DisposeAsync did not wait for {deferredDisposals.Count} pending heartbeat item dispose(s) still running past the grace period - their resource(s) will be disposed once/if they finish, but not before this DisposeAsync() call returned.");
                     }
                     catch (Exception ex)
                     {
@@ -1885,13 +1900,11 @@ namespace RingBufferPlus.Core
                             {
                                 if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
                             }, TaskScheduler.Default);
-                            var stillPendingDispose = new List<Task>();
-                            while (_pendingHeartbeatDisposals.TryTake(out var previousDispose))
+                            lock (_pendingHeartbeatDisposalsGate)
                             {
-                                if (!previousDispose.IsCompleted) stillPendingDispose.Add(previousDispose);
+                                _pendingHeartbeatDisposals.RemoveAll(t => t.IsCompleted);
+                                _pendingHeartbeatDisposals.Add(observedDispose);
                             }
-                            foreach (var previousDispose in stillPendingDispose) _pendingHeartbeatDisposals.Add(previousDispose);
-                            _pendingHeartbeatDisposals.Add(observedDispose);
                         }
                     }
                     catch (OperationCanceledException) when (!heartbeatWork.IsCompleted)
@@ -1937,18 +1950,13 @@ namespace RingBufferPlus.Core
                         }, TaskScheduler.Default).Unwrap();
                         // Prune already-finished entries before adding this one - otherwise a
                         // chronically slow HeartBeat callback (timing out on every single pulse)
-                        // would grow this bag for as long as the buffer runs, not just for as long
-                        // as disposals are genuinely still in flight (Round 5, Estabilidade). Safe
-                        // to compact here without losing anything mid-air: this loop is the bag's
-                        // only writer (see the field's own comment), so nothing else can be adding
-                        // while this take/re-add sequence runs.
-                        var stillPending = new List<Task>();
-                        while (_pendingHeartbeatDisposals.TryTake(out var previousDispose))
+                        // would grow this list for as long as the buffer runs, not just for as long
+                        // as disposals are genuinely still in flight (Round 5, Estabilidade).
+                        lock (_pendingHeartbeatDisposalsGate)
                         {
-                            if (!previousDispose.IsCompleted) stillPending.Add(previousDispose);
+                            _pendingHeartbeatDisposals.RemoveAll(t => t.IsCompleted);
+                            _pendingHeartbeatDisposals.Add(deferredDispose);
                         }
-                        foreach (var previousDispose in stillPending) _pendingHeartbeatDisposals.Add(previousDispose);
-                        _pendingHeartbeatDisposals.Add(deferredDispose);
                     }
                     catch (OperationCanceledException) when (_lifetime.IsCancellationRequested)
                     {
