@@ -112,6 +112,16 @@ namespace RingBufferPlus.Tests
             var durations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
             Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], true));
 
+            // Round 4 (Observabilidade, v6 pre-release audit): the success row must carry
+            // acquire.timed_out/acquire.cancelled too (both false), same tag-contract principle
+            // DispatchScaleDown's scale.* metrics already follow - otherwise a consumer filtering
+            // acquire.timed_out="false" gets zero rows for every successful acquire, since the key
+            // simply wouldn't exist on this row, instead of existing as false.
+            Assert.Contains(durations, r =>
+                Equals(r.Tags["acquire.success"], true) &&
+                r.Tags.ContainsKey("acquire.timed_out") && Equals(r.Tags["acquire.timed_out"], false) &&
+                r.Tags.ContainsKey("acquire.cancelled") && Equals(r.Tags["acquire.cancelled"], false));
+
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(true, acquireActivity.GetTagItem("success"));
             Assert.Equal(false, acquireActivity.GetTagItem("timed_out"));

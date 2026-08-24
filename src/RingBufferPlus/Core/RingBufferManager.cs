@@ -382,9 +382,17 @@ namespace RingBufferPlus.Core
                     isWaiting = false;
                 }
                 var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+                // Round 4 (Observabilidade, v6 pre-release audit): acquire.timed_out/acquire.cancelled
+                // are always emitted (false here) rather than only on the failure rows below, for the
+                // same reason DispatchScaleDown's tag contract already documents for scale.* - a
+                // consumer filtering acquire.timed_out="false" would otherwise get zero rows for every
+                // successful acquire (the label simply wouldn't exist), not the "calls without a
+                // timeout" they'd expect.
                 _acquireDuration.Record(elapsed.TotalSeconds,
                     new KeyValuePair<string, object?>("buffer.name", Name),
-                    new KeyValuePair<string, object?>("acquire.success", true));
+                    new KeyValuePair<string, object?>("acquire.success", true),
+                    new KeyValuePair<string, object?>("acquire.timed_out", false),
+                    new KeyValuePair<string, object?>("acquire.cancelled", false));
                 activity?.SetTag("success", true);
                 activity?.SetTag("timed_out", false);
                 activity?.SetStatus(ActivityStatusCode.Ok);
