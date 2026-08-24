@@ -371,6 +371,130 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 5 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 4 (commits `8990c78`..`fb6494a`) não
+introduziram regressão, e achar o que passou batido nas quatro primeiras
+rodadas. Mesmos 6 ângulos. Grafo do graphify não reatualizado (mesma decisão
+de custo/benefício das rodadas anteriores).
+
+**Foco recomendado pelo próprio fechamento do Round 4**
+(`acompanhamento-convergencia-v6.md`): (a) confirmar que os 2 Alto do Round 4
+(ambos gaps de doc, não bugs de comportamento) realmente não reaparecem — uma
+3ª vez seria padrão, não acaso; (b) revisitar H-B/H-C de complexidade só se
+houver motivo novo (nenhuma instrução especial para forçar isso). Mesma
+atenção de sempre: não confiar em comentários/relatório dizendo "corrigido" —
+reler o código real e, quando fizer sentido, reproduzir empiricamente.
+
+### Confirmação dos fixes do Round 4
+
+**Resposta à pergunta (a) do foco recomendado: os 2 Alto do Round 4 não
+reaparecem — mas um 3º Alto novo, da MESMA classe (doc citando ADR superseded),
+apareceu em outro arquivo.** Não é a mesma instância repetindo; é a mesma
+*classe* de bug (referência a ADR superseded) atingindo um arquivo diferente.
+
+- `LifetimeToken()` (TOCTOU de identidade de exceção) — confirmado conectado
+  nos 6 pontos por estabilidade E resiliência, independentemente.
+  Estabilidade reproduziu empiricamente (1600 hits do caminho disposed, 0
+  identidade errada, guard de "só entra na janela real" incluído). Resiliência
+  tentou >26.000 corridas e não conseguiu pousar na janela real (evidência do
+  tamanho da janela, não do fix estar quebrado) — a prova que sustenta o fix é
+  o teste determinístico via reflection já commitado, confirmado passando.
+- `BoxedTrue`/`BoxedFalse` — confirmado conectado e sem uso indevido de
+  identidade de referência (complexidade + estabilidade, `ReferenceEquals`
+  grepado no repo inteiro).
+- Comentário do construtor (janela gauge/inicializador) — caracterização
+  confirmada correta por complexidade e estabilidade; estabilidade também
+  checou um cenário de leak adicional (falha de `init` setter) e confirmou que
+  não é alcançável hoje.
+- `ringbufferplus.acquire.duration` simétrico nas 3 linhas — confirmado por
+  leitura + suite de testes (observabilidade).
+- `Logger`/`OnError` mutuamente exclusivos (doc do Round 4) — confirmado
+  empiricamente por observabilidade (0 mensagens Logger de nível Error, 1
+  chamada OnError, com os dois configurados).
+- Números re-medidos de `usage-observability.md` (544B/1168B) — **NÃO
+  confirmados**, ver achado de desempenho abaixo.
+
+### Achados novos
+
+- ✅ **[ALTO — usabilidade, corrigido]** `CONTRIBUTING.md:74,78,79` ainda linkava
+  `ADR004V02`/`ADR006V01` (superseded) e afirmava que a exceção de v5.0.0 ao
+  ciclo de deprecação "does not repeat for any future major" — falso: `ADR004V03`
+  (que supersede `ADR004V02`) autoriza explicitamente um 2º reset para v6.0.0,
+  e o código já reflete isso (`HeartBeat`, `OnError`, `ElasticCapacity`, etc.
+  todos quebraram sem ciclo de `[Obsolete]`). **3ª recorrência da mesma classe
+  de bug no mesmo arquivo** — já fechada uma vez para uma versão de ADR
+  anterior (`TODO/plano-de-acao.md:80`, achado U-27 da auditoria v5.1) e voltou
+  a ficar stale uma versão de ADR depois. Corrigido: as 3 referências trocadas
+  para `ADR004V03`/`ADR006V02`, e o texto atualizado para descrever as 2
+  exceções reais (v5.0.0 e v6.0.0) em vez de negar a segunda.
+- ✅ **[MÉDIO — usabilidade, corrigido]** `CHANGELOG.md:5` contradizia
+  `CHANGELOG.md:9` no mesmo arquivo — linha 5 (parágrafo de enquadramento)
+  ainda dizia "strict SemVer... from v5.0.0 onward" citando `ADR004V02`,
+  enquanto a linha 9 (seção Unreleased) já dizia corretamente "strict SemVer
+  resumes from v6.0.0 onward". Mesma causa raiz do achado acima
+  (`ADR004V03` não propagada). Corrigido: linha 5 agora lista as 3 exceções
+  reais (v5.0.0, v5.1.0, v6.0.0) e cita `ADR004V03`.
+- ✅ **[BAIXO — desempenho, corrigido]** `usage-observability.md:49-50`: os
+  números re-medidos no Round 4 (544B/1168B) já estavam stale — medidos ANTES
+  do fix de cache de boxing daquele mesmo round, nunca re-medidos depois.
+  Medição própria e independente desta rodada (2 execuções completas): **472B
+  no listener/1048B com listener**, consistente byte a byte. **Esta é a 3ª
+  ocorrência da situação "achado Alto do Round 4 era gap de doc" virar
+  candidato a converter em padrão** — mas neste caso específico, causada pela
+  ordem de operações do próprio coordenador (medir → implementar mais um fix
+  → esquecer de re-medir), não por uma frente de auditoria ter deixado passar.
+  Corrigido, e o parágrafo reescrito: a comparação "before vs. after" com o
+  baseline histórico de 568B (pré-ADR008) não é mais válida como estava
+  (472B &lt; 568B, então a moldura "instrumentação custa X% a mais" não se sustenta
+  mais contra esse baseline específico, que nunca foi re-medido e não deveria
+  ser) — texto ajustado para não fazer essa comparação inválida.
+- ✅ **[MÉDIO — observabilidade, corrigido]** Activity `"RingBufferPlus.Acquire"`
+  tinha a MESMA classe de assimetria de tag-set que foi o achado principal do
+  Round 4 para a métrica `acquire.duration` — só que no lado do trace: a tag
+  `cancelled` só era setada no catch de cancelamento do chamador
+  (`RingBufferManager.cs`, antiga linha ~468), ausente (não `false`) nas 2
+  outras linhas (sucesso, timeout/shutdown). Passou 4 rounds sem ser pego
+  porque o Round 4 corrigiu só o histograma, não as 2 chamadas `SetTag` de
+  sucesso. Doc (`usage-observability.md:35`) já descrevia esse comportamento
+  como intencional ("`cancelled` when the caller's own token... ended the
+  call"), então doc e código batiam entre si — mas ambos estavam errados pelo
+  mesmo padrão já identificado no Round 4. Corrigido: `cancelled=false`
+  adicionado nas 2 linhas que faltavam (uma via `BoxedFalse`, caminho de
+  sucesso; a outra com `false` cru, mesmo estilo do restante daquele branch
+  frio); doc reescrita para descrever a tag como sempre presente. Red/green
+  feito estendendo os 2 testes de Activity já existentes.
+- **[Candidato não medido — complexidade, encaminhado para desempenho +
+  estabilidade, sem ação nesta rodada]** H4: cada `AcquireAsync` elástico que
+  cai no ramo de espera grava um `EngineCommand.Backlog()` no canal ilimitado
+  `_commands`, sem coalescência — sob backlog sustentado perto de
+  `MaxCapacity` com muitos chamadores concorrentes esperando, o volume desses
+  comandos tende a acompanhar 1:1 o número de esperadores nesse instante, e
+  todos competem pelo mesmo loop serial de único consumidor que também
+  processa `FactoryBatchCompleted`/`ReplaceOne`/o floor guard — risco de
+  enfileiramento, não de tamanho de alocação (distinto do H-B já descartado).
+  Não medido nesta rodada; se confirmado por medição em rodada futura, requer
+  aprovação de estabilidade antes de qualquer mitigação (histórico do projeto
+  já registrou uma reversão de otimização que reabriu um risco de correção já
+  fechado nesta mesma área de sinalização).
+
+### Fechamento do Round 5
+
+Todos os 4 achados de comportamento/doc decididos e corrigidos nesta mesma
+sessão (2 Alto, 1 Médio de doc, 1 Médio de código com red/green); o candidato
+H4 fica em aberto, explicitamente não medido, para uma rodada futura decidir.
+Nenhum achado ficou sem decisão. Verificado: 188/188 testes net10.0, build
+limpo (0 warnings, 0 errors) em toda a solução a cada etapa. 3 das 6 frentes
+(estabilidade, resiliência) não encontraram nada novo além do que já está
+listado — primeiro sinal real de aproximação à convergência para essas duas
+frentes especificamente, mesmo que o total de achados do round (4, sem contar
+H4) não tenha caído em relação ao Round 4 (10) por estarem em categorias
+diferentes de achado (doc vs. comportamento).
+
+Status: concluído.
+
+---
+
 ## Round 4 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 3 (commits `af84bd1`..`8990c78`) não

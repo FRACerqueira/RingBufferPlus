@@ -193,3 +193,47 @@ por correção, não por desempenho).
 Verificado: 188/188 testes net10.0 (era 187, +1 novo), build limpo (0 warnings,
 0 errors) em toda a solução a cada etapa. Nenhum achado do Round 4 ficou em
 aberto sem decisão.
+
+## Round 5 — 2026-08-24
+
+Mesmo enquadramento. Estabilidade e resiliência não encontraram nada novo além
+do já mapeado (`LifetimeToken()` do Round 4 confirmado conectado e correto por
+ambas, uma via reprodução empírica de 1600 hits, outra via >26.000 tentativas
+sem pousar na janela real — corroborando, não contradizendo, o fix). Os outros
+4 ângulos encontraram achados, nenhum deles bug de comportamento novo — todos
+de doc ou de tag de telemetria seguindo exatamente o mesmo padrão já corrigido
+no Round 4.
+
+**Corrigidos nesta rodada** (2 Alto, 2 Médio):
+
+- Doc: `CONTRIBUTING.md` (Alto) — 3 referências a `ADR004V02`/`ADR006V01`
+  (superseded) e uma afirmação falsa de que a exceção de v5.0.0 ao ciclo de
+  deprecação não se repetiria — `ADR004V03` já autoriza um 2º reset para
+  v6.0.0. 3ª recorrência da mesma classe de bug no mesmo arquivo (já fechada
+  uma vez na auditoria v5.1, achado U-27, para uma versão de ADR anterior).
+  `CHANGELOG.md` (Médio) — mesma causa raiz, o parágrafo de enquadramento no
+  topo do arquivo nunca foi atualizado quando a seção Unreleased já tinha sido.
+  `usage-observability.md` (Baixo, achado da própria frente de desempenho) —
+  números 544B/1168B do Round 4 já estavam stale (medidos antes do fix de
+  boxing daquele mesmo round); re-medido nesta sessão: 472B/1048B, e o
+  parágrafo de comparação com o baseline histórico reescrito (a comparação
+  "before vs. after" não é mais válida com esses números).
+- Código, com red/green completo: Activity `"RingBufferPlus.Acquire"` tinha a
+  mesma assimetria de tag-set que foi o achado principal do Round 4 para a
+  métrica `acquire.duration` — a tag `cancelled` só era setada no catch de
+  cancelamento do chamador, ausente (não `false`) nas outras 2 linhas.
+  Corrigido adicionando `cancelled=false` às 2 linhas que faltavam; doc
+  reescrita para descrever a tag como sempre presente.
+
+**Candidato não medido, sem ação** (H4, encaminhado por complexidade): cada
+`AcquireAsync` elástico em espera grava um `EngineCommand.Backlog()` sem
+coalescência no canal único-consumidor — sob backlog sustentado com muitos
+esperadores, risco de enfileiramento atrás de comandos de estado real. Não
+medido; requer aprovação de estabilidade antes de qualquer mitigação, dado o
+histórico do projeto nessa área.
+
+Verificado: 188/188 testes net10.0 (mesmo total do Round 4 — as 2 novas
+asserções estenderam testes existentes, não criaram novos `[Fact]`), build
+limpo (0 warnings, 0 errors) em toda a solução a cada etapa. Nenhum achado do
+Round 5 ficou em aberto sem decisão (H4 é explicitamente um candidato não
+medido, não um achado pendente).
