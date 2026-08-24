@@ -371,6 +371,157 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
 
 ---
 
+## Round 6 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 5 (commits `fb6494a`..`ed72f67`) não
+introduziram regressão, e achar o que passou batido nas cinco primeiras
+rodadas. Grafo do graphify não reatualizado (mesma decisão de custo/benefício
+das rodadas anteriores).
+
+**Mudança de enquadramento nesta rodada, por decisão do usuário**: estabilidade
+e resiliência tiveram, cada uma, 1 rodada limpa (Round 5, "nada novo") — ainda
+não as 2 consecutivas que o critério de convergência exige, então não foram
+puladas. Mas, dado esse primeiro sinal, essas 2 frentes receberam um prompt
+mais curto/direcionado desta vez (confirmar que os fixes do Round 5 não
+regrediram + uma passada fresca mais rápida) em vez do mesmo nível de
+profundidade das outras 4 frentes (usabilidade, complexidade, desempenho,
+observabilidade), que mantiveram o enquadramento completo de sempre. Se
+estabilidade/resiliência convergirem de novo nesta rodada (2 rounds seguidos
+sem achado), a redução de escopo pode ser considerada mais agressiva na
+próxima; se acharem algo, o enquadramento completo volta na próxima rodada
+para essas 2 frentes.
+
+**Estabilidade** (enquadramento reduzido): levantou uma hipótese de leak de
+`Activity.Current` entre operações de Scale consecutivas — `DispatchScaleUp`/
+`DispatchScaleDown` chamam `_activitySource.StartActivity` de forma síncrona a
+partir de `ProcessCommandAsync` (chamado pelo `await foreach` de
+`RunEngineAsync`); o `Dispose()` correspondente só roda dentro do corpo forkado
+em `Task.Run` do lote, cujo `ExecutionContext` é uma cópia privada tirada no
+momento do `Task.Run` — restaurar `Activity.Current` ali não se propaga de
+volta para o loop do engine. Essa parte é verdadeira e foi confirmada por uma
+reprodução isolada (um método síncrono comum dentro de um loop comum), que
+mostrou o leak de fato. Mas construir o mesmo teste dentro do
+`RingBufferManager` real (`ConsecutiveScaleOperations_ProduceIndependentRootActivities_NotChainedToEachOther`,
+`RingBufferObservabilityTests.cs`) mostrou que o leak **não reproduz** no
+código real — investigado e explicado: `AsyncMethodBuilderCore.Start` salva o
+`ExecutionContext` do chamador antes de rodar a state machine de um método
+async (mesmo seu trecho puramente síncrono, sem nenhum `await` alcançado) e o
+restaura quando essa chamada retorna. Então `await ProcessCommandAsync(cmd)`
+em `RunEngineAsync` reverte qualquer mutação de `Activity.Current` feita
+dentro de `ProcessCommandAsync`/`DispatchScaleUp`/`DispatchScaleDown` assim
+que `ProcessCommandAsync` retorna — é essa fronteira de método async, não o
+`Task.Run`, que impede o leak aqui. **Terceira vez que uma suspeita de
+parent-chaining de Activity é levantada e refutada nesta série de rounds
+(Rounds 1, 3, 6)** — vale registrar para a próxima rodada não gastar uma
+quarta passada nisso. O teste foi mantido como guarda de regressão permanente,
+com o comentário reescrito para descrever o mecanismo que **previne** o bug
+(não mais o bug em si), e reforçado com asserções adicionais
+(`Parent`/`ParentSpanId`, além de `ParentId`).
+
+**Resiliência** (enquadramento reduzido): nenhum achado novo, fixes do Round 5
+confirmados sem regressão — **2ª rodada consecutiva sem achado**, critério de
+convergência por frente atingido (junto com estabilidade, cujo único achado
+desta rodada foi investigado e refutado, não um bug confirmado).
+
+**Observabilidade** (achados O9/O10/O11, todos decididos/corrigidos nesta
+mesma sessão):
+- **O9 (Médio)**: `scale.operations`/`scale.duration` carregam a tag
+  `success`, mas nem `DispatchScaleUp` nem `DispatchScaleDown` chamavam
+  `activity?.SetTag("success", ...)` na Activity `"RingBufferPlus.Scale"` —
+  terceira instância da mesma classe de assimetria métrica/trace já corrigida
+  para Acquire nos Rounds 4-5. Corrigido com red/green
+  (`ScaleActivities_CarrySuccessTag_MatchingTheScaleOperationsMetric`);
+  varredura de todos os `activity?.SetTag` do arquivo confirma paridade total
+  agora entre as 2 Activities existentes (`Acquire`, `Scale`) e suas métricas
+  irmãs — nenhuma outra ocorrência da classe.
+- **O10 (Alto)**: `usage-observability.md` afirmava que a Activity
+  `"RingBufferPlus.Scale"` "correlaciona naturalmente com o resto do seu
+  request trace" — falso por construção: `DispatchScaleUp`/`DispatchScaleDown`
+  rodam no loop interno do engine da própria instância, nunca no fluxo async
+  de nenhum chamador, então todo span `"RingBufferPlus.Scale"` é sempre raiz
+  de trace, sem `Parent`. Corrigido apenas na doc (não é um bug de
+  comportamento — propagar o contexto do chamador para `auto`/`floor`/
+  `backlog` não teria um único chamador para atribuir, seria uma decisão de
+  design maior, não um defeito a reparar).
+- **O11 (Baixo)**: a mensagem de log `"Stopped Heart Beat item"` sugeria que o
+  processamento do item tinha terminado, mesmo no branch em que o callback
+  ainda está rodando e o dispose foi deferido (não concluído). Reescrita para
+  `"Heart Beat pump iteration finished"`, que descreve o que sempre é
+  verdade (o fim da iteração do pump), não o estado do item. Sem teste
+  necessário (mudança textual; nenhum teste depende da string antiga,
+  confirmado por grep).
+- **Baixo, sem número próprio**: strings de `description` dos instrumentos
+  `ringbufferplus.scale.operations`/`ringbufferplus.scale.duration` omitiam
+  `buffer.name`/`target`/`cancelled` da lista de tags documentadas no próprio
+  OTel metadata — corrigido (texto mecânico).
+- **Baixo, sem número próprio**: `usage-observability.md:29` usava "mirrors"
+  de um jeito ambíguo entre o nome de tag prefixado da métrica
+  (`acquire.cancelled`) e o nome sem prefixo da Activity (`cancelled`) —
+  clarificado.
+
+**Complexidade + Desempenho**: ambas concluíram independentemente, por
+análises estáticas separadas, que o candidato H4 (sinalização de backlog via
+`EngineCommand.Backlog()` sem coalescência) é desprezível e não precisa de
+medição nem fix — o gate `if (!Elastic || _scaling || CurrentCapacity >=
+MaxCapacity) return;` no início de `EvaluateBacklogReactive` já torna
+qualquer sinal de backlog redundante barato o suficiente para não justificar
+coalescência adicional. **H4 fechado por 2 argumentos estáticos
+independentes**, sem necessidade de benchmark.
+
+**Desempenho**: os números re-medidos no Round 5 (`usage-observability.md`)
+já estavam stale de novo — 472 B/1048 B foram medidos antes do fix
+`cancelled`-tag daquele mesmo round ter sido aplicado, e nunca foram
+re-medidos depois. **Isso é a mesma falha de processo do Round 4→5, agora
+pela segunda vez seguida** — a causa raiz é medir e documentar
+imediatamente após cada commit de código, em vez de esperar todos os fixes de
+uma rodada estarem prontos. Corrigido desta vez com uma disciplina de
+sequenciamento explícita: todos os fixes de código do Round 6 (O9 incluído)
+foram aplicados primeiro, seguidos de rebuild limpo (3 TFMs, 0 warnings) e
+**uma única medição real** (`dotnet run -c Release --project
+benchmarks/RingBufferPlus.Benchmarks -f net10.0 -- -i --filter
+"*ObservabilityOverheadBenchmarks*"`) feita depois de tudo pronto. Número
+real: 472 B sem listener (estável, confirmado em todas as rodadas), **1088 B**
+com `MeterListener`/`ActivityListener` (não 1048 B) — ~2.3x o alocado não
+observado. Tempo: ~307ns sem listener, ~593ns com listener (~1.9x) — a doc
+também passou a descrever esses números como ordem de grandeza, não valor
+pontual preciso, já que variação de execução-a-execução nesta máquina já
+moveu a média em dezenas de ns entre execuções idênticas.
+
+**Usabilidade**: `doc/architecture/v6-design-proposal.md` nunca foi aberto
+nas primeiras 5 rodadas apesar de ser referenciado por um ADR atualmente
+Aceito (`ADR006V02:24`) e conter reivindicações desatualizadas (versões de
+ADR mais antigas que as atuais V02/V03). Corrigido com um banner
+"SUPERSEDED" no topo (não deleção — o arquivo é linkado por um ADR vivo,
+apagá-lo criaria uma referência quebrada), apontando o leitor para os ADRs
+como fonte de verdade atual.
+
+**Achado extra, fora do escopo original das 6 frentes** (descoberto ao
+verificar referências cruzadas quebradas pela limpeza de descontinuação da
+v5.1.0, decisão do usuário tomada no meio desta rodada): `ADR004V03`
+(atualmente Aceito, não histórico) ainda decidia "a próxima release é
+versionada 5.1.0, não 6.0.0" e tratava v5.1.0 como uma release passada real
+da qual v6.0.0 seria sucessora. Como nenhuma release 5.1.0 chegou a ser
+publicada, o usuário confirmou que isso não fere a convenção de imutabilidade
+de ADRs deste projeto (que protege decisões que de fato entraram em vigor) —
+corrigido diretamente no próprio ADR004V03, seguindo o padrão interno já
+existente no arquivo de "Amended on DATE", em vez de criar uma nova versão
+via `adrplus`. `ADR003V03` também tinha uma citação órfã para conteúdo do
+`CHANGELOG.md` apagado nessa mesma limpeza ("sample window resets across a
+scale operation..." não existe mais lá) — corrigida removendo a citação
+específica sem alterar a alegação de fundo (o comportamento é real e
+continua implementado). `ADR006V02` foi conferido e não precisou de
+alteração (já tratava "v5.1.0" apenas como opção considerada-e-rejeitada,
+consistente com a decisão nova).
+
+Verificado: 190/190 testes net10.0 (era 188, +2 novos — o teste de
+regressão de chaining e o teste de paridade de tag `success`), build limpo
+(0 warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks,
+gerador de docs).
+
+Status: **fechado**.
+
+---
+
 ## Round 5 — 2026-08-24
 
 Objetivo: verificar se os fixes do Round 4 (commits `8990c78`..`fb6494a`) não
