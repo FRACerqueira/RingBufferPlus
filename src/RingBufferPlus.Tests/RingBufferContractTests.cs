@@ -3874,5 +3874,86 @@ namespace RingBufferPlus.Tests
             await heartbeatValue.DisposeAsync();
             await manager.DisposeAsync();
         }
+
+        // ---------------------------------------------------------------------
+        // Round 8, Observabilidade: investigated and REFUTED a suspected logging gap - kept as a
+        // permanent regression guard, not because a bug was found.
+        //
+        // The suspicion: a manual SwitchToAsync with LockWhenScaling=false never awaits
+        // completion.Task, and ProcessCommandAsync's FactoryBatchCompleted case always has a
+        // non-null cmd.Completion for a Switch-triggered scale (regardless of LockWhenScaling),
+        // so it resolves via TrySetException instead of the "nobody is waiting, LogError it"
+        // branch that floor/backlog/auto-triggered scales fall into. The unlocked path's own
+        // ContinueWith (added only to avoid an unobserved task exception) observes the fault but
+        // does not itself call LogError - reading only that path in isolation suggested
+        // usage-observability.md's documented promise ("any other genuine factory failure...
+        // LogError with that real exception as-is") silently did not hold for this combination.
+        //
+        // What was missed reading only that path: CreateItemsAsync's own per-attempt catch
+        // (RingBufferManager.cs, AttemptAsync's `catch (Exception ex) when
+        // (!overall.IsCancellationRequested)`) already calls LogError(ex) for every individual
+        // failed attempt, unconditionally - before the batch-level aggregation (giveUp,
+        // lastFailure, the eventual cmd.Failure) even happens, and regardless of which signal
+        // triggered the scale-up or whether anyone is waiting on its completion. A first empirical
+        // probe of this test seemed to confirm the suspicion (only 1 logged error, not the 4
+        // expected from MaxConcurrentFactoryCalls=4 concurrent attempts) - but that was an
+        // artifact of the probe's own factory throwing synchronously, which let the first
+        // concurrent attempt run to completion (and set giveUp) before the other three ever
+        // reached their own call to Factory at all. A genuinely async factory (below) reproduces
+        // all 4 real attempts, and all 4 are independently logged.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task SwitchToAsync_UnlockedManualScaleUp_GenuineFactoryFailure_StillLogsTheError()
+        {
+            var loggedErrors = new List<Exception>();
+            var callCount = 0;
+            var manager = new RingBufferManager<int>(CancellationToken.None)
+            {
+                Name = "ContractSwitchUnlockedLog",
+                Capacity = 2,
+                MinCapacity = 2,
+                MaxCapacity = 6,
+                FactoryTimeout = TimeSpan.FromSeconds(2),
+                PulseHeartBeat = TimeSpan.FromSeconds(30),
+                SamplesBase = TimeSpan.FromSeconds(30),
+                SamplesCount = 5,
+                AcquireTimeout = TimeSpan.FromMilliseconds(300),
+                Elastic = true,
+                LockWhenScaling = false,
+                ErrorHandler = ex => { lock (loggedErrors) loggedErrors.Add(ex); },
+                Factory = async _ =>
+                {
+                    var n = Interlocked.Increment(ref callCount);
+                    // The initial warmup fill (Capacity=2) succeeds; every later call - the scale-up
+                    // this test triggers - fails for real. Genuinely async (like a real RabbitMQ/DB
+                    // client), not a synchronous throw - a synchronous throw would let the first of
+                    // the concurrent attempts complete (and set giveUp) before the others ever call
+                    // Factory at all, undercounting how many attempts genuinely run.
+                    if (n <= 2) return n;
+                    await Task.Delay(10);
+                    throw new InvalidOperationException("boom");
+                }
+            };
+            await manager.WarmupAsync();
+
+            var accepted = await manager.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            Assert.True(accepted); // LockWhenScaling=false returns as soon as the engine accepts it
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (loggedErrors.Count < 4 && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(20);
+            }
+
+            // All MaxConcurrentFactoryCalls (default 4) concurrent attempts genuinely ran and each
+            // independently reached LogError - confirmed count, not just non-empty, since the whole
+            // point of this test is that the real number matters (see the class comment above).
+            Assert.Equal(4, loggedErrors.Count);
+            Assert.All(loggedErrors, ex => Assert.True(ex is InvalidOperationException ioe && ioe.Message == "boom"));
+
+            await manager.DisposeAsync();
+        }
     }
 }
