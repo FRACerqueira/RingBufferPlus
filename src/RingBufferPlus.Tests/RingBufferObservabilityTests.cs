@@ -125,6 +125,11 @@ namespace RingBufferPlus.Tests
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(true, acquireActivity.GetTagItem("success"));
             Assert.Equal(false, acquireActivity.GetTagItem("timed_out"));
+
+            // Round 5 (Observabilidade, v6 pre-release audit): the Activity had the same tag-contract
+            // gap the metric above already had before Round 4 - "cancelled" was only ever set on the
+            // caller-cancellation catch, so it was absent (not false) on every other span.
+            Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
         }
 
         [Fact]
@@ -157,6 +162,10 @@ namespace RingBufferPlus.Tests
 
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("success"), false));
             Assert.Equal(true, acquireActivity.GetTagItem("timed_out"));
+
+            // Round 5 (Observabilidade, v6 pre-release audit): same tag-contract gap as the success
+            // path - "cancelled" belongs on this row too, not just the caller-cancellation one.
+            Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
         }
 
         [Fact]

@@ -418,6 +418,11 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("acquire.cancelled", BoxedFalse));
                 activity?.SetTag("success", BoxedTrue);
                 activity?.SetTag("timed_out", BoxedFalse);
+                // Round 5 (Observabilidade, v6 pre-release audit): "cancelled" was only ever set on
+                // the caller-cancellation catch below, so it was absent - not false - on every other
+                // span, the same tag-contract gap the Round 4 fix already closed for the
+                // acquire.duration histogram's own "cancelled" key.
+                activity?.SetTag("cancelled", BoxedFalse);
                 activity?.SetStatus(ActivityStatusCode.Ok);
                 return new RingBufferValue<T>(Name, elapsed, true, item, _turnbackDelegate);
             }
@@ -446,6 +451,10 @@ namespace RingBufferPlus.Core
                     new KeyValuePair<string, object?>("acquire.cancelled", false));
                 activity?.SetTag("success", false);
                 activity?.SetTag("timed_out", timedOut);
+                // Round 5 (Observabilidade, v6 pre-release audit): same tag-contract gap as the
+                // success path above - "cancelled" belongs on every row, not just the caller-
+                // cancellation one below.
+                activity?.SetTag("cancelled", false);
                 // Only a genuine timeout is a health signal worth an Error status (Round 4,
                 // Observabilidade - finding O2) - reaching this catch without timedOut means
                 // _lifetime (an ordinary shutdown) is what ended the wait instead, same
