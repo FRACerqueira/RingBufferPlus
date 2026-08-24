@@ -1109,6 +1109,89 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
+        // Round 2 (Resiliência, v6 pre-release audit): the deferred dispose in the branch fixed
+        // above was, itself, not fault-observed - unlike the sibling F12/F15 branch a few lines
+        // below it (which wraps its own deferred DisposeItemAsync in a ContinueWith that logs a
+        // fault), the raw disposeTask here was added straight into _pendingHeartbeatDisposals. A
+        // late failure from the item's own Dispose() (after it had already been deferred past one
+        // PulseHeartBeat) reached neither LogError/OnError nor TaskScheduler's unobserved-exception
+        // handling - silently dropped, unlike every other deferred-dispose path in this file.
+        // ---------------------------------------------------------------------
+
+        // Per-instance hang flag, deliberately NOT shared via a single ManualResetEventSlim across
+        // every pooled item: the other idle item still in the pool at DisposeAsync() time already
+        // goes through DisposeOneItemDefensivelyAsync, which DOES fault-observe correctly - sharing
+        // one hang/throw trigger across both items would let that already-correct path silently
+        // mask a bug in the path this test targets. Only the specific instance the HeartBeat
+        // callback marks ever hangs or throws; any other instance's DisposeAsync is a no-op.
+        private sealed class SelectivelyHangingThenThrowingDisposeProbe : IAsyncDisposable
+        {
+            private readonly ManualResetEventSlim _release = new();
+            public bool ShouldHang;
+
+            public async ValueTask DisposeAsync()
+            {
+                if (!ShouldHang) return;
+                await Task.Run(() => _release.Wait(TimeSpan.FromSeconds(10))).ConfigureAwait(false);
+                throw new InvalidOperationException("Simulated late dispose failure after grace period.");
+            }
+
+            public void Release() => _release.Set();
+        }
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task HeartBeatInvalidate_WhenDeferredItemDisposeLaterFaults_IsStillDelivered_NotSilentlyDropped()
+        {
+            var errors = new List<Exception>();
+            SelectivelyHangingThenThrowingDisposeProbe? hungProbe = null;
+
+            IRingBufferBuilder<SelectivelyHangingThenThrowingDisposeProbe> builder = new RingBufferBuilder<SelectivelyHangingThenThrowingDisposeProbe>("ContractHeartbeatDeferredDisposeFaultNotDropped", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(new SelectivelyHangingThenThrowingDisposeProbe()))
+                .Logger(new CapturingLogger())
+                .OnError(ex => { lock (errors) errors.Add(ex); })
+                .HeartBeat(item =>
+                {
+                    item.ShouldHang = true;
+                    hungProbe = item;
+                    return false;
+                }, pulse: TimeSpan.FromMilliseconds(200))
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            // Let a pulse fire, invalidate the item it acquires, and start hanging inside its
+            // Dispose() - by 500ms the pump has already deferred it (its own PulseHeartBeat=200ms
+            // elapsed) into _pendingHeartbeatDisposals, without the hang being released yet.
+            await Task.Delay(500);
+            Assert.NotNull(hungProbe);
+
+            // DisposeAsync() now starts its OWN PulseHeartBeat-bounded grace period for that same
+            // deferred item - still not released, so it also times out and DisposeAsync() gives up
+            // and returns, never itself observing the eventual fault. The other, still-idle item
+            // was never marked ShouldHang, so it disposes as a no-op and cannot mask the result.
+            await service.DisposeAsync();
+
+            // Only now does the deferred dispose actually resolve - and fault - strictly after
+            // DisposeAsync() itself has already returned.
+            hungProbe!.Release();
+
+            var deadline = DateTime.UtcNow.AddSeconds(3);
+            while (DateTime.UtcNow < deadline)
+            {
+                lock (errors)
+                {
+                    if (errors.Any(e => e is InvalidOperationException ioe && ioe.Message.Contains("Simulated late dispose failure"))) break;
+                }
+                await Task.Delay(20);
+            }
+            lock (errors)
+            {
+                Assert.Contains(errors, e => e is InvalidOperationException ioe && ioe.Message.Contains("Simulated late dispose failure"));
+            }
+        }
+
+        // ---------------------------------------------------------------------
         // 1.14 - The scale-up deadline must scale with the work requested (quantity * FactoryTimeout),
         // not with the sampling cadence (SamplesBase) - and a scale-up that still can't finish in
         // time must keep whatever capacity it already gained instead of discarding it. See TODO/

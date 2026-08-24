@@ -581,7 +581,12 @@ namespace RingBufferPlus.Core
                         // a resource is now leaked for an indeterminate time past this DisposeAsync()
                         // call, comparably significant to the existing "RingBuffer without resource"
                         // LogWarning.
-                        LogWarning($"DisposeAsync did not wait for {deferredDisposals.Length} orphaned heartbeat callback(s) still running past the grace period - their resource(s) will be disposed once/if the callback(s) finish, but not before this DisposeAsync() call returned.");
+                        // Round 2 (Estabilidade, v6 pre-release audit): "orphaned callback(s)"
+                        // used to be accurate for every entry here, but _pendingHeartbeatDisposals
+                        // now also receives entries whose callback already returned a verdict and
+                        // it's only the item's own Dispose() still running - reworded to cover both
+                        // without implying the callback itself is still orphaned in every case.
+                        LogWarning($"DisposeAsync did not wait for {deferredDisposals.Length} pending heartbeat item dispose(s) still running past the grace period - their resource(s) will be disposed once/if they finish, but not before this DisposeAsync() call returned.");
                     }
                     catch (Exception ex)
                     {
@@ -1026,7 +1031,7 @@ namespace RingBufferPlus.Core
             activity?.SetTag("trigger", scaleTrigger);
             activity?.SetTag("target", target);
             var sw = Stopwatch.StartNew();
-            LogMessage($"Starting ScaleUp {quantity}. Trigger: {scaleTrigger}.");
+            LogMessage($"Starting ScaleUp {quantity}. Trigger: {scaleTrigger}. Target: {target}.");
 
             _factoryBatchTask = Task.Run(async () =>
             {
@@ -1048,7 +1053,7 @@ namespace RingBufferPlus.Core
                     threw = ex;
                 }
                 sw.Stop();
-                LogMessage($"End ScaleUp. Trigger: {scaleTrigger}.");
+                LogMessage($"End ScaleUp. Trigger: {scaleTrigger}. Target: {target}.");
 
                 // Telemetry (activity/meter) is finalized here, unconditionally, rather than
                 // deferred to the FactoryBatchCompleted command below: it is independent,
@@ -1122,7 +1127,7 @@ namespace RingBufferPlus.Core
             activity?.SetTag("trigger", scaleTrigger);
             activity?.SetTag("target", target);
             var sw = Stopwatch.StartNew();
-            LogMessage($"Starting ScaleDown {quantity}. Trigger: {scaleTrigger}.");
+            LogMessage($"Starting ScaleDown {quantity}. Trigger: {scaleTrigger}. Target: {target}.");
 
             _removalBatchTask = Task.Run(async () =>
             {
@@ -1131,7 +1136,7 @@ namespace RingBufferPlus.Core
                     await DisposeItemsDefensivelyAsync(removed).ConfigureAwait(false);
                 }
                 sw.Stop();
-                LogMessage($"End ScaleDown. Trigger: {scaleTrigger}.");
+                LogMessage($"End ScaleDown. Trigger: {scaleTrigger}. Target: {target}.");
 
                 // Telemetry (activity/meter) is finalized here, unconditionally, same reasoning as
                 // DispatchScaleUp's own comment: independent, thread-safe instrumentation, not
@@ -1254,8 +1259,10 @@ namespace RingBufferPlus.Core
                 // Round 1 (Observabilidade, v6 pre-release audit): the Monitor's own tick decision
                 // otherwise left no trace at all when it decided NOT to scale - the scale.*
                 // telemetry only exists for a dispatched operation, and this method had no logging
-                // of its own. Debug-gated (LogMessage already checks IsEnabled), so this costs
-                // nothing when the caller hasn't opted into Debug-level logs.
+                // of its own. LogMessage itself now gates on IsEnabled(Debug) (Round 2 fix - it
+                // didn't before), so this costs nothing when the caller hasn't opted into
+                // Debug-level logs, despite running roughly every tick for the buffer's whole
+                // lifetime rather than only per scale operation.
                 LogMessage($"Monitor tick: demand={demand}, target={target} equals current capacity {CurrentCapacity} - no scale.");
                 return;
             }
@@ -1709,14 +1716,30 @@ namespace RingBufferPlus.Core
                         }
                         catch (TimeoutException)
                         {
-                            LogWarning("Heart Beat item dispose did not complete within one pulse - deferring, capacity was already corrected.");
+                            // Round 2 (Estabilidade, v6 pre-release audit): "capacity was already
+                            // corrected" only holds for the Invalidate (unhealthy) path - dropped
+                            // from the message rather than asserting something not always true;
+                            // the reader doesn't need that detail to know the dispose is deferred.
+                            LogWarning("Heart Beat item dispose did not complete within one pulse - deferring.");
+                            // Round 2 (Resiliência, v6 pre-release audit): the raw disposeTask was
+                            // deferred directly before this fix, unlike the F12/F15 branch below
+                            // (which wraps its own deferred dispose in a ContinueWith that observes
+                            // and logs a fault) - a late failure from this specific dispose reached
+                            // neither LogError/OnError nor TaskScheduler.UnobservedTaskException,
+                            // unlike every sibling deferred-dispose path in this file. Same fix:
+                            // observe the fault via a continuation, and defer that (not the raw
+                            // task) so DisposeAsync's own drain still waits for the real work too.
+                            var observedDispose = disposeTask.ContinueWith(t =>
+                            {
+                                if (t.IsFaulted) LogError(t.Exception!.GetBaseException());
+                            }, TaskScheduler.Default);
                             var stillPendingDispose = new List<Task>();
                             while (_pendingHeartbeatDisposals.TryTake(out var previousDispose))
                             {
                                 if (!previousDispose.IsCompleted) stillPendingDispose.Add(previousDispose);
                             }
                             foreach (var previousDispose in stillPendingDispose) _pendingHeartbeatDisposals.Add(previousDispose);
-                            _pendingHeartbeatDisposals.Add(disposeTask);
+                            _pendingHeartbeatDisposals.Add(observedDispose);
                         }
                     }
                     catch (OperationCanceledException) when (!heartbeatWork.IsCompleted)
@@ -1842,7 +1865,13 @@ namespace RingBufferPlus.Core
 
         private void LogMessage(string message)
         {
-            if (Logger is null) return;
+            // Round 2 (Complexidade, v6 pre-release audit): the IsEnabled(Debug) check is
+            // necessary here, not just cosmetic - without it, every call still built the
+            // interpolated string and a closure even when Debug logging was off, and ProcessTick
+            // now calls this roughly every SamplesBase/SamplesCount interval (300ms by default)
+            // for the whole lifetime of every elastic buffer, not just per scale operation.
+            // RingBufferBuilder's own LogMessage already has this guard; this one didn't.
+            if (Logger is null || !Logger.IsEnabled(LogLevel.Debug)) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
             SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
         }
@@ -1885,6 +1914,27 @@ namespace RingBufferPlus.Core
             catch
             {
                 //ignore: the logging/error sink itself threw - nothing further can be logged about it
+            }
+        }
+
+        // Round 2 (Estabilidade, v6 pre-release audit): same F23 rationale as SafeInvokeSink above
+        // - a user-supplied Logger is untrusted external code, and IsEnabled itself can throw
+        // (Microsoft.Extensions.Logging's composite Logger aggregates and rethrows provider
+        // exceptions, e.g. a provider disposed ahead of this manager during host shutdown).
+        // LogMessage's own IsEnabled(Debug) check ran unguarded before this fix - unlike every
+        // other call into Logger/ErrorHandler in this class - and could permanently kill
+        // _engineTask or _heartbeatTask (ProcessTick/RunHeartbeatAsync have no catch broad enough
+        // to survive it). Treat a throwing IsEnabled as "not enabled" and skip this one Debug line
+        // rather than propagate.
+        private static bool SafeIsEnabled(ILogger logger, LogLevel level)
+        {
+            try
+            {
+                return logger.IsEnabled(level);
+            }
+            catch
+            {
+                return false;
             }
         }
 
