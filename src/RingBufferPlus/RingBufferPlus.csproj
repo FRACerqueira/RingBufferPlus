@@ -33,6 +33,12 @@
 		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
 			<_Parameter1>RingBufferPlus.Tests</_Parameter1>
 		</AssemblyAttribute>
+		<!-- Round 1 (v6 pre-release audit): needed so MonitorTickCostBenchmarks can call the
+		     internal AutoScaleMonitor directly - a pure-function microbenchmark of the actual
+		     algorithm, not a new public surface. -->
+		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+			<_Parameter1>RingBufferPlus.Benchmarks</_Parameter1>
+		</AssemblyAttribute>
 	</ItemGroup>
 	<ItemGroup Condition="'$(TargetFramework)'=='net10.0'">
 		<PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.10" />
