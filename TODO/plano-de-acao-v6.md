@@ -330,3 +330,61 @@ Verificado: 190/190 testes net10.0 (era 188, +2 novos —
 build limpo (0 warnings, 0 errors) em toda a solução (3 TFMs, samples,
 benchmarks, gerador de docs). Nenhum achado do Round 6 ficou em aberto sem
 decisão.
+
+## Round 7 — 2026-08-24
+
+Estabilidade e resiliência não disparadas (convergência formal atingida no
+Round 6). Outras 4 frentes com enquadramento completo.
+
+**Corrigidos nesta rodada** (1 Alto, 1 Baixo de comportamento + 4 Baixo de
+doc):
+
+- **[Alto, observabilidade] Blackout de telemetria após falha de warmup
+  cacheada** — `EnsureWarmupAsync()`'s `Lazy<Task>` cacheia a falha inicial
+  (ADR011); toda chamada implícita subsequente de `AcquireAsync`/
+  `SwitchToAsync` relançava a mesma exceção antes de `_activitySource.
+  StartActivity` rodar, sem deixar span, métrica ou log algum. Apresentei 3
+  opções ao usuário (A: métrica/trace sem repetir log; B: métrica/trace +
+  log a cada chamada; C: só documentar) — **escolhida A**. Red/green: novo
+  teste `AcquireAsync_AfterWarmupFailureIsCached_StillRecordsDurationAndActivity`
+  falhou com coleção de `acquire.duration` vazia (motivo previsto), passou
+  após envolver `EnsureWarmupAsync()` num try/catch que emite Activity +
+  métrica (`success=false`/`timed_out=false`/`cancelled=false`, status
+  `Error`) sem chamar `LogError` de novo.
+- **[Baixo, observabilidade] Heartbeat inflava `_waitingCount`** — só o
+  disparo do `EngineCommand.Backlog()` era gateado por
+  `countsTowardFaultBudget`; o `Interlocked.Increment(ref _waitingCount)`
+  rodava sempre, inflando o contador que `EvaluateBacklogReactive`/
+  `ProcessTick` leem para calcular o alvo de scale-up (efeito real: no
+  máximo +1, autoatenuado). Apresentei 3 opções (A: só corrigir a prosa; B:
+  corrigir o comportamento; C: descartar) — **escolhida B**. Red/green: novo
+  teste `HeartbeatAcquireWaiting_DoesNotInflateWaitingCount` (via reflection
+  sobre `AcquireForHeartbeatAsync`/`_waitingCount`) falhou com contador=1
+  (motivo previsto), passou após gatear o incremento/decremento por
+  `countsTowardFaultBudget`.
+- **[Baixo × 4, doc]** 3 citações de rounds internos de auditoria vazando
+  para guias públicos (`usage-rabbitmq.md`, `usage-dependency-injection.md`,
+  `usage-observability.md`) reescritas para serem autocontidas; resíduo na
+  seção Links do `ADR004V03` (ainda descrevia v5.1.0 como release real,
+  incluindo referência órfã aos arquivos de `TODO/` já deletados) corrigido;
+  `usage-observability.md:50` "~1.9x" corrigido para "~2x" (desempenho mediu
+  ~1.98x); números indicativos do Round 1 (`MonitorTickCostBenchmarks`,
+  `ScaleRejectionCostBenchmarks`, `ElasticAcquireUnderBacklogBenchmarks`)
+  atualizados com medição em modo completo, sem mudança de conclusão.
+
+**Candidato roteado, deferido** (H-D, complexidade, não medido):
+`_pendingHeartbeatDisposals` (`ConcurrentBag<Task>`) sem afinidade de thread
+real dado o padrão de acesso do pump do heartbeat — complexidade pediu
+revisão de estabilidade antes de qualquer troca estrutural (mecanismo que
+fecha F12/F15). **Decisão do usuário: deferir para o Round 8** (quando
+estabilidade rodar de novo), não medir/alterar agora.
+
+**Resolvido, sem ação**: preocupação de proveniência sobre comentários
+"Round 7, Resiliência/Estabilidade" já existentes no código — confirmado via
+`git blame` que são de 2026-08-21, de uma série de auditoria anterior e não
+relacionada (pré-v6), coincidência de numeração, não vazamento desta rodada.
+
+Verificado: 192/192 testes net10.0 (era 190, +2 novos), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs). Nenhum achado do Round 7 ficou em aberto sem decisão (H-D é
+explicitamente um candidato deferido, não um achado pendente).

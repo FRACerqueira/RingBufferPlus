@@ -311,6 +311,15 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
   funcionam de verdade, não só compilam; números acima são indicativos de uma rodada
   curta, não uma medição estatisticamente robusta de release (isso ficaria para quem
   rodar os benchmarks completos antes do lançamento).
+  **Atualização (Round 7, desempenho — rodada completa, sem `--job short`):**
+  `MonitorTickCostBenchmarks` 14.64µs±0.44 (1.86KB, alocação idêntica ao indicativo;
+  tempo ~27% menor, provavelmente warmup insuficiente na rodada curta) — confirma
+  H1/H2 com número real, não mais indicativo. `ScaleRejectionCostBenchmarks` 125.1µs
+  ±3.90 (928B) — praticamente igual ao indicativo, sem achado novo.
+  `ElasticAcquireUnderBacklogBenchmarks` 99.7-101.2µs (81-94KB, 2 rodadas
+  independentes) — ~24-30% abaixo do indicativo em tempo e alocação; direção "o
+  indicativo estava superestimando o custo", não o oposto, então não mascarou
+  nenhuma regressão real. Nenhuma das 3 mudou de conclusão.
 - Devolvido para outras frentes: a pergunta se `_availableItems.Reader.Count` em
   `UnboundedChannel<T>` é O(1) é de leitura de runtime/BCL, não de medição — fica em
   aberto para `auditoria-complexidade`. O efeito de `Fault` ser rejeitado durante um
@@ -368,6 +377,121 @@ sinalizado ao usuário para ciência, não confirmado como seguro por mim.
   empírica (2 `SwitchToAsync` sequenciais, activities vieram como raízes
   independentes) E por argumento estrutural (gate `_scaling` garante no máximo uma
   activity de Scale em voo por vez, sem caminho de burla).
+
+---
+
+## Round 7 — 2026-08-24
+
+Objetivo: verificar se os fixes do Round 6 (commits `ed72f67`..`1c0d0fa`) não
+introduziram regressão, e achar o que passou batido nas seis primeiras rodadas.
+
+**Escopo reduzido, por decisão do usuário**: estabilidade e resiliência
+atingiram convergência formal no Round 6 (2 rodadas consecutivas sem achado
+confirmado cada) e **não são disparadas nesta rodada** — não apenas
+enquadramento mais curto como no Round 6, mas ausência completa desta vez,
+já que o critério de convergência por frente que este documento define foi
+satisfeito. As outras 4 frentes (usabilidade, complexidade, desempenho,
+observabilidade) mantêm o enquadramento completo, já que nenhuma delas bateu
+2 rodadas consecutivas sem achado ainda.
+
+**Complexidade**: confirmou o escopo do Round 6 e revalidou H1-H4/H-A/H-B/H-C
+por leitura fresca completa (incluindo 2 arquivos de produção nunca lidos
+antes nesta série, `RingBufferDefault.cs`/`RingBufferExtension.cs`) — nenhuma
+mudança de conclusão. Nota de precisão sem ação: `RingBufferDefault.Capacity=2`
+é um placeholder documentado como inalcançável na prática (toda rota até
+`Build`/`BuildWarmupAsync` passa por `FixedCapacity`/`ElasticCapacity`, que
+sempre sobrescreve esse valor) — rounds anteriores citaram esse número como
+se fosse o default de produção; não muda a conclusão de H3 (que dependia da
+proporção `Factory` ms-s vs. setup ns, não do valor exato), mas registrado
+para quem citar de novo. **Achado novo, candidato roteado (Baixo, não
+medido)**: `_pendingHeartbeatDisposals` é um `ConcurrentBag<Task>`, mas o
+único "escritor lógico" (o pump do heartbeat) retoma em thread arbitrária do
+pool a cada pulso após um `await` — sem a afinidade de thread que o tipo é
+otimizado para explorar, pode pagar custo de "steal-scan" sem o benefício.
+Complexidade pediu revisão de estabilidade antes de qualquer troca estrutural
+(esse mecanismo fecha F12/F15). **Decisão do usuário: 3B — deferir para o
+Round 8**, quando estabilidade rodar de novo (não medido nem alterado nesta
+rodada).
+
+**Desempenho**: confirmou, com rebuild limpo e 2 execuções independentes,
+que o benchmark de overhead de observabilidade **não regrediu** desde o
+Round 6 (472B/1088B idêntico byte a byte nas 2 rodadas; ~300ns/~600ns,
+consistente com a doc) — não é a 3ª ocorrência do padrão de doc stale.
+Também mediu em modo completo (sem `--job short`) os 3 benchmarks que
+ficaram como "indicativos" desde o Round 1 (`MonitorTickCostBenchmarks`,
+`ScaleRejectionCostBenchmarks`, `ElasticAcquireUnderBacklogBenchmarks`) —
+números atualizados na entrada do Round 1 acima; nenhum mudou de conclusão.
+2 achados textuais Baixo, ambos corrigidos: `usage-observability.md:50`
+("~1.9x" vs. o próprio "~2x" medido) e a atualização dos números indicativos
+do Round 1 no TODO. Confirmou que o fix O9 (2 `SetTag("success", ...)` novas
+em Scale) não introduz alocação evitável nova — mesmo padrão não-cacheado já
+existente na vizinhança imediata, e `activity == null` (sem listener, caso
+comum em produção) nem avalia o argumento.
+
+**Observabilidade**: confirmou O9/O10/O11 do Round 6 corretos e conectados;
+varredura completa de `activity?.SetTag` confirma paridade total entre as 2
+Activities existentes e suas métricas irmãs (classe fechada). **2 achados
+novos:**
+- **[Alto] Falha de warmup deixa `AcquireAsync`/`SwitchToAsync` sem qualquer
+  telemetria, indefinidamente**: `EnsureWarmupAsync()`'s `Lazy<Task>` cacheia
+  uma falha de warmup inicial (ADR011 — só `WarmupAsync()` explícito instala
+  uma tentativa nova). Toda chamada implícita subsequente relançava a mesma
+  exceção cacheada *antes* de `_activitySource.StartActivity` sequer rodar —
+  nenhum span, nenhuma linha em `acquire.duration`, nenhum log adicional
+  (o único `LogError` acontece 1x, dentro de `WarmupCoreAsync`). Um operador
+  olhando um dashboard veria silêncio total, não um pico de falha, durante a
+  janela em que literalmente toda chamada está falhando. **Decisão do
+  usuário: opção 1A** — emitir métrica/Activity (`success=false`,
+  `timed_out=false`, `cancelled=false`, status `Error`) em toda chamada
+  implícita que relança a falha cacheada, sem repetir `LogError` (evita
+  transformar tráfego normal contra um buffer conhecidamente quebrado em
+  tempestade de log — mesma razão pela qual o ADR011 já evita retry
+  automático aqui). Corrigido com red/green
+  (`AcquireAsync_AfterWarmupFailureIsCached_StillRecordsDurationAndActivity`).
+- **[Baixo, instância única] Contrato ambíguo do heartbeat no sinal de
+  backlog**: um comentário dizia que a espera do heartbeat "must not count"
+  no sinal reativo, mas só o *disparo* do `EngineCommand.Backlog()` era
+  bloqueado por `countsTowardFaultBudget` — o `Interlocked.Increment(ref
+  _waitingCount)` rodava incondicionalmente, e esse mesmo contador é lido
+  por `EvaluateBacklogReactive`/`ProcessTick` para calcular o alvo de
+  scale-up (efeito real: no máximo +1, autoatenuado, já que só 1 heartbeat
+  fica em voo por vez). **Decisão do usuário: opção 2B** — corrigir o
+  comportamento (gatear o incremento/decremento por `countsTowardFaultBudget`
+  também), não só a prosa, para que a intenção já documentada no comentário
+  passe a valer de ponta a ponta. Corrigido com red/green
+  (`HeartbeatAcquireWaiting_DoesNotInflateWaitingCount`, via reflection sobre
+  `AcquireForHeartbeatAsync`/`_waitingCount`).
+
+**Usabilidade**: confirmou os fixes de doc do Round 6 corretos (banner do
+v6-design-proposal.md, ADR004V03/ADR003V03, OnError.md regenerado sem
+reincidir na cópia stale conhecida). **2 achados novos, ambos Baixo,
+corrigidos como doc-only:**
+- 3 citações de rounds internos de auditoria vazando para guias públicos
+  (`usage-rabbitmq.md:44`, `usage-dependency-injection.md:58`,
+  `usage-observability.md:51`) — reescritas para serem autocontidas
+  (inline do raciocínio onde a citação era a única explicação, remoção pura
+  onde a frase já se sustentava sozinha).
+- `ADR004V03`, seção Links (linhas 116-117): resíduo que a correção anterior
+  do Round 6 não alcançou — ainda descrevia a v5.1.0 como release real
+  publicada ("bundled into the same 5.1.0 release", "the whole 5.1.0
+  batch"), contradizendo o próprio amendment da linha 36 do mesmo arquivo.
+  Corrigido, incluindo a referência órfã aos 2 arquivos de `TODO/` já
+  deletados na limpeza de descontinuação da v5.1.0.
+
+Também investigada e resolvida uma preocupação de proveniência levantada por
+usabilidade: comentários já existentes no código rotulados "Round 7,
+Resiliência/Estabilidade" (`RingBufferManager.cs:531,729,1238,1617,1707`)
+pareciam sugerir trabalho dessas 2 frentes nesta rodada, mesmo que elas não
+tenham sido disparadas. `git blame` confirma que são de 2026-08-21 — de uma
+série de auditoria anterior e completamente não relacionada (hardening
+pré-v6 em `develop`), coincidência de numeração com esta série (que começou
+em 2026-08-23), não um vazamento real.
+
+Verificado: 192/192 testes net10.0 (era 190, +2 novos), build limpo (0
+warnings, 0 errors) em toda a solução (3 TFMs, samples, benchmarks, gerador
+de docs).
+
+Status: **fechado**.
 
 ---
 
