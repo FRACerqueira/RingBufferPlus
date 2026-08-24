@@ -1871,7 +1871,7 @@ namespace RingBufferPlus.Core
             // now calls this roughly every SamplesBase/SamplesCount interval (300ms by default)
             // for the whole lifetime of every elastic buffer, not just per scale operation.
             // RingBufferBuilder's own LogMessage already has this guard; this one didn't.
-            if (Logger is null || !Logger.IsEnabled(LogLevel.Debug)) return;
+            if (Logger is null || !SafeIsEnabled(Logger, LogLevel.Debug)) return;
             var msg = $"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff} {Name}: {message} ";
             SafeInvokeSink(() => logMessageForDbg(Logger, Name, msg, null));
         }

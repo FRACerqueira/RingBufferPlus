@@ -906,6 +906,23 @@ namespace RingBufferPlus.Tests
             }
         }
 
+        // Round 3 (Estabilidade/Resiliência/Observabilidade, v6 pre-release audit, 3/3
+        // independent confirmations): the composite Logger from Microsoft.Extensions.Logging
+        // aggregates and rethrows provider exceptions from IsEnabled itself - a provider disposed
+        // ahead of this manager during host shutdown is a realistic way to hit this.
+        private sealed class ThrowingIsEnabledLogger : ILogger
+        {
+            public bool IsEnabled(LogLevel logLevel) => throw new ObjectDisposedException("provider");
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
+            public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) { }
+
+            private sealed class NullScope : IDisposable
+            {
+                public static readonly NullScope Instance = new();
+                public void Dispose() { }
+            }
+        }
+
         private sealed class CapturingLogger : ILogger
         {
             public List<string> Messages { get; } = new();
@@ -922,6 +939,33 @@ namespace RingBufferPlus.Tests
                 public static readonly NullScope Instance = new();
                 public void Dispose() { }
             }
+        }
+
+        // ---------------------------------------------------------------------
+        // Round 3 (Estabilidade/Resiliência/Observabilidade, v6 pre-release audit, 3/3
+        // independent confirmations): the Round 2 fix for this exact gap added a SafeIsEnabled
+        // helper but never actually wired it into LogMessage's own guard - the raw, unguarded
+        // Logger.IsEnabled(LogLevel.Debug) call remained, so a throwing IsEnabled still escaped
+        // synchronously through WarmupCoreAsync (LogMessage("Starting warmup process.") is its
+        // first statement) - worse than the two paths (ProcessTick/RunHeartbeatAsync) the original
+        // fix's own comment named, since neither of the previous two rounds' test suites exercised
+        // a throwing IsEnabled at all.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        [Trait("Category", "Contract")]
+        public async Task WarmupAsync_WhenLoggerIsEnabledThrows_StillCompletes()
+        {
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractThrowingIsEnabledDoesNotBreakWarmup", null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .Logger(new ThrowingIsEnabledLogger())
+                .FixedCapacity(2)
+                .BuildWarmupAsync();
+
+            Assert.Equal(2, service.CurrentCapacity);
+
+            await service.DisposeAsync();
         }
 
         [Fact]
