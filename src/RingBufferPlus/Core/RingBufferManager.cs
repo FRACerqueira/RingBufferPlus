@@ -1911,7 +1911,11 @@ namespace RingBufferPlus.Core
                         LogError(ex);
                         await acquired.DisposeAsync().ConfigureAwait(false);
                     }
-                    LogMessage("Stopped Heart Beat item");
+                    // Round 6 (Observabilidade, v6 pre-release audit - finding O11): "Stopped" wrongly
+                    // implied the item's own processing/dispose had finished, even on the branch above
+                    // where the callback is still running and its dispose is deferred, not done -
+                    // reworded to describe what actually always holds: this pump's own iteration ended.
+                    LogMessage("Heart Beat pump iteration finished");
                 }
             }
             catch (OperationCanceledException)
