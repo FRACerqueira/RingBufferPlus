@@ -601,6 +601,38 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task ScaleActivities_CarrySuccessTag_MatchingTheScaleOperationsMetric()
+        {
+            // Round 6 (Observabilidade, v6 pre-release audit - finding O9): scale.operations/
+            // scale.duration both carry a "success" tag, but neither DispatchScaleUp nor
+            // DispatchScaleDown ever calls activity?.SetTag("success", ...) - the third instance of
+            // the metric/trace tag-set asymmetry class first fixed for acquire.duration/
+            // "RingBufferPlus.Acquire" in Round 4, then again for the trace side in Round 5.
+            var bufferName = UniqueBufferName();
+            var (meterListener, records) = StartMeterListener();
+            var (activityListener, activities) = StartActivityListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 5, 2)
+                .LockWhenScaling()
+                .BuildWarmupAsync();
+
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromSeconds(5));
+            await service.DisposeAsync();
+
+            meterListener.Dispose();
+            activityListener.Dispose();
+
+            var scaleUpActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "up"));
+            var scaleDownActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("direction"), "down"));
+            Assert.Equal(true, scaleUpActivity.GetTagItem("success"));
+            Assert.Equal(true, scaleDownActivity.GetTagItem("success"));
+        }
+
+        [Fact]
         public async Task AcquireAsync_RacingDisposeAsync_RecordsOkStatus_NotError()
         {
             // Round 4, Observabilidade (finding O2): AcquireCoreAsync never set an ActivityStatusCode

@@ -282,8 +282,8 @@ namespace RingBufferPlus.Core
 
             _acquireDuration = _meter.CreateHistogram<double>("ringbufferplus.acquire.duration", unit: "s", description: "Duration of AcquireAsync calls, in seconds.");
             _acquireFaults = _meter.CreateCounter<long>("ringbufferplus.acquire.faults", description: "Count of AcquireAsync calls that timed out with no item available.");
-            _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by direction, trigger, and success.");
-            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by direction, trigger, and success.");
+            _scaleOperations = _meter.CreateCounter<long>("ringbufferplus.scale.operations", description: "Count of scale-up/scale-down operations, tagged by buffer.name, direction, trigger, target, success, and cancelled.");
+            _scaleDuration = _meter.CreateHistogram<double>("ringbufferplus.scale.duration", unit: "s", description: "Duration of scale-up/scale-down operations, in seconds, tagged by buffer.name, direction, trigger, target, success, and cancelled.");
             // Round 4 (Estabilidade, v6 pre-release audit): RingBufferBuilder.BuildCore constructs
             // this manager via object-initializer syntax - Name/Capacity/etc. (all `required`, none
             // with an inline default) are only assigned by the C# compiler AFTER this constructor
@@ -1154,6 +1154,10 @@ namespace RingBufferPlus.Core
                 var cancelledByShutdown = !scaledUp && _lifetime.IsCancellationRequested && !hadGenuineFailure;
                 var statusOk = scaledUp || cancelledByShutdown;
                 activity?.SetStatus(statusOk ? ActivityStatusCode.Ok : ActivityStatusCode.Error);
+                // Round 6 (Observabilidade, v6 pre-release audit - finding O9): scale.operations/
+                // scale.duration both carry "success", but the activity never did - third instance
+                // of the same metric/trace tag-set asymmetry class fixed for acquire in Rounds 4-5.
+                activity?.SetTag("success", scaledUp);
                 activity?.SetTag("cancelled", cancelledByShutdown);
                 activity?.Dispose();
                 _scaleOperations.Add(1,
@@ -1259,6 +1263,10 @@ namespace RingBufferPlus.Core
                     LogWarning($"ScaleDown to {target} only partially completed ({removed.Count}/{quantity} items removed) while a manual pin is active - the remaining reduction will not be retried until the pin expires.");
                 }
                 activity?.SetStatus(ActivityStatusCode.Ok);
+                // Round 6 (Observabilidade, v6 pre-release audit - finding O9): same tag-set gap
+                // as DispatchScaleUp above - scale.operations/scale.duration carry "success", the
+                // activity didn't.
+                activity?.SetTag("success", scaledDown);
                 activity?.SetTag("cancelled", false);
                 activity?.Dispose();
                 _scaleOperations.Add(1,
