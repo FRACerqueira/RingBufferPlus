@@ -41,13 +41,12 @@ Features
 
 What's new in the latest version
 =================================
-- v5.0.0 (latest version) - complete, coordinated product overhaul with sweeping breaking changes.
+- v5.0.0 (latest released version) - complete, coordinated product overhaul with sweeping breaking changes.
   See CHANGELOG.md's "Breaking changes v5.0.0" section for the full list; highlights:
     - Concurrency core rewritten on System.Threading.Channels as a single state machine - no lock/semaphore.
     - IDisposable removed; IAsyncDisposable is now the sole disposal contract (await using / DisposeAsync()).
     - Public fluent builder surface redesigned around explicit, mutually exclusive FixedCapacity/ElasticCapacity modes,
       replacing Capacity/ScaleTimer/MinCapacity/MaxCapacity.
-    - AutoScaleAcquireFault(...) and manual SwitchToAsync are mutually exclusive at the type level.
     - AcquireTimeout's delayAttempts parameter removed - a Channel-based acquire has no polling loop to pace.
     - Acquire no longer blocks while a scale operation is in progress, regardless of LockWhenScaling.
     - Added native observability (Meter/ActivitySource) - see doc/guides/usage-observability.md.
