@@ -51,7 +51,15 @@ namespace Microsoft.Extensions.DependencyInjection
                 return userfunc.Invoke(new RingBufferBuilder<T>(buffername, loggerFactory), service);
             });
             serviceCollection.AddSingleton(service => service.GetRequiredKeyedService<IRingBufferService<T>>(buffername));
-            serviceCollection.AddHostedService(service => new RingBufferWarmupHostedService<T>(service, buffername));
+            // Round 2 (Resiliência, v6 pre-release audit): AddHostedService<T>(factory) registers
+            // via TryAddEnumerable, which dedups by (ServiceType, ImplementationType) - and
+            // RingBufferWarmupHostedService<T> is the SAME closed generic type for every
+            // AddRingBuffer<T> call sharing this T, regardless of buffername. A second/third/etc.
+            // AddRingBuffer<T> call for the same T therefore silently registered ZERO actual
+            // IHostedService entries - no exception, no log - so only the first buffer of each T
+            // ever got its automatic warmup. A plain AddSingleton<IHostedService> is additive, not
+            // deduped by type, so each call genuinely registers its own hosted service instance.
+            serviceCollection.AddSingleton<IHostedService>(service => new RingBufferWarmupHostedService<T>(service, buffername));
             return serviceCollection;
         }
     }
