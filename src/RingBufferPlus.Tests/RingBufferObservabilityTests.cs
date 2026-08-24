@@ -633,6 +633,59 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public async Task ConsecutiveScaleOperations_ProduceIndependentRootActivities_NotChainedToEachOther()
+        {
+            // Round 6 (Estabilidade, v6 pre-release audit): investigated and REFUTED a suspected
+            // Activity.Current leak across consecutive Scale operations - kept as a permanent
+            // regression guard, not because a bug was found.
+            //
+            // The hypothesis: DispatchScaleUp/DispatchScaleDown call _activitySource.StartActivity
+            // synchronously from ProcessCommandAsync, itself called from RunEngineAsync's await
+            // foreach - a side effect of StartActivity is setting Activity.Current. The matching
+            // Dispose() only runs inside the batch's forked Task.Run body, whose ExecutionContext is
+            // a private copy taken at the Task.Run call, so restoring Activity.Current there can't
+            // propagate back to the engine loop. That much is true, and was confirmed with a
+            // standalone repro (a plain sync method in a plain loop) that DID show the leak - but
+            // this method is not a plain sync method in a plain loop.
+            //
+            // What actually prevents it here: AsyncMethodBuilderCore.Start saves the caller's
+            // ExecutionContext before running an async method's state machine (even its purely
+            // synchronous prefix, with no await ever reached) and restores it once that call
+            // returns. So `await ProcessCommandAsync(cmd)` in RunEngineAsync reverts whatever
+            // ProcessCommandAsync's own call to DispatchScaleUp/DispatchScaleDown mutated
+            // Activity.Current to, the instant ProcessCommandAsync returns - RunEngineAsync's own
+            // Activity.Current is never actually mutated, regardless of whether the callee awaited
+            // anything. This is a general async-method-boundary property (see also Round 1/3's own,
+            // separately-refuted parent-chaining suspicions on a different call path) - not specific
+            // to Task.Run, and it is why the standalone repro (no async method boundary at all
+            // between the two StartActivity calls) showed the leak while the real code doesn't.
+            var bufferName = UniqueBufferName();
+            var (activityListener, activities) = StartActivityListener();
+
+            IRingBufferBuilder<int> builder = new RingBufferBuilder<int>(bufferName, null);
+            var service = await builder
+                .Factory(_ => Task.FromResult(1))
+                .ElasticCapacity(2, 10, 2)
+                .LockWhenScaling()
+                .BuildWarmupAsync();
+
+            await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromSeconds(5));
+            await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromSeconds(5));
+            await service.DisposeAsync();
+
+            activityListener.Dispose();
+
+            var scaleActivities = activities.Where(a => a.OperationName == "RingBufferPlus.Scale" && Equals(a.GetTagItem("buffer.name"), bufferName)).ToList();
+            Assert.Equal(2, scaleActivities.Count);
+            Assert.All(scaleActivities, a =>
+            {
+                Assert.Null(a.ParentId);
+                Assert.Null(a.Parent);
+                Assert.Equal(default, a.ParentSpanId);
+            });
+        }
+
+        [Fact]
         public async Task AcquireAsync_RacingDisposeAsync_RecordsOkStatus_NotError()
         {
             // Round 4, Observabilidade (finding O2): AcquireCoreAsync never set an ActivityStatusCode
