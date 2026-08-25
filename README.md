@@ -1,13 +1,13 @@
-# ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png) Welcome to RingBufferPlus
+# ![RingBufferPlus Logo](https://raw.githubusercontent.com/FRACerqueira/RingBufferPlus/refs/heads/main/icon.png) RingBufferPlus
 
-## **The generic ring buffer with auto-scaler (elastic buffer).**
+## **Stop provisioning for worst case. Pool it, scale it, let it breathe.**
 
 [![License](https://img.shields.io/badge/License-MIT-brightgreen.svg)](LICENSE)
 [![Build](https://github.com/FRACerqueira/RingBufferPlus/workflows/Build/badge.svg)](https://github.com/FRACerqueira/RingBufferPlus/actions/workflows/build.yml)
 [![NuGet](https://img.shields.io/nuget/v/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 [![Downloads](https://img.shields.io/nuget/dt/RingBufferPlus)](https://www.nuget.org/packages/RingBufferPlus/)
 
-RingBufferPlus is a bounded, thread-safe pool of reusable instances of `T` — built once via a factory you supply, acquired and returned by callers — with an optional elastic capacity that scales up and down at runtime, manually or automatically, to keep resource usage matched to demand instead of provisioning for the worst case.
+RingBufferPlus is a bounded, thread-safe pool for any expensive-to-create resource — database connections, RabbitMQ channels, HTTP clients, whatever your `Factory` builds. You get one back with `AcquireAsync`, you return it by disposing it, and the pool takes care of keeping enough of them around without you having to guess a number up front.
 
 <!--
   Links below are repo-relative, not absolute GitHub URLs, so they keep working when
@@ -17,11 +17,23 @@ RingBufferPlus is a bounded, thread-safe pool of reusable instances of `T` — b
   (set in the csproj), so no absolute URL is needed for that case either.
 -->
 
+## Why RingBufferPlus
+
+- **Elastic capacity, on by default.** An elastic pool grows the instant callers are genuinely waiting, and shrinks predictively as demand trends down — no cron job, no manual tuning required to get useful behavior.
+- **Three signals, one owner.** A floor guard, a backlog-reactive signal, and a predictive Monitor all watch the pool; a single-consumer engine arbitrates between them so capacity never races itself.
+- **Manual override when you need it.** `SwitchToAsync` pins the pool to a capacity for a set duration — the automatic signals keep running underneath, they just take a back seat.
+- **Native observability, zero extra dependency.** Metrics and traces via the .NET-shipped `Meter`/`ActivitySource` — plug in any OpenTelemetry exporter, nothing extra to install.
+- **Health checks built in.** `HeartBeat` inspects a live item on a schedule and replaces it automatically if it's gone bad — no separate watchdog to write.
+- **Async all the way down.** `IAsyncDisposable` throughout; no sync-over-async traps.
+- **.NET 8, 9, and 10** — one package, three target frameworks.
+
 ### What's new in the latest version
 
 Full version history has moved to [CHANGELOG.md](CHANGELOG.md).
 
-**v6.0.0 (latest released version)** is a complete, coordinated product overhaul with sweeping breaking changes to the concurrency model, autoscale algorithm, and public fluent API surface — see the [ADRs](doc/adr/indexadrs.md), the CHANGELOG's "Breaking changes" section for v6.0.0 (the sole migration reference — no separate migration guide is provided), and the [pre-release audit report](doc/audits/v6.0.0-pre-release-audit.md) for full context. v5.x no longer receives fixes now that v6.0.0 has shipped.
+**v6.0.0 (latest released version)** is a complete, coordinated product overhaul with sweeping breaking changes to the concurrency model, autoscale algorithm, and public fluent API surface — see the [ADRs](doc/adr/indexadrs.md) and the CHANGELOG's "Breaking changes" section for v6.0.0 (the sole migration reference — no separate migration guide is provided). v5.x no longer receives fixes now that v6.0.0 has shipped.
+
+Every v6.0.0 change went through a 12-round adversarial pre-release audit before shipping — see the [audit report](doc/audits/v6.0.0-pre-release-audit.md) for the method and what it found.
 
 ## Installing
 
@@ -32,6 +44,8 @@ dotnet add package RingBufferPlus [--prerelease]
 **_Note: `[--prerelease]` for pre-release versions._**
 
 ## Quickstart
+
+A fixed pool, for when you know your capacity up front:
 
 ```csharp
 Random rnd = new();
@@ -53,7 +67,19 @@ await using (var buffer = await rb.AcquireAsync(cancellation))
 await rb.DisposeAsync();
 ```
 
-For elastic (scaling) buffers, dependency injection, RabbitMQ channel pooling, and every other builder option, see the guides below.
+An elastic pool, for when demand varies and you'd rather not guess:
+
+```csharp
+var rb = await RingBuffer<int>.New("MyBuffer")
+    .Factory((_) => Task.FromResult(rnd.Next(1, 10)))
+    .ElasticCapacity(minCapacity: 2, maxCapacity: 10, target: 4)
+    .BuildWarmupAsync(cancellation);
+
+// No further setup needed - the floor guard, backlog-reactive signal, and
+// predictive Monitor are already watching this pool.
+```
+
+For dependency injection, RabbitMQ channel pooling, and every other builder option, see the guides below.
 
 ## Guides
 

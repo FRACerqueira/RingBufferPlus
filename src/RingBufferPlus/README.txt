@@ -10,16 +10,16 @@
 
 ========================================================================================
 
-Welcome to RingBufferPlus
-=========================
+RingBufferPlus
+==============
 
-The generic ring buffer with auto-scaler (elastic buffer)
+Stop provisioning for worst case. Pool it, scale it, let it breathe.
 
 Project Description
 ====================
 
-A ring buffer is a memory allocation scheme where memory is reused (reclaimed) when an index, incremented modulo the buffer size, writes over a previously used location. A ring buffer makes a bounded queue when separate indices are used for inserting and removing data. The queue can be safely shared between threads (or processors) without further synchronization so long as one processor enqueues data and the other dequeues it. (Also, modifications to the read/write pointers must be atomic, and this is a non-blocking queue--an error is returned when trying to write to a full queue or read from an empty queue).
-The RingBufferPlus implementation follows the basic principle. The principle was expanded to have a scale capacity to optimize the consumption of the resources used.
+RingBufferPlus is a bounded, thread-safe pool for any expensive-to-create resource - database connections, RabbitMQ channels, HTTP clients, whatever your Factory builds. You get one back with AcquireAsync, you return it by disposing it, and the pool takes care of keeping enough of them around without you having to guess a number up front.
+Under the hood it follows the classic ring buffer principle: a bounded, index-based queue that can be shared safely between threads without extra synchronization. RingBufferPlus extends that principle with elastic capacity, so the pool can grow and shrink at runtime instead of staying fixed.
 
 Features
 ========
@@ -214,7 +214,7 @@ For more examples, please refer to the Samples directory: https://github.com/FRA
 
 Documentation
 =============
-The documentation is available in the Docs directory: https://github.com/FRACerqueira/RingBufferPlus/blob/main/src/docs/docindex.md
+The documentation is available in the Docs directory: https://github.com/FRACerqueira/RingBufferPlus/blob/main/doc/api/docindex.md
 
 License
 =======
