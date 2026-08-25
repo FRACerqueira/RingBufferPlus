@@ -65,11 +65,20 @@ namespace RingBufferPlusRabbitSample
             //create connection
             connectionRabbit = await connectionFactory!.CreateConnectionAsync(cts.Token);
 
+            var logger = hostApp.Services.GetService<ILogger<Program>>();
+
             //create ring buffer with autoscale (always on for an elastic pool since v6.0.0)
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Logger(hostApp.Services.GetService<ILogger<Program>>())
+                .Logger(logger)
                 .Factory((token) => ChannelFactory(token)!)
-                .ElasticCapacity(5, 20, 10, 50, TimeSpan.FromSeconds(5))
+                // Raised from the default (4): this pool's range (5-20) is wide enough that
+                // warmup and scale-up batches benefit from opening more channels in parallel
+                // over the shared connection.
+                .ElasticCapacity(5, 20, 10, 50, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 8)
+                // OnError replaces this buffer's own Error-level logging instead of adding to
+                // it, so route it back through the same logger here - e.g. a transient RabbitMQ
+                // connection drop while opening a channel during warmup or scale-up.
+                .OnError(ex => logger?.LogError(ex, "RingBufferPlus factory error"))
                 .BuildWarmupAsync(cts.Token);
 
             ReportCapacity(rb);

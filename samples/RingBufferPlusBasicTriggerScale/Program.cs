@@ -36,6 +36,11 @@ namespace RingBufferPlusBasicTriggerScale
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
                 .AcquireTimeout(TimeSpan.FromMilliseconds(500))
                 .ElasticCapacity(2, 4, 3, 50, TimeSpan.FromSeconds(5))
+                // The default deadband (3) exceeds the largest possible target-capacity gap in
+                // this sample's 2-4 range (2), so the Monitor could never dispatch a scale
+                // operation on its own. Lowering it to 1 lets the Monitor actually act; the
+                // other tuning parameters are left at their defaults.
+                .MonitorTuning(deadband: 1)
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
