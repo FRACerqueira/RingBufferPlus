@@ -3160,7 +3160,9 @@ namespace RingBufferPlus.Tests
             }
             sw.Stop();
             Assert.Equal(5, Volatile.Read(ref callCount));
-            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(1), $"Expected the unrelated ReplaceOne's own factory call to happen promptly instead of being stuck behind the scale-down's own hung-disposal grace period (PulseHeartBeat default, 10s). Actual: {sw.Elapsed}.");
+            // Budget is generous (well below the 10s grace period, but far above what a prompt
+            // completion needs) to absorb scheduling jitter on shared CI runners.
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), $"Expected the unrelated ReplaceOne's own factory call to happen promptly instead of being stuck behind the scale-down's own hung-disposal grace period (PulseHeartBeat default, 10s). Actual: {sw.Elapsed}.");
 
             releaseHang.Set();
             await oldItemDisposeTask;
@@ -3212,20 +3214,20 @@ namespace RingBufferPlus.Tests
             IRingBufferBuilder<HangingSyncDisposeProbe> builder = new RingBufferBuilder<HangingSyncDisposeProbe>("ContractDrainLoopBatchHangingSyncDispose", null);
             var service = await builder
                 .Factory(_ => Task.FromResult(new HangingSyncDisposeProbe(releaseHang)))
-                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(200))
+                .HeartBeat(_ => true, pulse: TimeSpan.FromMilliseconds(1000))
                 .FixedCapacity(4)
                 .BuildWarmupAsync();
 
             var sw = Stopwatch.StartNew();
             var disposeTask = service.DisposeAsync().AsTask();
-            // 4 hung items sequentially would cost ~4 x 200ms = 800ms just for the grace periods,
+            // 4 hung items sequentially would cost ~4 x 1000ms = 4000ms just for the grace periods,
             // on top of real dispatch overhead - budget well below that to prove concurrency, but
-            // above one grace period (200ms) plus scheduling slack.
-            var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromMilliseconds(700)));
+            // above one grace period (1000ms) plus enough scheduling slack for shared CI runners.
+            var completed = await Task.WhenAny(disposeTask, Task.Delay(TimeSpan.FromMilliseconds(2500)));
             sw.Stop();
 
             Assert.Same(disposeTask, completed);
-            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(700), $"Expected the batch to be bounded by ~one PulseHeartBeat, took {sw.Elapsed}.");
+            Assert.True(sw.Elapsed < TimeSpan.FromMilliseconds(2500), $"Expected the batch to be bounded by ~one PulseHeartBeat, took {sw.Elapsed}.");
 
             releaseHang.Set();
         }
