@@ -1,0 +1,25 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/benchmarks/">
+    <Project Path="benchmarks/RingBufferPlus.Benchmarks/RingBufferPlus.Benchmarks.csproj" />
+  </Folder>
+  <Folder Name="/doc/">
+    <File Path="doc/api/docindex.md" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/RingBufferPlusApiSample/RingBufferPlusApiSample.csproj" />
+    <Project Path="samples/RingBufferPlusBasicManualScale/RingBufferPlusBasicManualScale.csproj" />
+    <Project Path="samples/RingBufferPlusBasicSample/RingBufferPlusBasicSample.csproj" />
+    <Project Path="samples/RingBufferPlusBasicTriggerScale/RingBufferPlusBasicTriggerScale.csproj" />
+    <Project Path="samples/RingBufferPlusRabbitSample/RingBufferPlusRabbitSample.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="src/RingBufferPlus.Tests/RingBufferPlus.Tests.csproj" />
+  </Folder>
+  <Project Path="src/RingBufferPlus/RingBufferPlus.csproj" />
+  <Project Path="src/XmlDocMarkdownGenerator/XmlDocMarkdownGenerator.csproj" />
+</Solution>
