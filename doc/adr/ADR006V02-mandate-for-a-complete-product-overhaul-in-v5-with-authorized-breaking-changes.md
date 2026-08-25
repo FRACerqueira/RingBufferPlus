@@ -21,7 +21,7 @@ Technical Story: [ADR006V01](#) authorized "no commitment to the current version
 
 ## Context and Problem Statement
 
-A further design analysis (concurrency ownership model, autoscale algorithm, and remaining public surface — see `doc/architecture/v6-design-proposal.md`) produced real evidence for another round of breaking changes: a decision-quality simulation showing the shipped median autoscaling algorithm can get structurally stuck over-provisioned, and a real, run benchmark (`AutoScaleReactionBenchmarks`) showing the current reactive path is dominated by configured timeout, not actual scaling cost. Both findings require public surface and behavioral changes that are not minor-version-compatible. The question ADR006V01 already anticipated now applies for real: is authorizing this "every future major gets a free pass" — the option V01 already rejected — or does it stand on its own?
+A further design analysis (concurrency ownership model, autoscale algorithm, and remaining public surface) produced real evidence for another round of breaking changes: a decision-quality simulation showing the shipped median autoscaling algorithm can get structurally stuck over-provisioned, and a real, run benchmark (`AutoScaleReactionBenchmarks`) showing the current reactive path is dominated by configured timeout, not actual scaling cost. Both findings require public surface and behavioral changes that are not minor-version-compatible. The question ADR006V01 already anticipated now applies for real: is authorizing this "every future major gets a free pass" — the option V01 already rejected — or does it stand on its own?
 
 ## Decision Drivers
 
