@@ -79,7 +79,7 @@ For runnable samples, see the [Samples directory](./samples):
 
 ## API Reference
 
-Generated per-type/per-member reference: [src/docs/docindex.md](./src/docs/docindex.md).
+Generated per-type/per-member reference: [doc/api/docindex.md](./doc/api/docindex.md).
 
 ## Architecture Decision Records (ADR)
 

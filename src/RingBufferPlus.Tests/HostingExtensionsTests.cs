@@ -31,9 +31,8 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void AddRingBuffer_ShouldAlsoRegisterAHostedServiceForWarmup()
         {
-            // ADR007V03: WarmupRingBufferAsync was removed - AddRingBuffer<T> now registers an
-            // IHostedService alongside the pool, so warmup happens automatically on host start
-            // instead of requiring a separate opt-in call.
+            // ADR007V03: AddRingBuffer<T> registers an IHostedService alongside the pool, so
+            // warmup happens automatically on host start - there is no separate opt-in call.
             var services = new ServiceCollection();
             Func<IRingBufferBuilder<int>, IServiceProvider, IRingBufferService<int>> userFunc = (buffer, provider) => Mock.Of<IRingBufferService<int>>();
 
@@ -78,13 +77,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 1 (Resiliência, v6 pre-release audit): the hosted service used to look up its
-        // own buffer via GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name ==
-        // buffername) - which forces the DI container to construct EVERY registered
-        // IRingBufferService<T>, not just the named one, because FirstOrDefault must enumerate
-        // in registration order until it finds a match. "bad" is registered before "good" here
-        // specifically so that looking up "good" would have to pass through "bad"'s factory
-        // first under the old implementation, faulting an otherwise-healthy buffer's startup.
+        // A naive lookup - GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name ==
+        // buffername) - would force the DI container to construct every registered buffer, not
+        // just the named one, because FirstOrDefault enumerates in registration order until it
+        // matches. "bad" is registered before "good" here so that lookup strategy would hit
+        // "bad"'s factory first, faulting an otherwise-healthy buffer's startup.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -113,13 +110,12 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 2 (Resiliência, v6 pre-release audit): AddHostedService<T>(factory) registers via
-        // TryAddEnumerable, which dedups by (ServiceType, ImplementationType) - and
-        // RingBufferWarmupHostedService<T> is the SAME closed generic type for every
-        // AddRingBuffer<T> call sharing this T, regardless of buffername. Every AddRingBuffer<T>
-        // call past the first, for a given T, therefore silently registered ZERO actual
-        // IHostedService entries - no exception, no log - so only the first buffer of each T ever
-        // received its automatic warmup on host start, contradicting ADR007V03's own promise.
+        // AddHostedService<T>(factory) registers via TryAddEnumerable, which dedups by
+        // (ServiceType, ImplementationType). RingBufferWarmupHostedService<T> is the same closed
+        // generic type for every AddRingBuffer<T> call sharing this T, so without a different
+        // registration approach, every call after the first for a given T would silently
+        // register zero hosted services - only the first buffer of each T would get automatic
+        // warmup.
         // ---------------------------------------------------------------------
 
         [Fact]

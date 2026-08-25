@@ -3,8 +3,8 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 //
-// Acceptance tests for the v6.0.0 floor guard (ADR001V03), ported and validated in isolation
-// before being wired into the engine - see the class remarks on FloorGuardDecision.
+// Acceptance tests for the floor guard (ADR001V03) - see the class remarks on
+// FloorGuardDecision for how it is wired into the engine.
 
 using RingBufferPlus.Core;
 
@@ -22,7 +22,8 @@ namespace RingBufferPlus.Tests
         public void EvaluateBreach_CurrentExactlyAtMin_ReturnsNull()
         {
             // The common, healthy steady state for a fixed-capacity buffer (MinCapacity ==
-            // MaxCapacity == Capacity) - must not be a breach, or this would fire constantly.
+            // MaxCapacity == Capacity). This must not count as a breach, or the guard would
+            // fire constantly.
             Assert.Null(FloorGuardDecision.EvaluateBreach(currentCapacity: 4, minCapacity: 4));
         }
 
@@ -41,8 +42,8 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void EvaluateBreach_AtMinimumLegalCapacity_StillDetectsBreach()
         {
-            // MinCapacity == 2 is the minimum legal value across this codebase's own validation
-            // (RingBufferBuilder.ValidateBuild) - the guard must not have a blind spot there.
+            // MinCapacity == 2 is the smallest value RingBufferBuilder.ValidateBuild allows.
+            // The guard must still detect a breach there.
             Assert.Equal(1, FloorGuardDecision.EvaluateBreach(currentCapacity: 1, minCapacity: 2));
         }
 
@@ -73,8 +74,8 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void HasGraceWindowElapsed_ExactlyAtTheBoundary_ReturnsTrue()
         {
-            // Deliberately ">=", not ">" - a genuinely broken factory must be reported truthfully
-            // once a full FactoryTimeout cycle has passed, not one tick later.
+            // Deliberately ">=", not ">": a broken factory must be reported as soon as a full
+            // FactoryTimeout has passed, not one tick later.
             var start = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var now = start + TimeSpan.FromSeconds(15);
             Assert.True(FloorGuardDecision.HasGraceWindowElapsed(start, now, TimeSpan.FromSeconds(15)));
@@ -98,21 +99,18 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void HasGraceWindowElapsed_NowBeforeBreachDetectedAt_ReturnsFalse()
         {
-            // A caller passing a `now` earlier than the breach's own detected-at instant (e.g. a
-            // clock artifact, or a stale/reordered call) must never be treated as "elapsed" - the
-            // negative elapsed time is clamped to "still within the window", not sign-flipped into
-            // an even larger apparent elapsed duration.
+            // If `now` is earlier than the breach's own detected-at instant (e.g. a clock glitch
+            // or an out-of-order call), that must never look like "elapsed". The negative elapsed
+            // time counts as "still within the window", not a larger apparent duration.
             var breachDetectedAt = new DateTime(2026, 1, 1, 0, 0, 10, DateTimeKind.Utc);
             var now = breachDetectedAt - TimeSpan.FromSeconds(5);
             Assert.False(FloorGuardDecision.HasGraceWindowElapsed(breachDetectedAt, now, TimeSpan.FromSeconds(15)));
         }
 
         // ---------------------------------------------------------------------
-        // ShouldReportNow (Round 10, Observabilidade): the "below minimum" report must fire once
-        // when the grace window first elapses, then again on that same cadence as a fallback -
-        // never on every single evaluation (that was the bug: unbounded repeats driven by whatever
-        // cadence the caller happened to re-evaluate at), and never silent forever after the first
-        // report either.
+        // ShouldReportNow: the "below minimum" report fires once when the grace window elapses,
+        // then again on the same cadence as a fallback. It must never repeat on every single
+        // evaluation, and never go silent forever after the first report.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -134,10 +132,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ShouldReportNow_SoonAfterTheFirstReport_ReturnsFalse()
         {
-            // This is the exact bug: without a latch, this call - happening while the grace window
-            // was already elapsed since detection - would report again immediately. The fix's whole
-            // point is that "elapsed since detection" is no longer sufficient once a report has
-            // already fired; it must also be a fresh grace-window's worth of time since that report.
+            // Without a latch, this call would report again immediately, since the grace window
+            // has already elapsed since detection. Once a report has fired, "elapsed since
+            // detection" is no longer enough - a fresh grace window must also pass since then.
             var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var lastReportedAt = detectedAt + TimeSpan.FromMilliseconds(150);
             var now = lastReportedAt + TimeSpan.FromMilliseconds(50);
@@ -147,10 +144,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ShouldReportNow_ManyRapidRetriesWithinOneWindow_OnlyTheFirstReports()
         {
-            // Simulates the real failure mode: several evaluations happening well inside a single
-            // grace-window's worth of time (e.g. a batch of concurrent retry attempts all completing
-            // in quick succession). Only the first should report; the rest, still within the same
-            // window since that report, must not.
+            // Simulates several evaluations happening close together, inside one grace window
+            // (e.g. a batch of retries completing in quick succession). Only the first should
+            // report; the rest must not.
             var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var factoryTimeout = TimeSpan.FromMilliseconds(150);
             var firstReportAt = detectedAt + factoryTimeout;
@@ -177,8 +173,8 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ShouldReportNow_ManyWindowsLater_KeepsRepeatingOnceMore_NotJustTwice()
         {
-            // The fallback must keep going for the life of the outage, not just fire a 2nd time and
-            // then stop - simulates 5 consecutive grace-window cycles, each with its own report.
+            // The fallback must keep repeating for the whole outage, not stop after a second
+            // report. Simulates 5 consecutive grace-window cycles, each with its own report.
             var detectedAt = new DateTime(2026, 1, 1, 0, 0, 0, DateTimeKind.Utc);
             var factoryTimeout = TimeSpan.FromMilliseconds(150);
             DateTime? lastReportedAt = null;

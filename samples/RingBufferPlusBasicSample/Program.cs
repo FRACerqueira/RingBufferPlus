@@ -66,8 +66,8 @@ namespace RingBufferPlusBasicSample
 
         private static bool MyHeartBeat(int value)
         {
-            //do anything with value ex: health check
-            //return false to discard it instead (a replacement is created in its place)
+            // Do anything with the value here, e.g. a health check.
+            // Return false to discard it instead - a replacement is created automatically.
             return true;
         }
 

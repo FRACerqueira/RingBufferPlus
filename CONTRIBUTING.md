@@ -59,7 +59,7 @@ Any new code should also have reasonable unit test coverage.
 
 ### Regenerating the generated API reference
 
-If your change adds or edits an XML doc comment (`///`) on any public member, regenerate `src/docs/**` so the published reference stays in sync - it is not regenerated automatically:
+If your change adds or edits an XML doc comment (`///`) on any public member, regenerate `doc/api/**` so the published reference stays in sync - it is not regenerated automatically:
 
 ```
 dotnet build src/XmlDocMarkdownGenerator

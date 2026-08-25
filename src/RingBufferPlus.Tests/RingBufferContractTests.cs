@@ -3,19 +3,13 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 //
-// Behavioral contract tests for the v4 -> v5 concurrency rewrite (see
-// doc/adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md).
+// Behavioral contract tests for RingBufferManager's Channel-based, single-consumer concurrency
+// model (see doc/adr/ADR001V01-concurrency-model-for-ringbuffermanager-scale-up-and-down.md).
+// This file is the engine's acceptance gate.
 //
-// This suite started as a set of tests describing the INTENDED v5 behavior, with every
-// regression case marked [Fact(Skip = "...")] because it failed against the v4 implementation.
-// The Channel-based, single-consumer engine (ADR001) later replaced RingBufferManager<T>, so
-// every test below is now ported to the v5 API and unskipped - this file is the rewrite's
-// acceptance gate, and it is green.
-//
-// Notably, 1.3 (concurrent SwitchToAsync) is no longer "best-effort": because the new engine is a
-// single sequential consumer, "exactly one accepted caller" is now a deterministic guarantee, not
-// a probabilistic reproduction of a race. That upgrade from probabilistic to deterministic is
-// itself evidence the rewrite fixed the race by construction, per ADR001.
+// Notably, 1.3 (concurrent SwitchToAsync) is not "best-effort": because the engine is a single
+// sequential consumer, "exactly one accepted caller" is a deterministic guarantee, not a
+// probabilistic reproduction of a race.
 
 using System.Diagnostics;
 using System.Reflection;
@@ -146,11 +140,10 @@ namespace RingBufferPlus.Tests
                 return Task.FromResult(1);
             });
 
-            // Act: many concurrent callers. Warmup is a Lazy<Task> now, so idempotency is
-            // guaranteed by construction, not by a hand-rolled flag check - no need to force
-            // the race deterministically anymore, the property holds regardless of scheduling.
-            // Task.Run forces genuine thread-pool parallelism (a bare Task.WhenAll over the
-            // async calls directly could run sequentially on the calling thread otherwise).
+            // Act: many concurrent callers. Warmup uses Lazy<Task>, so idempotency is guaranteed
+            // by construction - it doesn't depend on scheduling or a hand-rolled flag check.
+            // Task.Run forces real thread-pool parallelism; a plain Task.WhenAll over the async
+            // calls directly could otherwise run them sequentially on the calling thread.
             var warmups = Enumerable.Range(0, 20).Select(_ => Task.Run(() => manager.WarmupAsync()));
             await Task.WhenAll(warmups);
 
@@ -218,9 +211,9 @@ namespace RingBufferPlus.Tests
                 .Build();
             await service.WarmupAsync();
 
-            // Act: many concurrent callers racing to request the same scale target. The engine is a
-            // single sequential consumer, so this is now a deterministic guarantee, not a race
-            // reproduction - see the file header note.
+            // Act: many concurrent callers race to request the same scale target. Because the engine
+            // is a single sequential consumer, exactly one caller wins - a deterministic guarantee,
+            // not a race reproduction.
             var results = await Task.WhenAll(Enumerable.Range(0, 20).Select(_ => Task.Run(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)))));
 
             // Assert: exactly one caller wins the race and gets the request accepted.
@@ -266,8 +259,7 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.4b - Disposing while a warmup is still in flight must not leak a faulted,
-        // unawaited background task (advisor review: DisposeAsync used to snapshot which
-        // pumps to await before WarmupCoreAsync had finished assigning them).
+        // unawaited background task.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -306,7 +298,7 @@ namespace RingBufferPlus.Tests
         // ---------------------------------------------------------------------
         // 1.4c - AcquireAsync after disposal must throw a clean ObjectDisposedException,
         // not an accidental one from CancellationTokenSource.CreateLinkedTokenSource
-        // observing an already-disposed _lifetime (advisor review).
+        // observing an already-disposed _lifetime.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -323,8 +315,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.4d - Invalidate() replaces the item via the engine, keeping capacity stable
-        // (advisor review: the ReplaceOne path had zero test coverage).
+        // 1.4d - Invalidate() replaces the item via the engine, keeping capacity stable.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -381,19 +372,15 @@ namespace RingBufferPlus.Tests
             await service.WarmupAsync();
             await service.DisposeAsync();
 
-            // Act & Assert: using the manual-switch mechanism after disposal must throw loudly,
-            // not silently no-op (there is no longer a separate scale queue to leak - the whole
-            // engine loop is gone - but the public contract must still reject post-disposal work).
+            // Act & Assert: calling SwitchToAsync after disposal must throw, not silently no-op.
+            // There's no separate scale queue anymore - the whole engine loop is gone - but the
+            // public contract must still reject work submitted after disposal.
             await Assert.ThrowsAsync<ObjectDisposedException>(() => service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
         }
 
         // ---------------------------------------------------------------------
-        // 1.8 - A factory (or a user item's Dispose) that throws a non-cancellation exception
-        // must not kill the engine loop. Before this fix, every catch from Factory up to the
-        // engine's command loop filtered exclusively on OperationCanceledException, so a plain
-        // exception faulted _engineTask permanently and every public async method (Warmup/
-        // Acquire/Switch/Dispose) could then hang forever - see TODO/relatorio-viabilidade-
-        // ringbufferplus-v5.md, finding F1/R1.
+        // 1.8 - A factory (or a user item's Dispose) that throws a plain exception must not kill
+        // the engine loop or hang later calls to Warmup/Acquire/Switch/Dispose.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -403,8 +390,8 @@ namespace RingBufferPlus.Tests
             // Arrange: every factory call throws a plain (non-cancellation) exception.
             var manager = CreateFixedManager(3, _ => throw new InvalidOperationException("boom"));
 
-            // Act: bound the wait - before the fix, the dead engine never resolved this TCS and
-            // WarmupAsync hung forever.
+            // Act: bound the wait, since a faulted engine leaving this TCS unresolved must not
+            // hang WarmupAsync forever.
             var warmupTask = manager.WarmupAsync();
             var completed = await Task.WhenAny(warmupTask, Task.Delay(TimeSpan.FromSeconds(3)));
 
@@ -432,8 +419,8 @@ namespace RingBufferPlus.Tests
 
             throwing = true;
 
-            // Act: the scale-up's factory calls throw. Before the fix, this faulted the engine
-            // permanently and every call below would then hang instead of completing.
+            // Act: the scale-up's factory calls throw - the engine must survive this, and every
+            // call below must still complete rather than hang.
             var switchTask = service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             var completed = await Task.WhenAny(switchTask, Task.Delay(TimeSpan.FromSeconds(3)));
             Assert.Same(switchTask, completed);
@@ -455,14 +442,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.36-1.38 - R23/R24/R25 (Round 7, Resiliência): a factory can throw
-        // OperationCanceledException/TaskCanceledException for its own unrelated reasons (an
-        // HttpClient/gRPC/DB driver's own internal timeout, nothing to do with this buffer's own
-        // _lifetime) - before these fixes, every catch below misclassified that as an ordinary
-        // shutdown, discarding the real exception. This completes (does not contradict) the
-        // Round 6-confirmed "surface the real factory exception on a zero-progress batch" contract
-        // - it just extends that contract to cover the case where the real exception happens to be
-        // OperationCanceledException-shaped.
+        // 1.36-1.38 - A factory can throw OperationCanceledException/TaskCanceledException for its
+        // own unrelated reasons - e.g. an HttpClient/gRPC/DB driver's own internal timeout, unrelated
+        // to this buffer's _lifetime. That real exception must still surface, not get misread as an
+        // ordinary shutdown. This extends the existing "surface the real factory exception on a
+        // zero-progress batch" rule to this OperationCanceledException-shaped case too.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -513,12 +497,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 8, Resiliência Finding 3: on the unlocked SwitchToAsync path (LockWhenScaling not
-        // set), the caller never awaits completion.Task - `!LockWhenScaling || await
-        // completion.Task...` short-circuits before the right side is ever evaluated. If the engine
-        // loop later resolves that TCS via TrySetException on a genuine scale failure, nothing ever
-        // observes the fault, and it surfaces as a genuinely unobserved task exception once the TCS
-        // is garbage-collected.
+        // On the unlocked SwitchToAsync path (LockWhenScaling not set), the caller never awaits
+        // completion.Task: `!LockWhenScaling || await completion.Task...` short-circuits before the
+        // right side ever runs. If the engine later fails the scale-up and resolves that TCS via
+        // TrySetException, nothing observes the fault. Once the TCS is garbage-collected, that fault
+        // surfaces as an unobserved task exception.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -611,11 +594,10 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task ElasticAutoscale_WhenTriggeredScaleUpFactoryThrows_EngineSurvives_AndAutoscaleRecovers()
         {
-            // Arrange: init capacity 4, min 2 (init != min, to avoid the separate, already-known R4
-            // defect where the scale-up target formula picks a no-op when init == min); the
-            // backlog-reactive signal is unconditionally active for any elastic pool since
-            // ADR001V03/ADR007V03 - no toggle needed (it replaces the old fault-count trigger this
-            // test originally targeted); factory throws only while "throwing" is true.
+            // Arrange: init capacity 4, min 2 (different values, so the scale-up target formula
+            // isn't a no-op). The backlog-reactive signal is always active for elastic pools
+            // (ADR001V03/ADR007V03) - no toggle needed. The factory only throws while "throwing"
+            // is true.
             var throwing = false;
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractFaultTriggeredScaleThrows", null);
             var service = builder
@@ -641,10 +623,8 @@ namespace RingBufferPlus.Tests
             // Give the engine a moment to process the backlog-triggered scale-up (posted fire-and-forget).
             await Task.Delay(300);
 
-            // Assert: capacity did not move (the scale-up's factory call failed), but the engine is
-            // still alive - before the original fix (now applying to the backlog path instead of
-            // the retired fault-count path), this permanently killed the engine and disabled
-            // autoscale.
+            // Assert: capacity did not move (the scale-up's factory call failed), but the engine
+            // must still be alive and autoscale still functional afterward.
             Assert.True(service.IsInitCapacity);
 
             // Recover the factory: autoscale must still work. Backlog-reactive requests exactly
@@ -682,15 +662,9 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.9 - A command whose completion signal races DisposeAsync's cancellation must not hang
-        // forever if cancellation wins. Before this fix, WarmupCoreAsync awaited its engine
-        // TaskCompletionSource with no cancellation token, so when the Warmup command lost that race
-        // (abandoned unread in the channel), nothing could ever unblock it - and DisposeAsync itself
-        // awaits that same signal, so disposal hung too. This is a genuine data race inside
-        // Channel<T> (which of "data arrived" vs "cancellation requested" the channel's pending wait
-        // observes first) - not forceable to a single deterministic outcome from outside the channel,
-        // so this is a bounded stress loop, not a one-shot repro (CLAUDE.md rule 5 step 3; empirically
-        // ~97% hang rate per iteration against the unfixed code during triage). See TODO/relatorio-
-        // viabilidade-ringbufferplus-v5.md, finding F4.
+        // forever if cancellation wins. This is a genuine data race inside Channel<T>, and it can't
+        // be forced to a single deterministic outcome from outside the channel - so this test runs
+        // as a bounded stress loop instead of a one-shot repro.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -716,23 +690,16 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.10 - RingBufferManager.DisposeAsync's own _disposed guard has the same non-atomic
-        // check-then-set shape as RingBufferValue's (finding F2, fixed via the identical
-        // Interlocked.Exchange idiom just above). Two separate attempts to reproduce it as a live
-        // race - the original audit probe (300 concurrent-dispose attempts) and a follow-up with
-        // tightly-synchronized dedicated threads (1000 attempts, ~12 minutes) - both produced zero
-        // hits, so this is fixed on the strength of the proven-necessary pattern rather than a
-        // red/green regression test (CLAUDE.md rule 5 step 3: the mechanism is named, but a test
-        // that costs 12 minutes per run for no observed signal does not earn a place in the suite).
-        // See TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding F10, and TODO/plano-de-
-        // acao.md P0#3 for the full account.
+        // check-then-set race shape as RingBufferValue's - fixed via the identical
+        // Interlocked.Exchange idiom used there.
         // ---------------------------------------------------------------------
 
         // ---------------------------------------------------------------------
         // 1.11 - A HeartBeat callback that blocks past its pulse budget must not stop the heartbeat
-        // pump forever, and the item it was holding must not be lost. Before this fix, the
-        // CancellationToken passed to Task.Run only prevented the delegate from starting - it did
-        // not cancel it once running - so the intended timeout guard was unreachable code. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding F3/R3.
+        // pump forever, and the item it was holding must not be lost. A CancellationToken passed
+        // to Task.Run only prevents the delegate from starting - it does not cancel a delegate once
+        // running, so bounding a blocking callback requires a different mechanism than relying on
+        // that token alone.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -764,9 +731,9 @@ namespace RingBufferPlus.Tests
             {
                 await service.WarmupAsync();
 
-                // With the fix, a second (and third, etc.) pulse must happen within a couple of
-                // pulse budgets even though the first invocation is still blocked. Without the fix,
-                // this never happens - the pump is dead until (if ever) the callback returns.
+                // A second (and subsequent) pulse must happen within a couple of pulse budgets even
+                // though the first invocation is still blocked - the pump must not be blocked by
+                // one hung callback.
                 var deadline = DateTime.UtcNow.AddSeconds(2);
                 while (Volatile.Read(ref invocations) < 2 && DateTime.UtcNow < deadline)
                 {
@@ -793,10 +760,9 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.12 - Disposal must always drain and clean up regardless of how a background pump
-        // ended. Before this fix, Task.WhenAll(pending) only caught OperationCanceledException, so
-        // any other fault (e.g. the ObjectDisposedException race below) escaped DisposeAsync before
-        // draining pooled items and disposing _lifetime/_meter/_activitySource. See TODO/relatorio-
-        // viabilidade-ringbufferplus-v5.md, finding F3/R2.
+        // ended. Any fault from a background pump - not just OperationCanceledException - must
+        // not escape DisposeAsync before draining pooled items and disposing
+        // _lifetime/_meter/_activitySource.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -833,9 +799,8 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.13 - An item returned via TurnbackAsync after the manager is already disposed must be
-        // disposed itself, not silently dropped. Before this fix, the ChannelClosedException handler
-        // had a bare "ignore" comment and never called DisposeItemAsync. See TODO/relatorio-
-        // viabilidade-ringbufferplus-v5.md, finding F5/R12.
+        // disposed itself, not silently dropped - this matters specifically on the
+        // ChannelClosedException path (channel already closed).
         // ---------------------------------------------------------------------
 
         private sealed class DisposableProbe : IDisposable
@@ -858,7 +823,7 @@ namespace RingBufferPlus.Tests
             private volatile bool _throwOnDispose;
             public ThrowingOnDisposeProbe(bool throwOnDispose) => _throwOnDispose = throwOnDispose;
             // Settable post-construction so a test can pick, by identity, which specific acquired
-            // instance throws - v6.0.0's bounded-concurrent Fábrica (ADR001V03) creates a batch's
+            // instance throws - v6.0.0's bounded-concurrent Creator (ADR001V03) creates a batch's
             // items concurrently, so "the Nth factory call" no longer reliably corresponds to "the
             // Nth item that ends up acquired"; tests that need one specific *acquired* item to
             // throw must flip this after acquiring, not bake it into the factory by call order.
@@ -884,8 +849,8 @@ namespace RingBufferPlus.Tests
             }
         }
 
-        // Round 8 (Observabilidade): a plain synchronous IDisposable, unlike HangingDisposeProbe
-        // above - its Dispose() blocks the calling thread directly, with no await point of its own.
+        // A plain synchronous IDisposable, unlike HangingDisposeProbe above - its Dispose() blocks
+        // the calling thread directly, with no await point of its own.
         private sealed class HangingSyncDisposeProbe(ManualResetEventSlim release) : IDisposable
         {
             // Capped at 10s so a broken fix can't actually hang the test process forever - the
@@ -893,10 +858,10 @@ namespace RingBufferPlus.Tests
             public void Dispose() => release.Wait(TimeSpan.FromSeconds(10));
         }
 
-        // Round 8 (Resiliência/F30): hangs past the grace period, then - once released - faults on
-        // its way out. Used to land a background dispose fault (the ContinueWith in
-        // DisposeOneItemDefensivelyAsync's TimeoutException branch) AFTER _logQueue has already
-        // been completed by DisposeAsync's own finally block.
+        // Hangs past the grace period, then - once released - faults on its way out. Used to land
+        // a background dispose fault (the ContinueWith in DisposeOneItemDefensivelyAsync's
+        // TimeoutException branch) AFTER _logQueue has already been completed by DisposeAsync's
+        // own finally block.
         private sealed class HangingThenThrowingDisposeProbe(ManualResetEventSlim release) : IAsyncDisposable
         {
             public async ValueTask DisposeAsync()
@@ -906,10 +871,9 @@ namespace RingBufferPlus.Tests
             }
         }
 
-        // Round 3 (Estabilidade/Resiliência/Observabilidade, v6 pre-release audit, 3/3
-        // independent confirmations): the composite Logger from Microsoft.Extensions.Logging
-        // aggregates and rethrows provider exceptions from IsEnabled itself - a provider disposed
-        // ahead of this manager during host shutdown is a realistic way to hit this.
+        // The composite Logger from Microsoft.Extensions.Logging aggregates and rethrows provider
+        // exceptions from IsEnabled itself - a provider disposed ahead of this manager during host
+        // shutdown is a realistic way to hit this.
         private sealed class ThrowingIsEnabledLogger : ILogger
         {
             public bool IsEnabled(LogLevel logLevel) => throw new ObjectDisposedException("provider");
@@ -942,14 +906,9 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 3 (Estabilidade/Resiliência/Observabilidade, v6 pre-release audit, 3/3
-        // independent confirmations): the Round 2 fix for this exact gap added a SafeIsEnabled
-        // helper but never actually wired it into LogMessage's own guard - the raw, unguarded
-        // Logger.IsEnabled(LogLevel.Debug) call remained, so a throwing IsEnabled still escaped
-        // synchronously through WarmupCoreAsync (LogMessage("Starting warmup process.") is its
-        // first statement) - worse than the two paths (ProcessTick/RunHeartbeatAsync) the original
-        // fix's own comment named, since neither of the previous two rounds' test suites exercised
-        // a throwing IsEnabled at all.
+        // WarmupCoreAsync's very first statement is a LogMessage call ("Starting warmup
+        // process."), so a throwing Logger.IsEnabled must not escape synchronously from there -
+        // unlike ProcessTick/RunHeartbeatAsync, this path has no earlier guard to catch it.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -998,7 +957,7 @@ namespace RingBufferPlus.Tests
             Assert.Equal(2, probe.DisposeCount);
         }
 
-        // Round 4 (Resiliência, v6 pre-release audit): _disposed flips to true synchronously as
+        // _disposed flips to true synchronously as
         // the first step of DisposeAsync, but _lifetime.Dispose() only runs once its finally has
         // awaited in-flight engine/heartbeat/sample-tick work - a caller that already passed
         // AcquireCoreAsync/SwitchToAsync/WarmupCoreAsync's ObjectDisposedException.ThrowIf(_disposed,
@@ -1013,8 +972,8 @@ namespace RingBufferPlus.Tests
         // the same async method and cannot be forced deterministically without instrumenting
         // production code, so a true end-to-end red-then-green against the original bug is not
         // achievable here (a probabilistic stress test racing AcquireAsync against DisposeAsync
-        // was run manually during the audit and did reproduce it, but is too flaky/slow to commit
-        // as a permanent regression test). This test instead pins the fix's actual contract
+        // does reproduce it, but is too flaky/slow to commit as a permanent regression test).
+        // This test instead pins the fix's actual contract
         // deterministically: reflectively invoke the private LifetimeToken() helper the three call
         // sites now route every _lifetime.Token access through, once the manager has already
         // completed a real DisposeAsync() - the exact end-state the race exposes early - and assert
@@ -1036,23 +995,19 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03 pre-work (Round 8 blast-radius sweep, paused finding): unlike its two
-        // siblings (DisposeAsync()'s drain loop, RemoveItemsAsync via DisposeItemsDefensivelyAsync),
-        // TurnbackAsync's Invalidate() branch awaited the old item's Dispose()/DisposeAsync() BEFORE
-        // enqueuing EngineCommand.ReplaceOne() in a `finally`. A Dispose() that hangs forever means
-        // that `finally` never runs (an unfinished await never lets it), so the slot is never
-        // replaced and CurrentCapacity is wrong forever from that point - same bug shape as
-        // F27/F28/F29, a third call site those fixes did not touch.
+        // v6.0.0 / ADR001V03: unlike its two siblings (DisposeAsync()'s drain loop,
+        // RemoveItemsAsync via DisposeItemsDefensivelyAsync), TurnbackAsync's Invalidate() branch
+        // Invalidate() used to await the old item's Dispose()/DisposeAsync() BEFORE enqueuing
+        // EngineCommand.ReplaceOne() in a `finally`. If that Dispose() hangs forever, the `finally`
+        // never runs, so the slot is never replaced and CurrentCapacity stays wrong forever.
         //
         // Fixed by enqueuing the replacement first, unconditionally, before awaiting the old item's
-        // disposal: pool-wide capacity truthfulness must not depend on how long, or whether, that
-        // call ever returns - a caller-owned item type whose Dispose() hangs is that caller's own
-        // problem (their own DisposeAsync() call on the RingBufferValue<T> hangs too), not a reason
-        // for shared pool state to go wrong for everyone else. This is the "prefer truthful state
-        // over another track-and-observe guard" lens adopted in Round 8: the blast radius here is
-        // local (one caller's own call blocks), not global (nothing about the engine loop or a
-        // background pump depends on this call returning), so the fix is a direct reordering, not a
-        // fourth instance of the PulseHeartBeat-bounded defensive-dispose pattern.
+        // disposal. Pool-wide capacity must not depend on how long - or whether - that call ever
+        // returns. A caller-owned item whose Dispose() hangs is that caller's own problem (their own
+        // DisposeAsync() call on the RingBufferValue<T> hangs too); it shouldn't corrupt shared pool
+        // state for everyone else. The blast radius here is local (one caller's own call blocks),
+        // not global, so the fix is a direct reordering rather than another bounded defensive-dispose
+        // wrapper.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1101,13 +1056,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Companion to the test above: the reordered TryWrite(ReplaceOne()) now runs
-        // unconditionally as the first thing in the Invalidate() branch, including after the
-        // manager is already disposed - previously that combination never reached this branch's
-        // channel write at all, so it was untested. TryWrite on an already-completed channel
-        // (Channel<EngineCommand>.Writer.TryComplete(), no exception) returns false rather than
-        // throwing, so this must fall through and dispose the item exactly once, the same as the
-        // pre-existing non-Invalidate case (TurnbackAsync_AfterManagerDisposed_...) above.
+        // Companion to the test above. TryWrite(ReplaceOne()) now runs unconditionally as the first
+        // step of the Invalidate() branch, even after the manager is already disposed. On an
+        // already-completed channel, TryWrite returns false instead of throwing, so this must fall
+        // through and dispose the item exactly once - the same as the non-Invalidate case
+        // (TurnbackAsync_AfterManagerDisposed_...) above.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1145,19 +1098,17 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 1 (Resiliência, v6 pre-release audit): RunHeartbeatAsync's own
-        // `await acquired.DisposeAsync()` (the healthy-verdict-arrived-in-time path, distinct from
-        // the F12/F15 timeout branch below it, which is already bounded via
-        // _pendingHeartbeatDisposals+PulseHeartBeat) is unbounded when the verdict is `false`: it
-        // routes through TurnbackAsync's Invalidate branch, which awaits the old item's own
-        // Dispose()/DisposeAsync() directly. That await hanging blocks _heartbeatTask forever, and
-        // DisposeAsync() awaits _heartbeatTask via Task.WhenAll(pending) BEFORE its own cleanup
-        // (draining _availableItems, disposing _lifetime/_meter/_activitySource) - so the whole
-        // manager's DisposeAsync() never returns, and _disposeGuard (already set) makes a retry a
-        // permanent silent no-op. Unlike the sibling case fixed for TurnbackAsync's general callers
-        // (Invalidate_WhenItemDisposeHangs_StillReplacesTheSlot_WithoutWaitingForIt above, where a
-        // hang is genuinely local to that caller's own DisposeAsync() call), here "the caller" is
-        // the framework's own heartbeat pump - its hang is everyone's problem, not just its own.
+        // RunHeartbeatAsync's own `await acquired.DisposeAsync()` runs on the healthy-verdict path
+        // (separate from the timeout branch below it, which is already bounded). When the verdict is
+        // `false`, that call routes through TurnbackAsync's Invalidate branch, which awaits the old
+        // item's own Dispose()/DisposeAsync() directly - and that await is unbounded. If it hangs, it
+        // blocks _heartbeatTask forever. DisposeAsync() awaits _heartbeatTask before its own cleanup
+        // (draining _availableItems, disposing _lifetime/_meter/_activitySource), so the manager's
+        // DisposeAsync() never returns either, and a retry is a permanent silent no-op.
+        //
+        // The sibling case above (Invalidate_WhenItemDisposeHangs_StillReplacesTheSlot_WithoutWaitingForIt)
+        // is different: there, a hang is local to that one caller's own DisposeAsync() call. Here,
+        // "the caller" is the framework's own heartbeat pump, so its hang becomes everyone's problem.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1190,21 +1141,20 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 2 (Resiliência, v6 pre-release audit): the deferred dispose in the branch fixed
-        // above was, itself, not fault-observed - unlike the sibling F12/F15 branch a few lines
-        // below it (which wraps its own deferred DisposeItemAsync in a ContinueWith that logs a
+        // The deferred dispose in the branch fixed above was not fault-observed. Unlike the sibling
+        // branch nearby (which wraps its deferred DisposeItemAsync in a ContinueWith that logs a
         // fault), the raw disposeTask here was added straight into _pendingHeartbeatDisposals. A
-        // late failure from the item's own Dispose() (after it had already been deferred past one
-        // PulseHeartBeat) reached neither LogError/OnError nor TaskScheduler's unobserved-exception
-        // handling - silently dropped, unlike every other deferred-dispose path in this file.
+        // late failure from the item's own Dispose() - after it had already been deferred past one
+        // PulseHeartBeat - reached neither LogError/OnError nor TaskScheduler's unobserved-exception
+        // handling. It was silently dropped, unlike every other deferred-dispose path in this file.
         // ---------------------------------------------------------------------
 
-        // Per-instance hang flag, deliberately NOT shared via a single ManualResetEventSlim across
-        // every pooled item: the other idle item still in the pool at DisposeAsync() time already
-        // goes through DisposeOneItemDefensivelyAsync, which DOES fault-observe correctly - sharing
-        // one hang/throw trigger across both items would let that already-correct path silently
-        // mask a bug in the path this test targets. Only the specific instance the HeartBeat
-        // callback marks ever hangs or throws; any other instance's DisposeAsync is a no-op.
+        // Per-instance hang flag. It is deliberately NOT one shared ManualResetEventSlim across every
+        // pooled item: the other idle item still in the pool at DisposeAsync() time already goes
+        // through DisposeOneItemDefensivelyAsync, which fault-observes correctly. Sharing one trigger
+        // across both items would let that already-correct path mask a bug in the path this test
+        // targets. Only the specific instance the HeartBeat callback marks ever hangs or throws;
+        // every other instance's DisposeAsync is a no-op.
         private sealed class SelectivelyHangingThenThrowingDisposeProbe : IAsyncDisposable
         {
             private readonly ManualResetEventSlim _release = new();
@@ -1275,8 +1225,7 @@ namespace RingBufferPlus.Tests
         // ---------------------------------------------------------------------
         // 1.14 - The scale-up deadline must scale with the work requested (quantity * FactoryTimeout),
         // not with the sampling cadence (SamplesBase) - and a scale-up that still can't finish in
-        // time must keep whatever capacity it already gained instead of discarding it. See TODO/
-        // relatorio-viabilidade-ringbufferplus-v5.md, finding R5.
+        // time must keep whatever capacity it already gained instead of discarding it.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1350,10 +1299,10 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.15 - Autoscale-on-fault must never be permanently disabled by a legal configuration.
-        // Before this fix, initialCapacity == minCapacity made the scale-up target formula pick a
-        // no-op (target == current) on every single fault, regardless of how many times it fired or
-        // how healthy the factory was. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, finding R4.
+        // 1.15 - Autoscale-on-fault must never be permanently disabled by a legal configuration -
+        // initialCapacity == minCapacity must not make the scale-up target formula pick a no-op
+        // (target == current) regardless of how many times a fault fires or how healthy the
+        // factory is.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1372,11 +1321,10 @@ namespace RingBufferPlus.Tests
             var held2 = await service.AcquireAsync();
 
             // Pool is empty - this caller starts waiting and triggers the backlog-reactive signal
-            // immediately (ADR001V03; replaces the old fault-count trigger the R4 bug originally
-            // guarded against). Whether this specific acquire ends up succeeding or timing out is
-            // not the point - the new target formula (CurrentCapacity + gap, capped at
-            // MaxCapacity) has no comparison against Capacity/MinCapacity at all, so the R4 bug
-            // class cannot recur here, but the broader "init == min must not block scale-up"
+            // immediately (ADR001V03). Whether this specific acquire ends up succeeding or timing
+            // out is not the point - the target formula (CurrentCapacity + gap, capped at
+            // MaxCapacity) has no comparison against Capacity/MinCapacity at all, so that failure
+            // mode cannot recur here, but the broader "init == min must not block scale-up"
             // property is still worth keeping.
             _ = await service.AcquireAsync();
 
@@ -1394,10 +1342,9 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.17 - A failed WarmupAsync() must not permanently brick the instance (ADR011, P2
-        // Decision B). Before this fix, a failed warmup was cached forever by the underlying
-        // Lazy<Task>, and the only way to recover was constructing a brand new instance - a real
-        // problem given every DI guide recommends registering the buffer as a singleton. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, U-22.
+        // Decision B) - caching the failure forever via the underlying Lazy<Task>, with no way to
+        // recover except constructing a brand new instance, would be a real problem given every DI
+        // guide recommends registering the buffer as a singleton.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1459,15 +1406,12 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.18 - A scale-up in progress must not let sample ticks pile up and drain in a burst
-        // right after it finishes (F6, P3). Before this fix, the dead `_scaling` guard in
-        // ProcessTickAsync never actually ran (the engine is a single serial consumer, so by the
-        // time a queued Tick is processed the scale is always already done), while
-        // RunSampleTickAsync kept enqueueing Ticks every cadence regardless - during a slow
-        // scale-up those Ticks pile up in the channel and get drained back-to-back the instant the
-        // engine frees up, producing several near-duplicate samples of the post-scale-up idle
-        // count and triggering an immediate scale-down evaluation instead of a properly
-        // time-spread one. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, F6.
+        // 1.18 - A scale-up in progress must not let sample ticks pile up and drain in a burst right
+        // after it finishes. RunSampleTickAsync keeps enqueueing Ticks on its own cadence regardless
+        // of whether a scale-up is running. During a slow scale-up, those Ticks pile up in the
+        // channel and then drain back-to-back the instant the engine frees up - producing several
+        // near-duplicate samples of the post-scale-up idle count, which would trigger an immediate
+        // scale-down instead of a properly time-spread one.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1489,14 +1433,12 @@ namespace RingBufferPlus.Tests
             }
 
             // Pool is empty (all 3 items in `held`) - 7 concurrent waiters trigger the backlog-
-            // reactive signal (ADR001V03), growing capacity 3 -> 10, possibly via more than one
-            // successive batch (it reacts proportionally to the net gap, not a coarse jump to
-            // MaxCapacity like the old fault-count trigger this test originally used). The Monitor's
-            // own scale-down path (ADR003V03) is unconditionally active for this elastic pool too
-            // (ADR001V03/ADR007V03 - no toggle to enable it). `held` is deliberately
-            // NOT released yet - releasing it before the waiters are served would let some of them
-            // grab those items directly, shrinking the net gap EvaluateBacklogReactive computes and
-            // making capacity land short of MaxCapacity.
+            // reactive signal (ADR001V03), growing capacity 3 -> 10, possibly over more than one
+            // batch (it reacts proportionally to the net gap, not a coarse jump to MaxCapacity). The
+            // Monitor's own scale-down path (ADR003V03) is always active for this elastic pool too
+            // (ADR001V03/ADR007V03) - no toggle needed. `held` is deliberately NOT released yet:
+            // releasing it before the waiters are served would let some of them grab those items
+            // directly, shrinking the net gap and making capacity land short of MaxCapacity.
             var waiterTasks = Enumerable.Range(0, 7).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
             var scaleUpDeadline = DateTime.UtcNow.AddSeconds(5);
@@ -1541,25 +1483,17 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.20 - A scale-down must not block the engine's single-consumer loop waiting for busy
-        // items to be returned (R6, P3): it must only take whatever is already idle right now
-        // (opportunistic, partial-if-needed), the same "keep partial progress" spirit already
-        // applied to scale-up (R5/P1#8), instead of blocking every other command (Fault, another
-        // Switch, ReplaceOne) behind a wait bounded by SamplesBase. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, R6.
+        // 1.20 - A scale-down must not block the engine's single-consumer loop while waiting for
+        // busy items to be returned. It must only take whatever is already idle right now
+        // (opportunistic, partial-if-needed) - the same "keep partial progress" spirit already
+        // applied to scale-up - instead of blocking every other command behind a wait.
         //
-        // Remoção (ADR001V03) update: whether the second Switch below is accepted or rejected is
-        // now a genuine race, not asserted either way - a caller-visible consequence documented on
-        // the Switch case itself. Before Remoção, a scale-down's own removal was a single
-        // synchronous step (dequeue only, R6's own "never wait for busy items" already made it
-        // near-instant for int items specifically), so _scaling reliably cleared before this second
-        // command was even posted. After Remoção, EVERY scale-down (regardless of item type) goes
-        // through the same dispatch-then-confirm-on-completion cycle Fábrica's scale-up already
-        // used - for int items the background batch is still near-instant, but whether it wins the
-        // race against this second command's own processing is exact scheduling, observed to go
-        // either way across repeated full-suite runs. What stays deterministic, and is what this
-        // test actually asserts, is that the engine processes the second command promptly either
-        // way, instead of being stuck behind the first scale-down's wait for busy items.
+        // Removal (ADR001V03) note: whether the second Switch below is accepted or rejected is a
+        // genuine race, not asserted either way. Every scale-down goes through the same
+        // dispatch-then-confirm cycle Creator's scale-up already uses, so whether it beats this
+        // second command depends on exact scheduling. What this test actually asserts, and what
+        // stays deterministic, is that the engine processes the second command promptly either way,
+        // instead of getting stuck behind the first scale-down's wait for busy items.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1603,8 +1537,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 1 (Estabilidade, v6 pre-release audit, confirmed by 2 independent instances):
-        // accepted as known behavior, not fixed - a manual (pinned) scale-down that only partially
+        // Accepted as known behavior, not fixed - a manual (pinned) scale-down that only partially
         // completes has nothing retrying it while the pin suppresses the Monitor. Surfaced via a
         // LogWarning instead of staying silent; the pool itself is never corrupted and self-corrects
         // once the pin expires.
@@ -1649,9 +1582,8 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.21 - The heartbeat pump's own internal AcquireAsync call must not count toward the
-        // autoscale fault budget (R11, P3): it is an internal health check, not consumer demand,
-        // and letting its timeout trigger a scale-up is a self-inflicted false signal. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, R11.
+        // autoscale fault budget: it is an internal health check, not consumer demand, and letting
+        // its timeout trigger a scale-up is a self-inflicted false signal.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1689,12 +1621,10 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.22 - A heartbeat callback that blocks past its pulse budget must not have the pooled
-        // resource disposed out from under it (F12, Rodada 2): the orphaned callback keeps running
-        // on its own thread-pool thread and may still be touching the resource when the timeout
-        // fires. Before this fix, Invalidate() + the enclosing "await using" disposed the resource
-        // synchronously on timeout, while the callback could still be using it - a genuine
-        // use-after-dispose race on the caller's own object (a DB connection, a RabbitMQ channel),
-        // not just internal bookkeeping. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, F12.
+        // resource disposed out from under it. The orphaned callback keeps running on its own
+        // thread-pool thread and may still be touching the resource when the timeout fires -
+        // disposing it right away would be a genuine use-after-dispose race on the caller's own
+        // object (a DB connection, a RabbitMQ channel), not just internal bookkeeping.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1748,13 +1678,11 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.22b - An ordinary DisposeAsync() racing a still-blocked heartbeat callback must not
-        // dispose the resource either (F15, Rodada 3): the F12 fix's guard,
-        // "when (!_lifetime.IsCancellationRequested)", correctly isolates a genuine pulse-budget
-        // timeout, but excludes the case where _lifetime itself is what cancelled the same linked
-        // pulseTimeout - an ordinary shutdown, not a timeout. That case fell through to the
-        // generic catch, which disposed the resource immediately - the exact race F12 had already
-        // fixed for the timeout path, reopened for the shutdown path. See
-        // TODO/relatorio-viabilidade-ringbufferplus-v5.md, F15.
+        // dispose the resource either. The guard "when (!_lifetime.IsCancellationRequested)"
+        // correctly isolates a genuine pulse-budget timeout, but misses the case where _lifetime
+        // itself cancelled the same linked pulseTimeout - an ordinary shutdown, not a timeout. That
+        // case fell through to the generic catch, which disposed the resource immediately: the same
+        // use-after-dispose race already fixed for the timeout path, reopened for the shutdown path.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1801,11 +1729,10 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.29 - With initialCapacity == 2 (the minimum legal value), the R16 fix's own margin
-        // formula collapses to currentCapacity itself, making scale-down from above initial
+        // 1.29 - With initialCapacity == 2 (the minimum legal value), the margin formula must not
+        // collapse to currentCapacity itself, which would make scale-down from above initial
         // capacity mathematically unreachable regardless of position - including exactly at
-        // MaxCapacity, not just off-tier (Rodada 4, R18). Fixed by capping the margin at
-        // currentCapacity - 1. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, R18.
+        // MaxCapacity, not just off-tier. Fixed by capping the margin at currentCapacity - 1.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1828,8 +1755,7 @@ namespace RingBufferPlus.Tests
 
             // Pool is empty - 4 concurrent waiters trigger the backlog-reactive signal
             // (ADR001V03), growing capacity 2 -> 6 (MaxCapacity), possibly via more than one
-            // successive batch. The Monitor's own scale-down path (what R18 is actually about,
-            // originally against the now-retired median algorithm) is unconditionally active for
+            // successive batch. The Monitor's own scale-down path is unconditionally active for
             // this elastic pool - no toggle to enable it (ADR001V03/ADR007V03).
             var waiterTasks = Enumerable.Range(0, 4).Select(_ => service.AcquireAsync().AsTask()).ToArray();
 
@@ -1852,9 +1778,9 @@ namespace RingBufferPlus.Tests
                 }
             }
 
-            // Release everything so the pool becomes fully idle - before the R18 fix, this could
-            // never scale down from here, no matter how idle, because initialCapacity == 2 made
-            // the margin mathematically unreachable even at the exact maximum capacity.
+            // Release everything so the pool becomes fully idle - scale-down from here must be
+            // reachable no matter how idle the pool is, even though initialCapacity == 2 could
+            // otherwise make the margin mathematically unreachable at the exact maximum capacity.
             foreach (var value in held)
             {
                 await value.DisposeAsync();
@@ -1871,20 +1797,16 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.23 - maxConsecutiveFactoryFailures (R14, Rodada 2): default (0) must keep today's
-        // fail-fast behavior (a single item's failure still gives up on the rest of the batch);
-        // opting in to a higher value must let the batch keep trying the remaining not-yet-
-        // attempted items instead. Before this parameter existed, CreateItemsAsync always rethrew
-        // on the very first per-item timeout/exception, with no way to opt into anything else, even
-        // though the overall deadline (quantity * FactoryTimeout) had plenty of room left to try the
-        // rest. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, R14.
+        // 1.23 - maxConsecutiveFactoryFailures: the default (0) must keep fail-fast behavior (a
+        // single item's failure still gives up on the rest of the batch); opting in to a higher
+        // value must let the batch keep trying the remaining not-yet-attempted items instead.
         //
-        // v6.0.0 (ADR001V03) made Fábrica bounded-concurrent (MaxConcurrentFactoryCalls, default 4):
-        // "give up on the remaining not-yet-attempted items" now only bites items that are still
-        // queued behind the concurrency window - anything already launched within it keeps running
-        // regardless. maxConcurrentFactoryCalls: 1 below pins this test back to the original
-        // one-at-a-time shape so it isolates the tolerance behavior from the concurrency behavior;
-        // the sibling test right after this one covers the bounded-concurrency case explicitly.
+        // Creator creates items with bounded concurrency (ADR001V03, MaxConcurrentFactoryCalls,
+        // default 4), so "give up on the remaining items" only stops items still queued behind that
+        // concurrency window - anything already launched keeps running regardless.
+        // maxConcurrentFactoryCalls: 1 below pins this test to the original one-at-a-time shape, so
+        // it isolates the tolerance behavior from the concurrency behavior; the next test covers the
+        // bounded-concurrency case explicitly.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1919,16 +1841,14 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03: the bounded-concurrency counterpart to the test above. With
-        // maxConcurrentFactoryCalls: 2 and 8 items requested, give-up only ever stops a later wave
-        // (still queued behind the concurrency window) from starting - it cannot un-start an
-        // attempt already in flight. This is deliberately a bound, not an exact count: give-up
-        // itself (a shared flag, set by whichever concurrent attempt fails) can race a sibling
-        // attempt's own success and release of its concurrency-window slot, so at most one or two
-        // stragglers beyond the wave that was already running may also start before the flag is
-        // visible to them - the same "simple, not a circuit-breaker" looseness ADR001V03 accepts
-        // for this mechanism under real concurrency. What must hold regardless of that race is the
-        // actual guarantee: nowhere near the full batch of 8 is ever attempted.
+        // ADR001V03: the bounded-concurrency counterpart to the test above. With
+        // maxConcurrentFactoryCalls: 2 and 8 items requested, giving up only stops a later wave
+        // (still queued behind the concurrency window) from starting - it can't un-start an attempt
+        // already in flight. This is a bound, not an exact count: the shared give-up flag can race a
+        // sibling attempt's own success, so one or two stragglers beyond the running wave may still
+        // start before the flag is visible to them (the same deliberately simple, non-circuit-breaker
+        // behavior ADR001V03 accepts). What must hold regardless is the actual guarantee: nowhere
+        // near the full batch of 8 is ever attempted.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -1978,7 +1898,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03: the core Fábrica acceptance criterion - a batch large enough to need
+        // v6.0.0 / ADR001V03: the core Creator acceptance criterion - a batch large enough to need
         // more than maxConcurrentFactoryCalls items actually achieves real concurrent fan-out (not
         // just "doesn't block the whole engine"), and never exceeds the configured bound.
         // ---------------------------------------------------------------------
@@ -2019,12 +1939,12 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03: Fábrica's batch now runs on the thread pool instead of blocking the
-        // engine's single consumer thread (Orquestrador) inline - a second command must be
-        // dequeued and handled immediately, not queued up behind the whole in-flight batch. A
-        // second overlapping scale-up request is still correctly rejected (one batch at a time,
-        // to avoid a MaxCapacity overshoot - see the Switch case's own comment), but the rejection
-        // itself must be prompt, proving the engine loop was free to look at it right away.
+        // ADR001V03: Creator's batch runs on the thread pool instead of blocking the engine's
+        // single consumer thread (Orchestrator) inline, so a second command must be dequeued and
+        // handled immediately, not queued up behind the whole in-flight batch. A second, overlapping
+        // scale-up request is still correctly rejected (only one batch at a time, to avoid a
+        // MaxCapacity overshoot), but that rejection itself must be prompt - proving the engine loop
+        // was free to look at it right away.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2058,7 +1978,7 @@ namespace RingBufferPlus.Tests
             // Act: immediately issue a second Switch request while the first batch is still
             // running in the background. Before this decoupling, the engine's single consumer
             // thread would still be blocked awaiting the first batch inline, so this call would
-            // not even be looked at until the ~2s factory delay elapsed. With Fábrica decoupled,
+            // not even be looked at until the ~2s factory delay elapsed. With Creator decoupled,
             // the engine is free to dequeue and reject it immediately (_scaling is true).
             var sw = Stopwatch.StartNew();
             var secondAccepted = await service.SwitchToAsync(ScaleSwitch.MinCapacity, TimeSpan.FromMinutes(1));
@@ -2072,7 +1992,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03: Fábrica's "simple growing backoff after consecutive [genuine]
+        // v6.0.0 / ADR001V03: Creator's "simple growing backoff after consecutive [genuine]
         // failures" - persisted across separate creation attempts (repeated
         // Invalidate()-triggered replacements here), not scoped to one batch. Exponential,
         // starting at ~100ms, doubling per consecutive genuine failure, reset by any success -
@@ -2170,7 +2090,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // v6.0.0 / ADR001V03 (advisor review): the backoff wait must never be counted against a
+        // v6.0.0 / ADR001V03: the backoff wait must never be counted against a
         // scale-up's own quantity * FactoryTimeout deadline (`overall` in CreateItemsAsync) - an
         // elevated streak's backoff (capped at 5s) could otherwise exceed a short deadline and
         // cancel the attempt before Factory is ever called even once, self-inflicting exactly the
@@ -2270,13 +2190,12 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.24 - A normal DisposeAsync racing an in-progress scale-up or heartbeat-triggered
-        // replacement must not be logged as a factory TimeoutException (R15, Rodada 2): before
-        // this fix, the outer OperationCanceledException catches in CreateItemsAsync and
-        // CreateSingleReplacementAsync did not distinguish "the factory/overall deadline actually
-        // elapsed" from "DisposeAsync cancelled the lifetime token while this was in flight" -
-        // both were logged identically as a timeout, misleading an on-call engineer into thinking
-        // the factory/broker was unhealthy during an ordinary clean shutdown. See TODO/relatorio-
-        // viabilidade-ringbufferplus-v5.md, R15.
+        // replacement must not be logged as a factory TimeoutException: the outer
+        // OperationCanceledException catches in CreateItemsAsync and CreateSingleReplacementAsync
+        // must distinguish "the factory/overall deadline actually elapsed" from "DisposeAsync
+        // cancelled the lifetime token while this was in flight" - conflating the two as an
+        // identical timeout would mislead an on-call engineer into thinking the factory/broker was
+        // unhealthy during an ordinary clean shutdown.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2343,12 +2262,12 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.25 - An ordinary DisposeAsync() racing an in-progress WarmupAsync() must not be logged
-        // as "RingBuffer did not reach initial capacity" (Finding A, Rodada 3 - Resiliência): the
-        // warmup completion wait is bounded by _lifetime.Token so a concurrent dispose does not
-        // hang it forever, but the catch that observes that cancellation treated it identically to
-        // a genuine factory failure to reach capacity, logging it as an ERROR during an ordinary
-        // clean shutdown. Same bug class as R15, in a code path R15 did not touch. See TODO/
-        // relatorio-viabilidade-ringbufferplus-v5.md, Finding A (Resiliência, Rodada 3).
+        // as "RingBuffer did not reach initial capacity": the warmup completion wait is bounded by
+        // _lifetime.Token so a concurrent dispose does not hang it forever, but the catch that
+        // observes that cancellation must not treat it identically to a genuine factory failure to
+        // reach capacity - logging it as an ERROR during an ordinary clean shutdown would be
+        // misleading, the same class of gap as the scale-up/replacement case above, in a different
+        // code path.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2438,7 +2357,7 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // Monitor (ADR001V03/ADR003V03): same reachability-cap bug class as the old median
-        // algorithm's R18/R19 (Rodada 4), reproduced in a new shape. MonitorDeadband defaults to 3;
+        // algorithm had, reproduced in a new shape. MonitorDeadband defaults to 3;
         // a buffer whose Capacity-to-MinCapacity span is smaller than that (here, 4 to 2 - span 2)
         // would otherwise never be able to scale down to its own floor via the Monitor, however
         // idle it becomes, because |target(2) - CurrentCapacity(4)| = 2 < deadband(3) blocks it
@@ -2473,8 +2392,8 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 1 (Observabilidade, v6 pre-release audit): ProcessTick had no logging of its own -
-        // a tick that decided NOT to scale (target already equals CurrentCapacity, or the change is
+        // ProcessTick's decision to NOT scale
+        // (target already equals CurrentCapacity, or the change is
         // within MonitorDeadband) left no trace anywhere. This buffer stays fully idle at its own
         // MinCapacity/target the whole time, so the Monitor's target should converge to (and stay
         // at) CurrentCapacity almost immediately, making the "no scale" tick log reliably reachable.
@@ -2512,13 +2431,9 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.26 - A fault-triggered scale-up that only partially succeeds (R14's tolerated
-        // failures) can land off-tier, strictly between Capacity and MaxCapacity. Idleness there
-        // must still eventually trigger a scale-down (R16, Rodada 3) instead of getting stuck at
-        // that off-tier capacity forever: AutoScaleDecision.EvaluateScaleDown originally only ever
-        // evaluated at the exact initial or maximum capacity, using a safety margin computed once
-        // from Min/Init/MaxCapacity - unreachable from most off-tier positions. See TODO/
-        // relatorio-viabilidade-ringbufferplus-v5.md, R16.
+        // 1.26 - A fault-triggered scale-up that only partially succeeds (tolerated failures) can
+        // land off-tier, strictly between Capacity and MaxCapacity. Idleness there must still
+        // eventually trigger a scale-down, not get stuck at that off-tier capacity forever.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2526,19 +2441,15 @@ namespace RingBufferPlus.Tests
         public async Task ElasticAutoscale_PartialScaleUpLandsOffTier_StillEventuallyScalesDown()
         {
             // Backlog-reactive (ADR001V03) is self-driving: an unserved waiting caller keeps
-            // re-triggering EvaluateBacklogReactive (via the FactoryBatchCompleted follow-up call)
-            // until it is either served or times out - it does not "give up partway" the way a
-            // single fixed-quantity SwitchToAsync/fault-triggered batch used to. A batch composed
-            // to fail on exactly half its attempts (the old design) therefore does not reliably
-            // land at a fixed off-tier capacity anymore. Nor is the landing value fully
-            // deterministic even with a bounded number of waiters: _waitingCount is decremented in
-            // a served caller's own continuation (AcquireCoreAsync's finally block), which can run
-            // slightly after a follow-up evaluation already re-reads it as "still waiting",
-            // occasionally dispatching one extra small batch before the count catches up (see
-            // EvaluateBacklogReactive's own remarks - a known, accepted approximation, never risks
-            // exceeding MaxCapacity). MaxCapacity is set generously far from Capacity here so this
-            // still reliably lands off-tier (strictly below MaxCapacity) rather than asserting an
-            // exact value.
+            // re-triggering EvaluateBacklogReactive until it is either served or times out - it
+            // never "gives up partway" the way a single fixed-quantity batch can. So the landing
+            // capacity here isn't fully deterministic even with a bounded number of waiters:
+            // _waitingCount can be re-read as "still waiting" slightly after a served caller's own
+            // continuation decrements it, occasionally dispatching one extra small batch (a known,
+            // accepted approximation that never risks exceeding MaxCapacity - see
+            // EvaluateBacklogReactive's own remarks). MaxCapacity is set generously far from
+            // Capacity here so this test still reliably lands off-tier (strictly below MaxCapacity)
+            // instead of asserting an exact value.
             var callCount = 0;
             IRingBufferBuilder<int> builder = new RingBufferBuilder<int>("ContractOffTierScaleDown", null);
             var service = builder
@@ -2622,18 +2533,16 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.27 - A heartbeat tick's own internal acquire can race DisposeAsync() in a narrow window
-        // where _disposed is already true but _lifetime.Token has not yet observed cancellation
-        // (Rodada 4, Estabilidade): AcquireCoreAsync's ObjectDisposedException.ThrowIf(_disposed,
-        // this) throws in that window, and RunHeartbeatAsync's outer catch only caught
-        // OperationCanceledException - the ObjectDisposedException propagated out, faulted
-        // _heartbeatTask, and DisposeAsync's own Task.WhenAll(pending) generic catch logged it as
-        // an unexpected error, indistinguishable from a genuine fault. Same bug class as
-        // R15/F15/R17 (an ordinary shutdown miscategorized as a failure), in a location none of
-        // those fixes touched. This is a narrow, timing-dependent race, not deterministically
-        // reproducible on demand - reproduced probabilistically over many iterations with a very
-        // small PulseHeartBeat to maximize the hit rate, per the red/green protocol's guidance for
-        // races too narrow to hit reliably a single time.
+        // 1.27 - A heartbeat tick's own internal acquire can race DisposeAsync() in a narrow window:
+        // _disposed is already true, but _lifetime.Token has not yet observed cancellation.
+        // AcquireCoreAsync's ObjectDisposedException.ThrowIf(_disposed, this) throws in that window,
+        // and RunHeartbeatAsync's outer catch only caught OperationCanceledException - so the
+        // ObjectDisposedException propagated out, faulted _heartbeatTask, and got logged as an
+        // unexpected error, indistinguishable from a genuine fault. Same bug class as elsewhere in
+        // this file: an ordinary shutdown miscategorized as a failure, just in a different location.
+        // This race is narrow and timing-dependent, not reproducible on demand, so this test
+        // reproduces it probabilistically over many iterations with a very small PulseHeartBeat to
+        // maximize the hit rate.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2664,13 +2573,13 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.27b - A residual instance of the same shutdown-vs-failure ambiguity found while
-        // verifying the fix above (Rodada 4, Estabilidade): if a fast heartbeat callback finishes
-        // at nearly the same instant an ordinary DisposeAsync() cancels _lifetime, the F12/F15
-        // catch's own guard ("!heartbeatWork.IsCompleted") can evaluate false even though this was
-        // just an ordinary shutdown - the exception then fell through to the generic catch, which
-        // logged the resulting OperationCanceledException/TaskCanceledException as an
-        // unconditional error. Disposing the resource in that fallthrough was still safe (the
-        // callback had genuinely already finished) - only the log level was wrong.
+        // verifying the fix above: if a fast heartbeat callback finishes at nearly the same instant
+        // an ordinary DisposeAsync() cancels _lifetime, the completion-check guard
+        // ("!heartbeatWork.IsCompleted") can evaluate false even though this was just an ordinary
+        // shutdown. The exception then fell through to the generic catch, which logged the
+        // resulting OperationCanceledException/TaskCanceledException as an unconditional error.
+        // Disposing the resource in that fallthrough was still safe - the callback had genuinely
+        // already finished - only the log level was wrong.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2701,11 +2610,10 @@ namespace RingBufferPlus.Tests
 
         // ---------------------------------------------------------------------
         // 1.28 - DisposeAsync() must actually wait (bounded by PulseHeartBeat) for an orphaned
-        // heartbeat callback's deferred dispose (F12/F15) to finish, not merely schedule it and
-        // return (Rodada 4, Estabilidade): the deferred continuation was fire-and-forget, so
-        // DisposeAsync's own Task.WhenAll(pending) never included it - the pooled resource could
-        // still be undisposed by the time DisposeAsync() returned, a real leak if the host process
-        // exits shortly after. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, Rodada 4.
+        // heartbeat callback's deferred dispose to finish, not merely schedule it and return: the
+        // deferred continuation must not be fire-and-forget, left out of DisposeAsync's own
+        // Task.WhenAll(pending) - the pooled resource could otherwise still be undisposed by the
+        // time DisposeAsync() returned, a real leak if the host process exits shortly after.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2735,7 +2643,7 @@ namespace RingBufferPlus.Tests
 
             Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
             // Let the 500ms pulse timeout actually fire while the callback is still blocked, so
-            // the F12/F15 deferred-dispose continuation gets enqueued.
+            // the deferred-dispose continuation gets enqueued.
             await Task.Delay(700);
 
             // Release the callback shortly after DisposeAsync() starts waiting - well within the
@@ -2753,16 +2661,15 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.29 - DisposeAsync()'s idle-item drain loop (Rodada 5, Estabilidade, Finding A) was not
-        // actually unconditional, despite its own comment claiming so: a raw loop calling
-        // DisposeItemAsync directly for each idle item aborted on the first one whose Dispose()
-        // threw, leaking every remaining item plus _lifetime/_meter/_activitySource - permanently,
-        // since _disposeGuard makes a second DisposeAsync() call a silent no-op. Same failure mode
-        // R2 already fixed once, for the warmup-exception trigger; this is the same defect via a
-        // different trigger (an item's own Dispose() failing instead). Fixed by routing through
-        // the existing DisposeItemsDefensivelyAsync helper (already used by RemoveItemsAsync),
-        // which disposes every item regardless of any individual failure and logs instead of
-        // propagating. See TODO/relatorio-viabilidade-ringbufferplus-v5.md, Rodada 5.
+        // 1.29 - DisposeAsync()'s idle-item drain must actually be unconditional: a raw loop
+        // calling DisposeItemAsync directly for each idle item must not abort on the first one
+        // whose Dispose() throws, leaking every remaining item plus _lifetime/_meter/
+        // _activitySource permanently (since _disposeGuard makes a second DisposeAsync() call a
+        // silent no-op) - the same failure mode already fixed once for the warmup-exception
+        // trigger, here via a different trigger (an item's own Dispose() failing instead). Fixed
+        // by routing through the existing DisposeItemsDefensivelyAsync helper (already used by
+        // RemoveItemsAsync), which disposes every item regardless of any individual failure and
+        // logs instead of propagating.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2797,7 +2704,7 @@ namespace RingBufferPlus.Tests
         // 1.30 - DisposeAsync's grace-period-timeout warning (an orphaned heartbeat callback's
         // deferred disposal did not finish within PulseHeartBeat) must actually reach the
         // configured Logger. Originally written against BackgroundLogger(true)'s own queue-
-        // completion-ordering bug (Rodada 5, Estabilidade, Finding B, since fixed); that queue no
+        // completion-ordering bug; that queue no
         // longer exists (ADR007V03 removed BackgroundLogger entirely - logging is always
         // synchronous now), so this is a plain regression test for the message itself.
         // ---------------------------------------------------------------------
@@ -2828,7 +2735,7 @@ namespace RingBufferPlus.Tests
 
             Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
             // Let the 300ms pulse timeout fire while the callback is still blocked, enqueueing the
-            // F12/F15 deferred-dispose continuation.
+            // deferred-dispose continuation.
             await Task.Delay(500);
 
             await service.DisposeAsync();
@@ -2837,13 +2744,13 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.31 - _pendingHeartbeatDisposals (F12/F15's deferred-dispose bag) was only ever
-        // pruned by DisposeAsync itself, at the very end of the buffer's life - a HeartBeat
-        // callback that chronically overran its own pulse budget added one entry per timed-out
+        // 1.31 - _pendingHeartbeatDisposals (the deferred-dispose bag) must not only be pruned by
+        // DisposeAsync itself, at the very end of the buffer's life - a HeartBeat callback that
+        // chronically overran its own pulse budget would otherwise add one entry per timed-out
         // pulse for as long as the buffer stayed alive, even though almost every one of those
         // entries had already completed by the time the next pulse timed out. Unbounded growth
-        // for the buffer's entire runtime, not a correctness bug (Round 5, Estabilidade). Fixed
-        // by pruning already-completed entries out of the bag every time a new one is added.
+        // for the buffer's entire runtime, not a correctness bug. Fixed by pruning
+        // already-completed entries out of the bag every time a new one is added.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2890,15 +2797,12 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.32 - F23 (Rodada 6, achado independentemente por Estabilidade e Observabilidade): no
-        // call to a user-supplied Logger/ErrorHandler was guarded against that callback itself
-        // throwing. On the heartbeat-timeout path, that meant a throwing OnError, invoked from
-        // LogError right before the ReplaceOne command is enqueued, aborted the whole catch block
-        // before ReplaceOne ever ran - permanently losing one pool slot (the stuck item is never
-        // replaced) and faulting _heartbeatTask. DisposeAsync()'s own Task.WhenAll(pending) then
-        // observes that fault, calls LogError(ex) to report it, which invokes the same throwing
-        // OnError again - this time with nothing catching it, making DisposeAsync() itself throw,
-        // directly contradicting its own "must never throw" design comment.
+        // 1.32 - No call to a user-supplied Logger/ErrorHandler was guarded against that callback
+        // itself throwing. On the heartbeat-timeout path, a throwing OnError - invoked from LogError
+        // right before the ReplaceOne command is enqueued - aborted the whole catch block before
+        // ReplaceOne ever ran. That permanently lost one pool slot and faulted _heartbeatTask.
+        // DisposeAsync() then observed that fault, called LogError(ex) to report it, which invoked
+        // the same throwing OnError again - this time uncaught, making DisposeAsync() itself throw.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -2924,7 +2828,7 @@ namespace RingBufferPlus.Tests
 
             Assert.True(callbackStarted.Wait(TimeSpan.FromSeconds(2)), "Expected the heartbeat callback to start.");
             // Let the 200ms pulse timeout fire while the callback is still blocked - this is what
-            // triggers the throwing OnError call inside RunHeartbeatAsync's F12/F15 catch.
+            // triggers the throwing OnError call inside RunHeartbeatAsync's timeout catch.
             await Task.Delay(500);
 
             // The stuck slot must still get replaced despite OnError throwing - both items must be
@@ -2941,7 +2845,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.33 - F23: each SafeInvokeSink call is independent, but this proves it end-to-end -
+        // 1.33 - Each SafeInvokeSink call is independent, but this proves it end-to-end -
         // a throwing OnError on one heartbeat-triggered invocation must not prevent later,
         // separate invocations of the same handler from still firing normally. Originally written
         // against BackgroundLogger(true)'s own dispatch loop, which a throwing OnError could fault
@@ -2985,7 +2889,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 8 (F30): a LogError call from a hung item's background dispose (Round 8 fix above)
+        // A LogError call from a hung item's background dispose
         // faulting strictly after DisposeAsync() has already returned must still reach OnError, not
         // be silently dropped. Originally about BackgroundLogger(true)'s own queue-completion
         // timing (that queue no longer exists, ADR007V03) - logging is unconditionally synchronous
@@ -3033,11 +2937,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 1 (Observabilidade, v6 pre-release audit): the plain-text scale log messages
-        // ("Starting ScaleUp N."/"End ScaleUp.") never interpolated scaleTrigger, even though it
-        // was already in scope - a consumer using only ILogger (no Meter/Activity listener) could
-        // not tell a manual switch apart from a floor-guard/backlog-reactive/Monitor-driven scale
-        // from the log stream alone.
+        // The plain-text scale log messages
+        // ("Starting ScaleUp N."/"End ScaleUp.") must interpolate scaleTrigger, even though it is
+        // already in scope - without it, a consumer using only ILogger (no Meter/Activity
+        // listener) could not tell a manual switch apart from a
+        // floor-guard/backlog-reactive/Monitor-driven scale from the log stream alone.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3066,14 +2970,14 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.34 - Sweep for unguarded external-callback invocations (Round 7): TurnbackAsync's
+        // 1.34 - Sweep for unguarded external-callback invocations: TurnbackAsync's
         // Invalidate() branch called DisposeItemAsync(value.Current) then
         // _commands.Writer.TryWrite(EngineCommand.ReplaceOne()) with no guard around the dispose
         // call - a user item type throwing from Dispose()/DisposeAsync() there skipped the
         // ReplaceOne enqueue entirely, permanently losing that pool slot. Same shape of bug as
-        // F19/F23: a later necessary step skipped because an earlier one, calling into
-        // external/user code, threw uncaught. The exception itself is expected to still
-        // propagate to the caller unchanged (no public contract change, unlike F19/F23 - this
+        // elsewhere in this sweep: a later necessary step skipped because an earlier one, calling
+        // into external/user code, threw uncaught. The exception itself is expected to still
+        // propagate to the caller unchanged (no public contract change - this
         // one is fixed with a `finally`, not a swallow) - only the replacement bookkeeping must
         // not depend on that call succeeding.
         // ---------------------------------------------------------------------
@@ -3082,7 +2986,7 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task Invalidate_WhenItemsDisposeThrows_StillQueuesAReplacement()
         {
-            // v6.0.0's bounded-concurrent Fábrica (ADR001V03) creates warmup's 2 items concurrently
+            // v6.0.0's bounded-concurrent Creator (ADR001V03) creates warmup's 2 items concurrently
             // by default, so which physical factory call becomes "the one that gets acquired first"
             // is no longer deterministic - throwing-on-dispose is picked by identity, on the actual
             // acquired instance, instead of baked into the factory by call order.
@@ -3112,11 +3016,11 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.35 - Same unguarded-callback sweep (Round 7), same class of bug as F23, but in
+        // 1.35 - Same unguarded-callback sweep, same class of bug as elsewhere in it, but in
         // RingBufferBuilder<T> instead of RingBufferManager<T>: ValidateBuild's own LogError(err)
         // calls invoked a throwing OnError with no guard, so the ErrorHandler's own bug replaced
-        // the real validation failure Build() was about to throw. Lower severity than F23/F24 -
-        // no running instance/pool state exists yet at this point - but same fix pattern.
+        // the real validation failure Build() was about to throw. Lower severity - no running
+        // instance/pool state exists yet at this point - but same fix pattern.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3134,14 +3038,14 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.39-1.40 - N1/N2 (Round 7, Estabilidade): a pooled item's own Dispose()/DisposeAsync()
-        // had no bound anywhere - unlike Factory (FactoryTimeout) and the heartbeat callback
-        // (PulseHeartBeat, F16). N1: a hang in DisposeAsync()'s own idle-item drain loop just
-        // delayed/blocked shutdown itself. N2, far worse: RemoveItemsAsync runs on the single-
-        // consumer engine's own thread during a scale-down, so a hang there stalled every other
-        // command forever, including the wait DisposeAsync() itself has on _engineTask. Both fixed
-        // by bounding each item's dispose wait to PulseHeartBeat (same grace-period precedent F16
-        // already established) inside the shared DisposeItemsDefensivelyAsync helper.
+        // 1.39-1.40 - A pooled item's own Dispose()/DisposeAsync() had no bound anywhere - unlike
+        // Factory (FactoryTimeout) and the heartbeat callback (PulseHeartBeat). First gap: a hang
+        // in DisposeAsync()'s own idle-item drain loop just delayed/blocked shutdown itself.
+        // Second, far worse: RemoveItemsAsync runs on the single-consumer engine's own thread
+        // during a scale-down, so a hang there stalled every other command forever, including the
+        // wait DisposeAsync() itself has on _engineTask. Both fixed by bounding each item's dispose
+        // wait to PulseHeartBeat (the same grace-period precedent already established for the
+        // heartbeat callback) inside the shared DisposeItemsDefensivelyAsync helper.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3199,9 +3103,9 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Remoção (ADR001V03): the test above proves the engine survives a hung scale-down disposal
+        // Removal (ADR001V03): the test above proves the engine survives a hung scale-down disposal
         // within DisposeAsync()'s own drain (already true before this role existed, thanks to the
-        // pre-existing PulseHeartBeat grace-period bound, N1/N2). What it does NOT prove is that the
+        // pre-existing PulseHeartBeat grace-period bound). What it does NOT prove is that the
         // engine stays FREE while that grace period is still being waited out - a scale-down's
         // disposal ran INLINE on the engine's own single-consumer thread before this role isolated
         // it, so an entirely unrelated command (ReplaceOne, gated by nothing scale-related) queued
@@ -3264,7 +3168,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 8, Estabilidade F29 + Observabilidade: DisposeItemsDefensivelyAsync's grace period
+        // DisposeItemsDefensivelyAsync's grace period
         // (PulseHeartBeat) only ever bounded IAsyncDisposable.DisposeAsync() - a plain synchronous
         // IDisposable.Dispose() blocks the calling thread before WaitAsync gets a chance to apply
         // any bound at all. HangingDisposeProbe above is IAsyncDisposable and already dispatches to
@@ -3295,8 +3199,9 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 8, Estabilidade F29: the batch of idle items was disposed sequentially - N hung
-        // items cost N x PulseHeartBeat in total, not one bounded wait for the whole batch.
+        // The batch of idle items must not be disposed sequentially - N hung
+        // items would otherwise cost N x PulseHeartBeat in total, instead of one bounded wait for
+        // the whole batch.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3326,13 +3231,12 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.41 - Round 8, Resiliência: Invalidate() (and the heartbeat's stuck-item path) disposes
+        // 1.41 - Invalidate() (and the heartbeat's stuck-item path) disposes
         // the old item BEFORE enqueuing ReplaceOne, so by the time CreateSingleReplacementAsync
         // runs, one real item is already gone from the pool. When its Factory call then fails, the
-        // method only logged - _currentCapacity was never touched - so CurrentCapacity reported the
-        // old, too-high number forever, with no retry and no correction. This is the same class of
-        // bug as Round 1's R1 ("perda silenciosa de capacidade via Invalidate()"), which was marked
-        // closed at the time but was never actually fixed for this code path.
+        // method must not only log - _currentCapacity must reflect the loss too, or
+        // CurrentCapacity would report the old, too-high number forever, with no retry and no
+        // correction.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3381,7 +3285,7 @@ namespace RingBufferPlus.Tests
                 await Task.Delay(20);
             }
             Assert.Equal(1, service.CurrentCapacity);
-            // The floor guard (ADR001V03, added after this test) does retry this in the background
+            // The floor guard (ADR001V03) does retry this in the background
             // once CurrentCapacity(1) < MinCapacity(2) - but replacementShouldThrow never flips
             // back to false in this test, so every retry keeps failing and capacity never recovers.
             // See Invalidate_WhenTheReplacementFactoryFailsThenRecovers_FloorGuardRestoresMinCapacity
@@ -3393,7 +3297,7 @@ namespace RingBufferPlus.Tests
         // ---------------------------------------------------------------------
         // 1.41b - Floor guard (ADR001V03): the gap the test above documents (a failed replacement
         // shrinks CurrentCapacity below MinCapacity with nothing that retries it) is now closed -
-        // the Orquestrador keeps retrying, at the pace of Fábrica's own existing consecutive-failure
+        // the Orchestrator keeps retrying, at the pace of Creator's own existing consecutive-failure
         // backoff, until the floor is restored or the buffer is disposed. This is the
         // highest-priority signal of all (floor guard > backlog-reactive > manual pin > Monitor).
         // ---------------------------------------------------------------------
@@ -3504,7 +3408,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 10, Observabilidade: EvaluateFloorGuard's LogError had no latch tied to the grace
+        // EvaluateFloorGuard's LogError had no latch tied to the grace
         // window - each call that found the window already elapsed logged again, so a persistently
         // broken factory reports forever (throttled only by the shared factory-retry backoff, not
         // by the guard itself). Decided with the maintainer: log once when the grace window first
@@ -3551,17 +3455,13 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.42-1.43 - Round 8, Resiliência Achado 1: CreateItemsAsync passed Factory the batch-level
-        // token (overall.Token) and CreateSingleReplacementAsync passed it the full-lifetime token
-        // (_lifetime.Token) - neither is the token that actually fires at the per-item FactoryTimeout
-        // deadline (factoryTimeout.Token, itself linked from the other so it fires on every condition
-        // the old token did, plus the per-item deadline). A cooperative factory that honors
-        // CancellationToken was therefore never actually told to stop once .WaitAsync(factoryTimeout.Token)
-        // gave up waiting on it - it kept running, orphaned, and any eventual successful result was
-        // silently dropped without disposal. Passing factoryTimeout.Token instead costs nothing and lets
-        // a well-behaved factory actually stop. A factory that ignores cancellation entirely is
-        // unaffected by this fix and remains a documented caller responsibility - see the XML doc on
-        // Factory's `value` parameter.
+        // 1.42-1.43 - Factory used to receive a token that never actually fires at the per-item
+        // FactoryTimeout deadline. So a cooperative factory that honors CancellationToken was never
+        // actually told to stop once the library gave up waiting on it - it kept running, orphaned,
+        // and any eventual successful result was silently dropped without disposal. Passing the
+        // per-item deadline's own token instead costs nothing and lets a well-behaved factory
+        // actually stop. A factory that ignores cancellation entirely is unaffected by this fix and
+        // remains a documented caller responsibility.
         // ---------------------------------------------------------------------
 
         [Fact]
@@ -3671,8 +3571,7 @@ namespace RingBufferPlus.Tests
             // All 10 items sit idle with nothing ever acquiring them - with a 100ms tick interval
             // (300ms baseTimer / 3 samples), the Monitor's own near-zero demand window would
             // already have dispatched a scale-down toward MinCapacity well within this delay if
-            // the pin above were not suppressing it (see the sibling _AfterPinExpires_ test, which
-            // proves this same setup does scale down once the pin is gone).
+            // the pin above were not suppressing it.
             await Task.Delay(500);
             Assert.Equal(10, service.CurrentCapacity);
 
@@ -3893,7 +3792,7 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // 1.42 - Round 7, Observabilidade: a comment above the backlog-reactive signal in
+        // 1.42 - A comment above the backlog-reactive signal in
         // AcquireCoreAsync claimed the heartbeat's own internal acquire "must not count" toward
         // it, but only the EngineCommand.Backlog() dispatch was actually gated by
         // countsTowardFaultBudget - Interlocked.Increment(ref _waitingCount) itself ran
@@ -3928,31 +3827,24 @@ namespace RingBufferPlus.Tests
         }
 
         // ---------------------------------------------------------------------
-        // Round 8, Observabilidade: investigated and REFUTED a suspected logging gap - kept as a
-        // permanent regression guard, not because a bug was found.
+        // Investigated and REFUTED a suspected logging gap - kept as a permanent regression guard,
+        // not because a bug was found.
         //
         // The suspicion: a manual SwitchToAsync with LockWhenScaling=false never awaits
-        // completion.Task, and ProcessCommandAsync's FactoryBatchCompleted case always has a
-        // non-null cmd.Completion for a Switch-triggered scale (regardless of LockWhenScaling),
-        // so it resolves via TrySetException instead of the "nobody is waiting, LogError it"
-        // branch that floor/backlog/auto-triggered scales fall into. The unlocked path's own
-        // ContinueWith (added only to avoid an unobserved task exception) observes the fault but
-        // does not itself call LogError - reading only that path in isolation suggested
-        // usage-observability.md's documented promise ("any other genuine factory failure...
-        // LogError with that real exception as-is") silently did not hold for this combination.
+        // completion.Task, so a failure resolves via TrySetException instead of the "nobody is
+        // waiting, LogError it" branch that floor/backlog/auto-triggered scales use. The unlocked
+        // path's own fault-observing continuation doesn't call LogError itself, so reading only
+        // that path suggested the documented promise ("any genuine factory failure gets LogError'd
+        // with the real exception") silently didn't hold here.
         //
-        // What was missed reading only that path: CreateItemsAsync's own per-attempt catch
-        // (RingBufferManager.cs, AttemptAsync's `catch (Exception ex) when
-        // (!overall.IsCancellationRequested)`) already calls LogError(ex) for every individual
-        // failed attempt, unconditionally - before the batch-level aggregation (giveUp,
-        // lastFailure, the eventual cmd.Failure) even happens, and regardless of which signal
-        // triggered the scale-up or whether anyone is waiting on its completion. A first empirical
-        // probe of this test seemed to confirm the suspicion (only 1 logged error, not the 4
-        // expected from MaxConcurrentFactoryCalls=4 concurrent attempts) - but that was an
-        // artifact of the probe's own factory throwing synchronously, which let the first
-        // concurrent attempt run to completion (and set giveUp) before the other three ever
-        // reached their own call to Factory at all. A genuinely async factory (below) reproduces
-        // all 4 real attempts, and all 4 are independently logged.
+        // What that reading missed: CreateItemsAsync's own per-attempt catch already calls
+        // LogError(ex) for every individual failed attempt, unconditionally - before any
+        // batch-level aggregation happens, and regardless of which signal triggered the scale-up or
+        // who's waiting on it. An early probe seemed to confirm the suspicion (1 logged error
+        // instead of the 4 expected from 4 concurrent attempts), but that was an artifact of the
+        // probe's factory throwing synchronously - letting the first attempt finish and set giveUp
+        // before the other three ever called Factory. A genuinely async factory (below) reproduces
+        // all 4 real attempts, each independently logged.
         // ---------------------------------------------------------------------
 
         [Fact]

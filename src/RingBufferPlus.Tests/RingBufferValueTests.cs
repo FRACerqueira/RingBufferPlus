@@ -74,12 +74,11 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void DisposeAsync_ConcurrentCalls_NeverInvokeTurnbackMoreThanOnce()
         {
-            // The _disposed guard is a plain, non-atomic bool - a concurrent double-dispose can let
-            // both callers pass the check before either sets the flag, invoking turnback (and thus
-            // returning the same pooled instance) twice. Racing a single pair rarely lands the
-            // interleaving, so this repeats the race many times (matching the ~3.8% hit rate measured
-            // during triage) rather than relying on one attempt - see TODO/relatorio-viabilidade-
-            // ringbufferplus-v5.md, finding F2.
+            // The _disposed guard is a plain, non-atomic bool. A concurrent double-dispose can let
+            // both callers pass the check before either sets the flag, invoking turnback twice and
+            // returning the same pooled instance twice. A single race rarely hits that
+            // interleaving (measured at about 3.8%), so this repeats it many times instead of
+            // relying on one attempt.
             const int attempts = 5000;
             var duplicateCount = 0;
 

@@ -10,17 +10,15 @@ using RingBufferPlus.Core;
 
 namespace RingBufferPlus.Tests
 {
-    // ADR008: Meter/ActivitySource are per-RingBufferManager<T> instance, all sharing the
-    // constant Name "RingBufferPlus". Every buffer under test gets a unique Name (buffer.name
-    // tag), and every assertion filters on it - this suite runs alongside every other test class
-    // in the assembly, whose own RingBufferManager<int> instances share the same Meter/ActivitySource
-    // Name and would otherwise contaminate a listener that isn't filtering.
+    // Meter/ActivitySource are per-RingBufferManager<T> instance (ADR008), but all instances
+    // share the same Name, "RingBufferPlus". So every test gives its buffer a unique name and
+    // filters on it - without that, a listener would also pick up managers from every other test
+    // class running concurrently in this assembly.
     //
-    // Capture collections below are ConcurrentQueue<T>, not List<T>, deliberately: these global
-    // listeners receive callbacks for every "RingBufferPlus"-named source in the whole process,
-    // including from other test classes' managers running concurrently on other threads. A plain
-    // List<T>.Add under that concurrent-writer load is a real, observed source of flaky dropped
-    // entries - not a hypothetical one.
+    // Capture collections are ConcurrentQueue<T>, not List<T>, on purpose. These listeners are
+    // global: they receive callbacks from every "RingBufferPlus" source in the process, including
+    // other tests' managers on other threads. A plain List<T>.Add under that load really does drop
+    // entries and cause flaky failures - this has been observed, not just theorized.
     public class RingBufferObservabilityTests
     {
         private static string UniqueBufferName([System.Runtime.CompilerServices.CallerMemberName] string caller = "") =>
@@ -112,27 +110,24 @@ namespace RingBufferPlus.Tests
             var durations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
             Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], true));
 
-            // Round 4 (Observabilidade, v6 pre-release audit): the success row must carry
-            // acquire.timed_out/acquire.cancelled too (both false), same tag-contract principle
-            // DispatchScaleDown's scale.* metrics already follow - otherwise a consumer filtering
-            // acquire.timed_out="false" gets zero rows for every successful acquire, since the key
-            // simply wouldn't exist on this row, instead of existing as false.
+            // A successful row must still carry acquire.timed_out/acquire.cancelled, both false.
+            // Otherwise a consumer filtering on acquire.timed_out=false would get zero rows for
+            // every successful acquire, because the tag wouldn't exist at all instead of being false.
             Assert.Contains(durations, r =>
                 Equals(r.Tags["acquire.success"], true) &&
                 r.Tags.ContainsKey("acquire.timed_out") && Equals(r.Tags["acquire.timed_out"], false) &&
                 r.Tags.ContainsKey("acquire.cancelled") && Equals(r.Tags["acquire.cancelled"], false));
 
-            // Round 8 (Observabilidade, v6 pre-release audit): acquire.warmup_failed belongs on
-            // every row too, same tag-contract principle as timed_out/cancelled above.
+            // acquire.warmup_failed belongs on every row too, same tag-contract principle as
+            // timed_out/cancelled above.
             Assert.Contains(durations, r => r.Tags.ContainsKey("acquire.warmup_failed") && Equals(r.Tags["acquire.warmup_failed"], false));
 
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
             Assert.Equal(true, acquireActivity.GetTagItem("success"));
             Assert.Equal(false, acquireActivity.GetTagItem("timed_out"));
 
-            // Round 5 (Observabilidade, v6 pre-release audit): the Activity had the same tag-contract
-            // gap the metric above already had before Round 4 - "cancelled" was only ever set on the
-            // caller-cancellation catch, so it was absent (not false) on every other span.
+            // The Activity must carry "cancelled" on every span, not just the caller-cancellation
+            // one - same rule already checked above for the metric.
             Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
             Assert.Equal(false, acquireActivity.GetTagItem("warmup_failed"));
         }
@@ -168,8 +163,8 @@ namespace RingBufferPlus.Tests
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("success"), false));
             Assert.Equal(true, acquireActivity.GetTagItem("timed_out"));
 
-            // Round 5 (Observabilidade, v6 pre-release audit): same tag-contract gap as the success
-            // path - "cancelled" belongs on this row too, not just the caller-cancellation one.
+            // Same rule as the success path above: "cancelled" belongs on this row too, not just
+            // the caller-cancellation one.
             Assert.Equal(false, acquireActivity.GetTagItem("cancelled"));
             Assert.Equal(false, acquireActivity.GetTagItem("warmup_failed"));
         }
@@ -177,13 +172,10 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task AcquireAsync_AfterWarmupFailureIsCached_StillRecordsDurationAndActivity()
         {
-            // Round 7 (Observabilidade, v6 pre-release audit): EnsureWarmupAsync's Lazy<Task> caches
-            // a failed initial warmup attempt (ADR011 - only an explicit WarmupAsync() call installs
-            // a fresh attempt and retries). Before this fix, every implicit AcquireAsync call after
-            // that first failure rethrew the cached exception before ever reaching
-            // _activitySource.StartActivity, leaving zero telemetry (no span, no acquire.duration
-            // row) on every one of those calls - a dashboard would show total silence, not a fault
-            // spike, during exactly the window every single AcquireAsync call is failing.
+            // A failed initial warmup is cached (ADR011): only an explicit WarmupAsync() call
+            // retries it. Every implicit AcquireAsync call after that must still produce a span and
+            // an acquire.duration row, not just rethrow the cached exception silently - otherwise a
+            // dashboard would show total silence instead of a fault spike while every call fails.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -213,16 +205,14 @@ namespace RingBufferPlus.Tests
             meterListener.Dispose();
             activityListener.Dispose();
 
-            // ...but must still leave a trace on both signals: this is the fix under test.
+            // ...but must still leave a trace on both signals.
             var durations = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.duration" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName)).ToList();
             Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], false));
 
-            // Round 8 (Observabilidade, v6 pre-release audit): without a dedicated tag, this row's
-            // acquire.success/timed_out/cancelled combination (false/false/false) was byte-identical
-            // to an ordinary DisposeAsync() racing an in-flight call - a metrics-only consumer (no
-            // ActivityListener attached, a perfectly normal configuration) could not tell "the buffer
-            // is permanently broken, every call is failing" from "a benign, transient shutdown race".
-            // acquire.warmup_failed is the only tag true on this specific row.
+            // Without acquire.warmup_failed, this row (success/timed_out/cancelled all false) would
+            // look identical to an ordinary shutdown race. A metrics-only consumer (no
+            // ActivityListener, a normal setup) couldn't tell "the buffer is permanently broken"
+            // from "a harmless shutdown". This tag is the only one true on this specific row.
             Assert.Contains(durations, r => Equals(r.Tags["acquire.success"], false) && r.Tags.ContainsKey("acquire.warmup_failed") && Equals(r.Tags["acquire.warmup_failed"], true));
 
             var acquireActivity = Assert.Single(activities, a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName));
@@ -244,9 +234,9 @@ namespace RingBufferPlus.Tests
             using var callerCts = new CancellationTokenSource();
             callerCts.Cancel();
 
-            // A caller-supplied, already-cancelled token is a genuine cancellation, not a fault -
-            // it propagates (see RingBufferManagerTests.AcquireAsync_ShouldThrow_WhenAlreadyCancelled)
-            // but the span/metric must not be left outcome-less just because the exception rethrows.
+            // An already-cancelled caller token is a genuine cancellation, not a fault. It
+            // propagates, but the span/metric must still record an outcome even though the
+            // exception rethrows.
             await Assert.ThrowsAsync<TaskCanceledException>(() => manager.AcquireAsync(callerCts.Token).AsTask());
 
             await manager.DisposeAsync();
@@ -272,11 +262,9 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task AcquireDuration_DistinguishesGenuineTimeoutFromCallerCancellation()
         {
-            // Round 5, Observabilidade (finding O6): ringbufferplus.acquire.duration carried no tag
-            // distinguishing why an unsuccessful acquire failed - every failed row looked identical
-            // whether it was a genuine AcquireTimeout, an ordinary shutdown, or the caller's own
-            // token firing, unlike the "RingBufferPlus.Acquire" activity, which already carried
-            // timed_out/cancelled. Fixed by adding the same two tags to the metric.
+            // acquire.duration must distinguish why an acquire failed: a genuine timeout, an
+            // ordinary shutdown, and the caller's own cancellation must not look identical. This
+            // matches the same distinction the "RingBufferPlus.Acquire" activity already makes.
             var timeoutBufferName = UniqueBufferName();
             using var timeoutCts = new CancellationTokenSource();
             var (timeoutMeterListener, timeoutRecords) = StartMeterListener();
@@ -314,14 +302,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task HeartBeat_UnhealthyVerdict_RecordsInvalidationCounter()
         {
-            // Round 9 (Observabilidade, v6 pre-release audit): the HeartBeat's "unhealthy" verdict
-            // (callback returns false, the item is Invalidate()'d and replaced) - the most common
-            // way a HeartBeat-configured pool actually operates - emitted no log, metric, or trace
-            // of its own. The pump's one log line ("Heart Beat pump iteration finished") fires
-            // identically whether the verdict was healthy or not, so an operator watching telemetry
-            // alone could not tell a pool that's constantly cycling items from a perfectly healthy
-            // one. Confirmed empirically: 11 pulses of an always-unhealthy callback produced the
-            // exact same log sequence a healthy callback would have.
+            // When HeartBeat returns false, the item is invalidated and replaced - the most common
+            // outcome for a HeartBeat-configured pool. This needs its own signal; otherwise an
+            // operator watching telemetry can't tell a constantly-cycling pool from a healthy one.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
 
@@ -364,11 +347,9 @@ namespace RingBufferPlus.Tests
             var (activityListener, activities) = StartActivityListener();
 
             // Capacity=2, MaxCapacity=4: two callers unable to acquire immediately trigger the
-            // backlog-reactive signal (ADR001V03), which replaced the old fault-count trigger.
-            // Two concurrent waiters (not one) are used because backlog-reactive reacts
-            // proportionally to the net gap, not necessarily in one single jump to MaxCapacity
-            // like the old trigger did - EvaluateBacklogReactive re-checks after every batch
-            // completes, so MaxCapacity may be reached via more than one small successive batch.
+            // backlog-reactive signal (ADR001V03). Two waiters, not one, because backlog-reactive
+            // scales proportionally to demand, not in one jump to MaxCapacity - it may take more
+            // than one small batch to get there.
             var manager = CreateManager(bufferName, cts.Token, capacity: 2, minCapacity: 1, maxCapacity: 4, elastic: true);
             await manager.WarmupAsync();
 
@@ -401,13 +382,11 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task RisingDemandTrend_TriggersPredictiveMonitorScaleUp_BeforeAnyCallerEverWaits_WithAutoTrigger()
         {
-            // The Monitor (ADR001V03/ADR003V03) is the only signal that can scale up BEFORE demand
-            // actually exceeds capacity: its linear-regression trend, projected a horizon ahead, can
-            // push the target above CurrentCapacity from a rising-but-still-below-capacity demand
-            // series alone. This is structurally impossible for backlog-reactive (which only exists
-            // because a caller could not get an item immediately) or the old median algorithm
-            // (scale-down only) - proving it requires a demand ramp that never lets idle hit zero,
-            // so no caller ever actually waits.
+            // The Monitor (ADR001V03/ADR003V03) is the only signal that can scale up before demand
+            // actually exceeds capacity - its trend projection can raise the target while demand is
+            // still below capacity. Backlog-reactive can't do this (it only fires once a caller is
+            // already waiting), so this test uses a demand ramp that never lets idle hit zero: no
+            // caller ever waits, yet capacity still grows.
             var bufferName = UniqueBufferName();
             using var cts = new CancellationTokenSource();
             var (meterListener, records) = StartMeterListener();
@@ -464,10 +443,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task ReplaceOne_WhenReplacementFactoryFailsThenRecovers_RecordsScaleOperation_WithFloorTrigger()
         {
-            // Floor guard (ADR001V03): MinCapacity == Capacity here (like the fixed-capacity
-            // scenario in RingBufferContractTests) so a single failed replacement immediately
-            // breaches the floor, and the guard's own background retry - not any caller action -
-            // is what restores it once the factory recovers.
+            // Floor guard (ADR001V03): MinCapacity == Capacity here, so a single failed replacement
+            // immediately breaches the floor. Only the guard's own background retry - not any
+            // caller action - restores it once the factory recovers.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -546,9 +524,7 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task SwitchToAsync_WhenFactoryThrowsDuringScaleUp_RecordsFailureTag_AndErrorActivityStatus()
         {
-            // A failed/undone scale operation must not be recorded identically to a successful one
-            // (finding R8). Reuses the same "factory throws during scale-up" scenario as the P0#1
-            // regression test in RingBufferContractTests.
+            // A failed scale operation must not be recorded identically to a successful one.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -618,9 +594,8 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task SwitchToAsync_RacingDisposeAsync_RecordsCancelledNotFailure()
         {
-            // Round 4, Observabilidade (finding O1): a scale operation cancelled by an ordinary
-            // DisposeAsync() must not be recorded identically to a genuine factory failure -
-            // same distinction R15/F15/R17/R18 already make for logs, now extended to
+            // A scale operation cancelled by an ordinary DisposeAsync() must not be recorded like a
+            // genuine factory failure - same distinction already made for logs, checked here for
             // scale.operations/scale.duration and the "RingBufferPlus.Scale" activity's status.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
@@ -655,9 +630,8 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task SwitchToAsync_RecordsScaleDurationTaggedByTrigger()
         {
-            // Round 1 (Observabilidade, v6 pre-release audit): scale.duration used to omit the
-            // trigger tag entirely (only scale.operations carried it), making it impossible to
-            // slice scale latency by which signal (manual/floor/backlog/auto) caused it.
+            // scale.duration must carry the trigger tag too (not just scale.operations), so scale
+            // latency can be sliced by which signal (manual/floor/backlog/auto) caused it.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
 
@@ -680,9 +654,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task SwitchToAsync_RecordsTargetTagOnScaleOperationsAndActivity()
         {
-            // Round 1 (Observabilidade, v6 pre-release audit): neither scale.operations/
-            // scale.duration nor the "RingBufferPlus.Scale" activity carried the target capacity
-            // the operation was aiming for - useful for any trigger, not just the Monitor.
+            // scale.operations/scale.duration and the "RingBufferPlus.Scale" activity must all
+            // carry the target capacity the operation was aiming for - useful for any trigger, not
+            // just the Monitor.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -710,11 +684,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task ScaleActivities_CarrySuccessTag_MatchingTheScaleOperationsMetric()
         {
-            // Round 6 (Observabilidade, v6 pre-release audit - finding O9): scale.operations/
-            // scale.duration both carry a "success" tag, but neither DispatchScaleUp nor
-            // DispatchScaleDown ever calls activity?.SetTag("success", ...) - the third instance of
-            // the metric/trace tag-set asymmetry class first fixed for acquire.duration/
-            // "RingBufferPlus.Acquire" in Round 4, then again for the trace side in Round 5.
+            // scale.operations/scale.duration carry a "success" tag; the "RingBufferPlus.Scale"
+            // activity must carry it too - same metric/trace mismatch already fixed for
+            // acquire.duration/"RingBufferPlus.Acquire".
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -742,30 +714,22 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task ConsecutiveScaleOperations_ProduceIndependentRootActivities_NotChainedToEachOther()
         {
-            // Round 6 (Estabilidade, v6 pre-release audit): investigated and REFUTED a suspected
-            // Activity.Current leak across consecutive Scale operations - kept as a permanent
-            // regression guard, not because a bug was found.
+            // This test guards against a plausible-sounding leak that doesn't actually happen:
+            // Activity.Current staying set across consecutive Scale operations.
             //
-            // The hypothesis: DispatchScaleUp/DispatchScaleDown call _activitySource.StartActivity
-            // synchronously from ProcessCommandAsync, itself called from RunEngineAsync's await
-            // foreach - a side effect of StartActivity is setting Activity.Current. The matching
-            // Dispose() only runs inside the batch's forked Task.Run body, whose ExecutionContext is
-            // a private copy taken at the Task.Run call, so restoring Activity.Current there can't
-            // propagate back to the engine loop. That much is true, and was confirmed with a
-            // standalone repro (a plain sync method in a plain loop) that DID show the leak - but
-            // this method is not a plain sync method in a plain loop.
+            // Why it seems plausible: StartActivity sets Activity.Current as a side effect, called
+            // synchronously from ProcessCommandAsync inside RunEngineAsync's loop. The matching
+            // Dispose() runs inside a separate Task.Run body with its own copy of ExecutionContext,
+            // so it can't undo that mutation on the engine loop's own context. A standalone repro (a
+            // plain sync method in a plain loop) confirmed this part is true, and does leak there.
             //
-            // What actually prevents it here: AsyncMethodBuilderCore.Start saves the caller's
-            // ExecutionContext before running an async method's state machine (even its purely
-            // synchronous prefix, with no await ever reached) and restores it once that call
-            // returns. So `await ProcessCommandAsync(cmd)` in RunEngineAsync reverts whatever
-            // ProcessCommandAsync's own call to DispatchScaleUp/DispatchScaleDown mutated
-            // Activity.Current to, the instant ProcessCommandAsync returns - RunEngineAsync's own
-            // Activity.Current is never actually mutated, regardless of whether the callee awaited
-            // anything. This is a general async-method-boundary property (see also Round 1/3's own,
-            // separately-refuted parent-chaining suspicions on a different call path) - not specific
-            // to Task.Run, and it is why the standalone repro (no async method boundary at all
-            // between the two StartActivity calls) showed the leak while the real code doesn't.
+            // Why it doesn't happen here: every async method call, including `await
+            // ProcessCommandAsync(cmd)`, saves and restores the caller's ExecutionContext around
+            // itself - even across a purely synchronous call with no actual await inside. So
+            // RunEngineAsync's own Activity.Current is restored the instant ProcessCommandAsync
+            // returns, regardless of what DispatchScaleUp/DispatchScaleDown mutated it to inside.
+            // The standalone repro leaked only because it had no async method boundary between the
+            // two StartActivity calls - real code always does.
             var bufferName = UniqueBufferName();
             var (activityListener, activities) = StartActivityListener();
 
@@ -795,10 +759,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public async Task AcquireAsync_RacingDisposeAsync_RecordsOkStatus_NotError()
         {
-            // Round 4, Observabilidade (finding O2): AcquireCoreAsync never set an ActivityStatusCode
-            // on any outcome before this fix. An acquire cancelled by an ordinary DisposeAsync()
-            // while waiting - not a genuine AcquireTimeout - must not read as an error span, mirroring
-            // the same shutdown-vs-failure distinction now made for Scale (O1).
+            // An acquire cancelled by an ordinary DisposeAsync() while waiting - not a genuine
+            // timeout - must not read as an error span. Same shutdown-vs-failure distinction
+            // already made for Scale.
             var bufferName = UniqueBufferName();
             using var cts = new CancellationTokenSource();
             var (meterListener, records) = StartMeterListener();
@@ -827,11 +790,10 @@ namespace RingBufferPlus.Tests
             var faults = records.Where(r => r.InstrumentName == "ringbufferplus.acquire.faults" && Equals(r.Tags.GetValueOrDefault("buffer.name"), bufferName));
             Assert.Empty(faults);
 
-            // Assert.All, not Assert.Single/NotEmpty: under heavy parallel test-suite load, this
-            // process-wide ActivityListener can occasionally miss a specific activity's stop
-            // notification (a pre-existing harness fragility, not specific to this test - see the
-            // class-level remarks on global listener contamination). When the activity IS captured,
-            // it must never show Error for a shutdown-cancelled (not genuinely timed-out) acquire.
+            // Assert.All, not Assert.Single/NotEmpty: under heavy parallel test load, this
+            // process-wide listener can occasionally miss an activity's stop notification (see the
+            // class-level remarks on global listener contamination). When it IS captured, it must
+            // never show Error for a shutdown-cancelled (not genuinely timed-out) acquire.
             var unsuccessfulAcquireActivities = activities.Where(a => a.OperationName == "RingBufferPlus.Acquire" && Equals(a.GetTagItem("buffer.name"), bufferName) && Equals(a.GetTagItem("success"), false)).ToList();
             Assert.All(unsuccessfulAcquireActivities, a => Assert.Equal(ActivityStatusCode.Ok, a.Status));
         }
@@ -851,7 +813,7 @@ namespace RingBufferPlus.Tests
             await managerB.WarmupAsync();
 
             // Dispose A first - this must not affect B's still-live Meter/ActivitySource (ADR008's
-            // whole reason for a per-instance, not static, telemetry source).
+            // reason for a per-instance, not static, telemetry source).
             await managerA.DisposeAsync();
 
             var value = await managerB.AcquireAsync();
@@ -869,13 +831,11 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Contract")]
         public async Task ScaleUp_WithAGenuineFailureThenRacedByDisposeAsync_StillReportsTheFailure_NotJustCancelled()
         {
-            // Round 5, Observabilidade (finding O7): cancelledByShutdown ("!ok && token was
-            // cancelled") could be true at the same time a genuine, non-cancellation factory
-            // failure had already happened earlier in the very same batch (tolerated via
-            // maxConsecutiveFactoryFailures, so the batch kept going and made partial progress).
-            // Before the fix, an ordinary DisposeAsync() racing the batch's still-unattempted
-            // items reported the whole attempt as "just cancelled by shutdown" - masking the real
-            // failure entirely, the exact opposite of what O1 exists to prevent.
+            // A genuine factory failure can happen earlier in a batch (tolerated via
+            // maxConsecutiveFactoryFailures, so the batch continues with partial progress). If an
+            // ordinary DisposeAsync() then races the batch's remaining items, the result must still
+            // report the genuine failure, not just "cancelled by shutdown" - otherwise the real
+            // failure would be masked entirely.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -900,14 +860,10 @@ namespace RingBufferPlus.Tests
 
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
-            // Manually triggers the scale-up 2 -> 6 (quantity 4): attempt 1 succeeds, attempt 2
-            // fails genuinely (tolerated), attempts 3/4 are mid-Task.Delay when we race them
-            // below. What's under test here (CreateItemsAsync's/FactoryBatchCompleted's telemetry
-            // correctness under a DisposeAsync race) is identical regardless of what dispatches
-            // the batch - SwitchToAsync gives an exact, deterministic quantity (4), unlike
-            // backlog-reactive's own proportional sizing (ADR001V03: reacts to the net gap, not a
-            // coarse tier jump), which would need several precisely-timed concurrent waiters to
-            // reconstruct the same batch size reliably.
+            // Triggers the scale-up 2 -> 6 (quantity 4): attempt 1 succeeds, attempt 2 fails
+            // genuinely (tolerated), attempts 3/4 are mid-delay when we race them below. SwitchToAsync
+            // is used here (not backlog-reactive) only because it gives an exact, deterministic
+            // batch size - the telemetry behavior under test doesn't depend on what dispatched it.
             var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(accepted);
 
@@ -931,10 +887,9 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Observability")]
         public async Task ScaleUp_WithAZeroProgressGenuineFailureThenRacedByDisposeAsync_StillReportsTheFailure_NotJustCancelled()
         {
-            // Round 6, Resiliência (O7-residual): the O7 fix (above) only threads hadGenuineFailure
-            // through CreateItemsAsync's tuple-return exit path. When the whole batch makes zero
-            // progress, CreateItemsAsync instead throws its own lastFailure directly - a second,
-            // different exit path the O7 fix never covered, reopening the exact same masking.
+            // CreateItemsAsync has two exit paths for a failed batch: a tuple return, or - when the
+            // batch makes zero progress - throwing lastFailure directly. Both must preserve the
+            // genuine-failure vs. cancelled-by-shutdown distinction.
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();
@@ -958,11 +913,9 @@ namespace RingBufferPlus.Tests
 
             var held1 = await service.AcquireAsync();
             var held2 = await service.AcquireAsync();
-            // Manually triggers the scale-up 2 -> 6: attempt 1 fails genuinely (zero progress,
-            // tolerated), attempts 2+ are mid-Task.Delay when we race them below - the whole batch
-            // never creates anything, so CreateItemsAsync throws instead of returning. See the
-            // sibling test above for why SwitchToAsync (deterministic quantity), not backlog-
-            // reactive, drives this.
+            // Triggers the scale-up 2 -> 6: attempt 1 fails genuinely (zero progress, tolerated),
+            // attempts 2+ are mid-delay when we race them below. The batch never creates anything,
+            // so CreateItemsAsync throws instead of returning.
             var accepted = await service.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1));
             Assert.True(accepted);
 
@@ -986,12 +939,9 @@ namespace RingBufferPlus.Tests
         [Trait("Category", "Observability")]
         public async Task ScaleDown_WithANormalPartialCompletion_IsNeverReportedAsError()
         {
-            // Round 7, shutdown-vs-genuine-failure sweep: RemoveItemsAsync never observes a
-            // token and never throws (R6) - a scale-down that doesn't fully reach its target is
-            // always just "not enough idle items were available right now," entirely by design,
-            // never a genuine failure or a cancellation. Confirmed empirically (before the fix)
-            // that this normal outcome was reported as ActivityStatusCode.Error, contradicting
-            // usage-observability.md's own documented contract.
+            // RemoveItemsAsync never observes a token and never throws. A scale-down that doesn't
+            // fully reach its target just means "not enough idle items were available" - by design,
+            // never a genuine failure or a cancellation (see usage-observability.md).
             var bufferName = UniqueBufferName();
             var (meterListener, records) = StartMeterListener();
             var (activityListener, activities) = StartActivityListener();

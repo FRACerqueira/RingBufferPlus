@@ -17,37 +17,37 @@ namespace RingBufferPlus
         string Name { get; }
 
         /// <summary>
-        /// The Current capacity of the RingBuffer.
+        /// Current capacity of the buffer.
         /// </summary>
         int CurrentCapacity { get; }
 
         /// <summary>
-        /// Is Maximum capacity of the RingBuffer.
+        /// True when the buffer is at its maximum capacity.
         /// </summary>
         bool IsMaxCapacity { get; }
 
         /// <summary>
-        /// Is Minimum capacity of the RingBuffer.
+        /// True when the buffer is at its minimum capacity.
         /// </summary>
         bool IsMinCapacity { get; }
 
         /// <summary>
-        /// Is Initial capacity of the RingBuffer.
+        /// True when the buffer is at its initial (startup) capacity.
         /// </summary>
         bool IsInitCapacity { get; }
 
         /// <summary>
-        /// The Value Maximum capacity of the RingBuffer.
+        /// The buffer's configured maximum capacity.
         /// </summary>
         int MaxCapacity { get; }
 
         /// <summary>
-        /// The Value Minimum capacity of the RingBuffer.
+        /// The buffer's configured minimum capacity.
         /// </summary>
         int MinCapacity { get; }
 
         /// <summary>
-        /// The Value Initial capacity of the RingBuffer.
+        /// The buffer's configured initial capacity.
         /// </summary>
         int Capacity { get; }
 
@@ -72,14 +72,13 @@ namespace RingBufferPlus
         /// <summary>
         /// Warms up with full capacity ready.
         /// <remarks>
-        /// It is recommended to use this method in the initialization of the application.
-        /// If a previous call to this method failed, calling it again retries the attempt from
-        /// scratch instead of rethrowing the same cached failure - a transient factory failure
-        /// (e.g. a database or broker not yet accepting connections at startup) does not
-        /// permanently disable the instance. This retry only happens when <c>WarmupAsync</c> is
-        /// called explicitly again; <see cref="AcquireAsync(CancellationToken)"/> and
-        /// <c>SwitchToAsync</c> only observe the outcome of the most recent attempt and never
-        /// trigger a retry on their own.
+        /// Recommended for use during application startup.
+        /// If a previous call failed, calling this again retries from scratch instead of rethrowing the
+        /// cached failure - so a transient factory failure (e.g. a database or broker not yet accepting
+        /// connections at startup) doesn't permanently disable the instance. Only an explicit call to
+        /// <c>WarmupAsync</c> retries; <see cref="AcquireAsync(CancellationToken)"/> and
+        /// <c>SwitchToAsync</c> just observe the outcome of the most recent attempt and never retry on
+        /// their own.
         /// </remarks>
         /// </summary>
         /// <param name="cancellation">The <see cref="CancellationToken"/>.</param>

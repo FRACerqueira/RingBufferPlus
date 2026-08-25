@@ -39,9 +39,8 @@ namespace RingBufferPlus
 
         /// <summary>
         /// The default maximum number of concurrent factory calls when creating several items at
-        /// once (the initial warmup fill, or a scale-up). See ADR001V03: bounds a large batch from
-        /// flooding a struggling-but-technically-accepting downstream with simultaneous creation
-        /// attempts (e.g. database/broker connections).
+        /// once (initial warmup, or a scale-up). Limits how many creation attempts (e.g. database
+        /// or broker connections) hit a struggling downstream at the same time.
         /// </summary>
         public readonly static int MaxConcurrentFactoryCalls = 4;
 
@@ -54,27 +53,27 @@ namespace RingBufferPlus
         public readonly static int Capacity = 2;
 
         /// <summary>
-        /// The default percentile used by the Monitor's predictive autoscale algorithm (ADR003V03)
+        /// The default percentile used by the Monitor's predictive autoscale algorithm
         /// as the demand "fair level" - p95.
         /// </summary>
         public readonly static double MonitorPercentileP = 0.95;
 
         /// <summary>
         /// The default fractional headroom the Monitor adds on top of the percentile "fair level"
-        /// (ADR003V03) - 10%.
+        /// - 10%.
         /// </summary>
         public readonly static double MonitorSafetyBuffer = 0.10;
 
         /// <summary>
         /// The default number of sampling ticks the Monitor's linear-regression demand trend is
-        /// projected ahead (ADR003V03).
+        /// projected ahead.
         /// </summary>
         public readonly static double MonitorHorizon = 5;
 
         /// <summary>
-        /// The default deadband: the Monitor's computed target must differ from the current
-        /// capacity by at least this many items before a scale operation is dispatched (ADR003V03)
-        /// - without it, the algorithm was measured to oscillate heavily under flat-but-noisy demand.
+        /// The minimum difference between the Monitor's computed target and the current capacity
+        /// before it triggers a scale operation. Without this deadband, the algorithm oscillates
+        /// under flat but noisy demand (measured).
         /// </summary>
         public readonly static int MonitorDeadband = 3;
 

@@ -7,14 +7,17 @@ using Microsoft.Extensions.Logging;
 
 namespace RingBufferPlus.Core
 {
-    // One mutable builder backs all three public views (ADR007): the mode-switch methods
+    // One mutable builder backs all three public views (ADR007). The mode-switch methods
     // (FixedCapacity/ElasticCapacity) narrow which interface the caller sees next, so the
     // compiler enforces mutual exclusivity even though a single instance implements everything.
-    // Since ADR007V03, ElasticCapacity is the only elastic view - the floor guard, backlog-
-    // reactive signal, and Monitor are unconditionally active for it, so there is no further
-    // automatic-vs-manual split (the former IRingBufferAutoScaleBuilder<T>/AutoScaleAcquireFault
-    // pair is gone). Explicit interface implementation is required wherever the same method name
-    // returns a different interface type depending on which view is in scope.
+    //
+    // ElasticCapacity is the only elastic view (ADR007V03): the floor guard, backlog-reactive
+    // signal, and Monitor are unconditionally active for it. There's no automatic-vs-manual
+    // split anymore - the former IRingBufferAutoScaleBuilder<T>/AutoScaleAcquireFault pair is
+    // gone.
+    //
+    // Explicit interface implementation is required wherever the same method name returns a
+    // different interface type depending on which view is in scope.
     internal sealed class RingBufferBuilder<T> :
         IRingBufferBuilder<T>,
         IRingBufferFixedBuilder<T>,
@@ -219,12 +222,12 @@ namespace RingBufferPlus.Core
                 LogError(err);
                 throw err;
             }
-            // Round 1 (Resiliência, v6 pre-release audit): PulseHeartBeat now sustains three
-            // separate disposal bounds (DisposeOneItemDefensivelyAsync's grace period, the
-            // heartbeat pump's own dispose bound, and the pulse timeout itself), for every buffer
-            // regardless of Elastic/HeartBeat configuration (DisposeAsync's own drain loop uses it
-            // too) - an explicit zero/negative value (a plausible unit mistake) would make every
-            // defensive dispose expire instantly, treating ordinary disposal as hung.
+            // PulseHeartBeat backs three separate disposal bounds: DisposeOneItemDefensivelyAsync's
+            // grace period, the heartbeat pump's own dispose bound, and the pulse timeout itself.
+            // This applies to every buffer, regardless of Elastic/HeartBeat configuration -
+            // DisposeAsync's own drain loop uses it too. A zero or negative value (a plausible
+            // unit mistake) would make every defensive dispose expire instantly, treating
+            // ordinary disposal as hung.
             if (_pulseHeartBeat <= TimeSpan.Zero)
             {
                 var err = new InvalidOperationException("The pulse (PulseHeartBeat) must be greater than zero.");
@@ -312,10 +315,9 @@ namespace RingBufferPlus.Core
 
         private void LogMessage(string message)
         {
-            // Round 2 (Estabilidade, v6 pre-release audit): IsEnabled itself is a call into
-            // untrusted external code (same F23 class as SafeInvokeSink below) and can throw -
-            // guarded via SafeIsEnabled rather than called raw, same fix already applied to the
-            // sibling gap this one was modeled after in RingBufferManager.LogMessage.
+            // IsEnabled is a call into untrusted external code and can throw - the same risk as
+            // SafeInvokeSink below. Guarded via SafeIsEnabled instead of called raw, mirroring
+            // RingBufferManager.LogMessage's own guard.
             if (_logger is null || !SafeIsEnabled(_logger, LogLevel.Debug)) return;
 
             SafeInvokeSink(() => logMessageForDbg(_logger, _uniqueName, message, null));
@@ -323,27 +325,21 @@ namespace RingBufferPlus.Core
 
         private void LogError(Exception message)
         {
-            // Fixed alongside the OnError signature change (ADR007V03): this guard previously
-            // required _logger to be non-null AND enabled for Error, which meant a caller who
-            // configured OnError without also configuring Logger never had their error handler
-            // invoked at all during Build-time validation - the exact opposite of "the logger is
-            // already configured separately" (ADR007V03's own reasoning for simplifying OnError).
+            // Per ADR007V03, OnError and Logger are configured independently. So this only skips
+            // when BOTH _logger and _errorHandler are absent - a caller who set OnError but not
+            // Logger must still get their error handler invoked during Build-time validation.
             if (_logger is null && _errorHandler is null) return;
 
             if (_errorHandler is null)
             {
                 if (SafeIsEnabled(_logger!, LogLevel.Error))
                 {
-                    // Round 2 (Observabilidade, v6 pre-release audit): passed null here instead of
-                    // the real exception, unlike RingBufferManager's own LogError - a structured
-                    // sink (Application Insights, Serilog) reading the canonical Exception field
-                    // got nothing for a builder validation error, only the text embedded in the
-                    // message. Round 3: that text was message.ToString() (type + message + stack
-                    // trace) - far more verbose than RingBufferManager.LogError's own text field
-                    // (just error.Message), a format asymmetry a structured sink reading the text
-                    // field alone would see as inconsistent between the two classes. Narrowed to
-                    // message.Message to match - the full exception (type, stack trace) is already
-                    // available via the Exception argument now passed alongside it.
+                    // Passes the real exception (not null), so a structured sink (Application
+                    // Insights, Serilog) reading the canonical Exception field gets it here too -
+                    // same as RingBufferManager.LogError. The text argument is message.Message,
+                    // not message.ToString(), to match RingBufferManager.LogError's own text
+                    // format. The full exception detail (type, stack trace) is already available
+                    // separately, via the Exception argument.
                     SafeInvokeSink(() => logMessageForErr(_logger!, _uniqueName, message.Message, message));
                 }
             }
@@ -365,10 +361,9 @@ namespace RingBufferPlus.Core
             }
         }
 
-        // A user-supplied Logger/OnError is untrusted external code (Round 7, unguarded-callback
-        // sweep - same class as F23, found in RingBufferManager): if it throws while ValidateBuild
-        // is reporting a real validation failure, that throw must not replace/mask the actual
-        // exception ValidateBuild is about to throw to its own caller.
+        // A user-supplied Logger/OnError is untrusted external code. If it throws while
+        // ValidateBuild is reporting a real validation failure, that throw must not replace or
+        // mask the actual exception ValidateBuild is about to throw to its own caller.
         private static void SafeInvokeSink(Action invoke)
         {
             try

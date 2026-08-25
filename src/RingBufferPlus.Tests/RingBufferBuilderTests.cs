@@ -121,7 +121,7 @@ namespace RingBufferPlus.Tests
             // ADR007: Build() above statically returns IRingBufferService<int> - SwitchToAsync is not
             // in scope at compile time for a fixed-capacity buffer (it has nothing to scale). A caller
             // that casts back to IRingBufferManualScaleService<int> must not silently no-op; it must
-            // fail loudly (see the advisor note on the escaped-cast path).
+            // fail loudly.
             var escaped = Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
             await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
 
@@ -250,10 +250,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_LogsTheRealValidationException_NotNull()
         {
-            // Round 2 (Observabilidade, v6 pre-release audit): LogError passed null as the
-            // Exception parameter instead of the real exception, unlike RingBufferManager's own
-            // LogError - a structured logging sink (Application Insights, Serilog) reading the
-            // canonical Exception field got nothing for a builder validation error.
+            // LogError must pass the real exception as the Exception parameter, not null - a
+            // structured logging sink (Application Insights, Serilog) reading the canonical
+            // Exception field would otherwise get nothing for a builder validation error.
             _loggerMock.Setup(l => l.IsEnabled(LogLevel.Error)).Returns(true);
             Exception? capturedException = null;
             _loggerMock.Setup(l => l.Log(
@@ -273,10 +272,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenPulseHeartBeatIsZero()
         {
-            // Round 1 (Resiliência, v6 pre-release audit): PulseHeartBeat sustains several
-            // disposal bounds regardless of Elastic/HeartBeat configuration - a zero value made it
-            // through Build() unvalidated before this fix, making every defensive dispose expire
-            // instantly.
+            // PulseHeartBeat sustains several disposal bounds regardless of Elastic/HeartBeat
+            // configuration - a zero value must be rejected at Build() time, or every defensive
+            // dispose would expire instantly.
             var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).HeartBeat(_ => true, TimeSpan.Zero).FixedCapacity(2);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());

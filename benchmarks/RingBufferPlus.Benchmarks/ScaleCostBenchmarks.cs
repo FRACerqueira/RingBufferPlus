@@ -13,11 +13,12 @@ namespace RingBufferPlus.Benchmarks
     // Measures the engine's own cost of moving between capacities via SwitchToAsync, isolated
     // from factory latency (the factory here just returns an int instantly).
     //
-    // RunStrategy.Monitoring pins InvocationCount to 1: the default job's UnrollFactor/
-    // InvocationCount tuning calls the benchmarked method many times per [IterationSetup], and
-    // IterationSetup only runs once per ITERATION, not per invocation - so invocations after the
-    // first would find the buffer already at the target (MoveToCapacityAsync's target==current
-    // early-return) and silently average a real scale with near-zero no-ops.
+    // RunStrategy.Monitoring pins InvocationCount to 1. The default job would call the
+    // benchmarked method many times per [IterationSetup], but IterationSetup only runs once per
+    // iteration, not per invocation. Without pinning, every invocation after the first would
+    // find the buffer already at its target (an instant no-op via MoveToCapacityAsync's
+    // target==current early-return), silently averaging a real scale together with near-zero
+    // no-ops.
     [SimpleJob(RunStrategy.Monitoring, launchCount: 1, warmupCount: 2, iterationCount: 10)]
     [MemoryDiagnoser]
     public class ScaleCostBenchmarks

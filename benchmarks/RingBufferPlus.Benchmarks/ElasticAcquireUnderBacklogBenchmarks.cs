@@ -8,15 +8,14 @@ using RingBufferPlus;
 
 namespace RingBufferPlus.Benchmarks
 {
-    // Round 1 (v6 pre-release audit, auditoria-desempenho gap): AcquireThroughputBenchmarks only
-    // measures a FixedCapacity buffer (Monitor/backlog-reactive never active at all - the gate in
-    // RingBufferManager.cs makes that path structurally untouched by v6's changes). This measures
-    // the overhead the v6 concurrency model actually added to the acquire path: waiter accounting
-    // (_waitingCount), the gap calculation in EvaluateBacklogReactive, and the Monitor's background
-    // sample-tick thread running concurrently - all only present on an elastic buffer.
+    // AcquireThroughputBenchmarks only measures a FixedCapacity buffer, where the Monitor and
+    // backlog-reactive signal are never active - a gate in RingBufferManager.cs keeps that path
+    // untouched by them. This benchmark measures the overhead those add to the acquire path on
+    // an elastic buffer instead: waiter accounting (_waitingCount), the gap calculation in
+    // EvaluateBacklogReactive, and the Monitor's background sample-tick thread.
     //
     // Background "noise" tasks keep the pool under sustained real contention (some callers
-    // genuinely waiting, not just idle-served) for the whole benchmark run, so the measured
+    // genuinely waiting, not just idle-served) for the whole run, so the measured
     // AcquireAndRelease reflects steady-state cost under backlog, not a cold/idle elastic buffer.
     [MemoryDiagnoser]
     public class ElasticAcquireUnderBacklogBenchmarks

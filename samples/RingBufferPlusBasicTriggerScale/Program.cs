@@ -52,7 +52,7 @@ namespace RingBufferPlusBasicTriggerScale
             }
             sw.Reset();
 
-            //simulate 3 AcquireAsync to expire free resources
+            // Acquire 3 items at once, using up all the free resources.
             Console.WriteLine("Try 3 AcquireAsync");
             await using (var buffer1 = await rb.AcquireAsync(cts.Token))
             {
@@ -73,14 +73,14 @@ namespace RingBufferPlusBasicTriggerScale
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
             Console.WriteLine("Try 4 AcquireAsync");
-            //simulate 4 AcquireAsync to expire free resources
+            // Acquire 4 items at once, using up all the free resources.
             await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
                 await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
                 {
                     await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
                     {
-                        //AcquireAsync fault
+                        // This 4th acquire may time out if the pool has not grown yet.
                         await using (var buffer4 = await rb.AcquireAsync(tokenapplifetime))
                         {
                             Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");

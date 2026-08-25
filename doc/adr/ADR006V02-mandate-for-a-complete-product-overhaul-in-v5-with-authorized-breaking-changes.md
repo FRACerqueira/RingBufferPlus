@@ -42,7 +42,7 @@ Chosen option: "Authorize v6.0.0 as its own coordinated overhaul, with its own j
 
 This ADR authorizes, for v6.0.0, each item below (details and trade-offs live in each item's own ADR — this list does not repeat them, only references them):
 
-* **Concurrency ownership model** — Orquestrador (single owner of capacity truth) / Fábrica / Remoção / Monitor, see [ADR001V03](./ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
+* **Concurrency ownership model** — Orchestrator (single owner of capacity truth) / Creator / Removal / Monitor, see [ADR001V03](./ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md).
 * **Autoscale algorithm** — percentile + linear-regression trend, replacing the median, backed by a real comparison simulation, see [ADR003V03](./ADR003V03-median-sample-autoscaling-algorithm.md).
 * **Public fluent surface** — explicit `target` capacity, `SwitchToAsync` redesigned as a temporary pin, `HeartBeat`/`Logger`/DI surface cleanup, see [ADR007V03](./ADR007V03-redesign-of-the-public-fluent-api-surface.md).
 

@@ -82,8 +82,8 @@ namespace RingBufferPlusRabbitSample
         }
 
         // Publishes from WorkerCount concurrent tasks for 60 seconds, sharing one ring buffer of
-        // RabbitMQ channels - this is the pattern channel pooling exists for: many concurrent
-        // publishers, one shared IConnection, no per-publish channel-open cost.
+        // RabbitMQ channels. This is exactly what channel pooling is for: many concurrent
+        // publishers share one IConnection, with no per-publish channel-open cost.
         private static async Task RunLoadTestAsync(IRingBufferService<IChannel> rb, CancellationToken shutdownToken)
         {
             Console.WriteLine($"Wait... 20 sec. before starting {WorkerCount} concurrent workers");

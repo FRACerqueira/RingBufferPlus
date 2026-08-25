@@ -8,16 +8,16 @@ using RingBufferPlus.Core;
 
 namespace RingBufferPlus.Benchmarks
 {
-    // Round 1 (v6 pre-release audit, auditoria-desempenho gap): measures the actual per-tick cost
-    // of the Monitor's sample-window management + decision algorithm, at the production default
-    // window size (SamplesCount=100) - the numbers `auditoria-complexidade`'s H1/H2 hypotheses
-    // (List<int>.RemoveAt(0) shift; Percentile's OrderBy().ToArray() allocation) were left without.
+    // Measures the actual per-tick cost of the Monitor's sample-window management plus its
+    // decision algorithm, at the production default window size (SamplesCount=100). This gives
+    // real numbers for two allocation costs that were previously only theoretical: the
+    // List<int>.RemoveAt(0) shift, and Percentile's OrderBy().ToArray() allocation.
     //
-    // This mirrors RingBufferManager.ProcessTick's own sample-window management verbatim (Add then
-    // RemoveAt(0) once full) rather than calling AutoScaleMonitor.EvaluateTarget in isolation, so
-    // the measured cost is the same shape the engine actually pays once the window is full (the
-    // steady-state case - a growing window before that point is cheaper, not the concern H1/H2
-    // raised).
+    // This mirrors RingBufferManager.ProcessTick's own sample-window management verbatim (Add,
+    // then RemoveAt(0) once full) instead of calling AutoScaleMonitor.EvaluateTarget in
+    // isolation, so the measured cost matches what the engine actually pays once the window is
+    // full - the steady-state case. A growing window, before that point, is cheaper and isn't
+    // the concern here.
     [MemoryDiagnoser]
     public class MonitorTickCostBenchmarks
     {

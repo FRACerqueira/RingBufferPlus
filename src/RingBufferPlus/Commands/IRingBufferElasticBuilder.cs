@@ -12,7 +12,7 @@ namespace RingBufferPlus
     /// producing an <see cref="IRingBufferManualScaleService{T}"/>.
     /// </summary>
     /// <remarks>
-    /// Since v6.0.0 (ADR001V03/ADR007V03), the floor guard, backlog-reactive signal, and Monitor
+    /// The floor guard, backlog-reactive signal, and Monitor
     /// are always active for any elastic pool - there is no separate "automatic vs. manual" mode to
     /// choose between as in v4/v5 (<see cref="IRingBufferManualScaleService{T}.SwitchToAsync(ScaleSwitch, TimeSpan)"/>
     /// is a temporary pin over the Monitor's own output, not a mutually exclusive alternative to it).
@@ -23,37 +23,33 @@ namespace RingBufferPlus
         /// <summary>
         /// Sets the factory (required) to create an instance in the ring buffer asynchronously.
         /// </summary>
-        /// <param name="value">The handler to factory. Receives a <see cref="CancellationToken"/> that
-        /// fires at this call's own <paramref name="timeout"/> deadline (and on shutdown) - honoring it
-        /// (passing it through to any awaited I/O, or checking it directly) is the caller's
-        /// responsibility. If the factory ignores the token and keeps running after this library has
-        /// already given up waiting on it, any instance it eventually produces is discarded without being
-        /// disposed - a resource leak (e.g. a database connection or broker channel left open) that this
-        /// library cannot detect or prevent on your behalf.</param>
-        /// <param name="timeout">Per-item timeout for the factory call; also the deadline for the overall
-        /// operation as <c>quantity * timeout</c> when creating several items at once (the initial warmup
-        /// fill, or a scale-up) - so it bounds how long other engine operations wait behind it. Default is
-        /// 15 seconds - inherited unchanged from a previous release, not calibrated against any particular
-        /// factory. Set it deliberately based on how long your own factory call actually takes (e.g.
-        /// opening a database connection or a broker channel), not the default.</param>
-        /// <param name="maxConsecutiveFactoryFailures">How many consecutive factory failures (per-item
-        /// timeout or exception) to tolerate within a single creation batch (the initial warmup fill, or
-        /// a scale-up) before giving up on the remaining not-yet-attempted items. Resets to zero on every
-        /// success, so only a true streak of failures counts, not isolated ones scattered across an
-        /// otherwise healthy batch. Default is 0: the first failure gives up on the rest of the batch
-        /// immediately (whatever succeeded before it is still kept) - the same behavior as before this
-        /// parameter existed. Raise it if your factory has occasional, recoverable hiccups and you want
-        /// the batch to keep trying the remaining items instead of abandoning them. If a tolerated
-        /// failure is itself a <paramref name="timeout"/> rather than a fast exception, raising this
-        /// value multiplies <paramref name="timeout"/>'s own worst-case blocking effect: the batch can
-        /// now stay blocked for roughly <c>(maxConsecutiveFactoryFailures + 1) * timeout</c> before
-        /// giving up on a given item, not just <paramref name="timeout"/>. Since v6.0.0 (ADR001V03), a
-        /// batch's factory calls run with bounded concurrency (up to <c>maxConcurrentFactoryCalls</c>,
-        /// default <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/>), not one at a time -
-        /// giving up only stops items still queued behind that concurrency window, not ones already in
-        /// flight when the streak is exceeded, so with both defaults a fully broken factory can still
-        /// receive up to <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/> concurrent attempts
-        /// before giving up, not just 1.</param>
+        /// <param name="value">The handler that creates an instance. It receives a <see cref="CancellationToken"/>
+        /// that fires at the <paramref name="timeout"/> deadline (and on shutdown) - pass it through to any
+        /// I/O you await, or check it yourself. If the factory ignores the token and keeps running anyway,
+        /// any instance it eventually produces is discarded without being disposed - a resource leak (e.g.
+        /// an open database connection or broker channel) that this library cannot detect or prevent for
+        /// you.</param>
+        /// <param name="timeout">Timeout for one factory call. When creating several items at once (the
+        /// initial warmup fill, or a scale-up), the whole batch's deadline is <c>quantity * timeout</c>,
+        /// which bounds how long other engine operations wait behind it. Default is 15 seconds - a generic
+        /// value, not tuned for any specific factory. Set it based on how long your own factory call
+        /// actually takes (e.g. opening a database connection or broker channel).</param>
+        /// <param name="maxConsecutiveFactoryFailures">How many consecutive factory failures (timeouts or
+        /// exceptions) to tolerate in one creation batch (the initial warmup fill, or a scale-up) before
+        /// giving up on the remaining items. A success resets the count to zero, so only a real streak
+        /// counts, not a few failures scattered across an otherwise healthy batch.
+        /// Default is 0: the first failure ends the batch immediately, keeping whatever already succeeded.
+        /// Raise it if your factory has occasional, recoverable hiccups and you want the batch to keep
+        /// trying the rest.
+        /// If a tolerated failure is itself a <paramref name="timeout"/> rather than a fast exception,
+        /// raising this value also raises the worst-case wait for a single item: it can block for roughly
+        /// <c>(maxConsecutiveFactoryFailures + 1) * timeout</c> instead of just <paramref name="timeout"/>.
+        /// Factory calls also run with bounded concurrency (<c>maxConcurrentFactoryCalls</c>, default
+        /// <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/>) rather than one at a time. Giving up
+        /// only stops items still waiting for a slot - calls already in flight keep running. So with
+        /// default settings, a fully broken factory can still make up to
+        /// <see cref="RingBufferDefault.MaxConcurrentFactoryCalls"/> concurrent attempts, not just
+        /// one.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> Factory(Func<CancellationToken, Task<T>> value, TimeSpan? timeout = null, byte maxConsecutiveFactoryFailures = 0);
 
@@ -63,7 +59,7 @@ namespace RingBufferPlus
         /// <remarks>
         /// At each <paramref name="pulse"/>, an item is acquired from the buffer and handed to
         /// <paramref name="value"/> for inspection - the framework owns acquiring and returning it,
-        /// not your callback (ADR007V03): there is no disposable object handed to you to misuse.
+        /// not your callback: there is no disposable object handed to you to misuse.
         /// Returning <see langword="false"/> discards the item and creates a replacement in its
         /// place, through the same path <see cref="RingBufferValue{T}.Invalidate"/> uses for any
         /// other caller; returning <see langword="true"/> returns it to the pool normally.
@@ -96,13 +92,13 @@ namespace RingBufferPlus
         /// Sets the error handler, invoked inline instead of this buffer's own Error-level logging
         /// whenever it would otherwise log an error internally.
         /// </summary>
-        /// <param name="errorHandler">The handler to invoke with the error. Called synchronously,
-        /// inline (ADR007V03) - no background queue. Substitutes for the logger configured via
-        /// <see cref="Logger(ILogger?)"/> at Error level, it does not add to it: once this is set,
-        /// the configured <see cref="ILogger"/> no longer receives Error-level messages from this
-        /// buffer at all (it still receives every other level unaffected). If you need the error
-        /// surfaced through both your own sink and the standard logger, call the logger yourself
-        /// from inside this handler - it is not done for you.</param>
+        /// <param name="errorHandler">The handler to invoke with the error, called synchronously and
+        /// inline - no background queue. It replaces the logger configured via
+        /// <see cref="Logger(ILogger?)"/> at Error level, rather than adding to it: once this is set,
+        /// that <see cref="ILogger"/> stops receiving Error-level messages from this buffer (every
+        /// other level is unaffected). To surface the error through both your own sink and the
+        /// logger, call the logger yourself from inside this handler - that is not done for
+        /// you.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> OnError(Action<Exception> errorHandler);
 
@@ -126,26 +122,24 @@ namespace RingBufferPlus
         // still unresolved by this move): whether this shape (one method, four parameters,
         // all-or-nothing) is still the right surface once real usage exists to judge it against.
         /// <summary>
-        /// Tunes the Monitor's predictive autoscale algorithm (ADR003V03): a sliding-window
-        /// percentile as a demand "fair level", inflated by a safety buffer, adjusted by a
-        /// linear-regression trend projected a configurable horizon ahead, clamped to
-        /// [MinCapacity, MaxCapacity]. This is the lowest-priority of the four signals in
-        /// ADR001V03's model (floor guard &gt; backlog-reactive &gt; manual pin &gt; Monitor) - it
-        /// only acts on ticks where demand is not currently keeping pace with capacity; the window
-        /// used for those ticks is <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int?, int?, TimeSpan?, int?)"/>'s
-        /// own <c>numberSamples</c>, unchanged by this method.
+        /// Tunes the Monitor, the lowest-priority of the four scale signals (floor guard &gt;
+        /// backlog-reactive &gt; manual pin &gt; Monitor). It computes a target capacity from a
+        /// percentile of recent demand (a "fair level"), adds a safety buffer, and adjusts for a
+        /// projected trend - always clamped to [MinCapacity, MaxCapacity]. It only acts when demand
+        /// isn't keeping pace with capacity, using the sample window set by
+        /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int?, int?, TimeSpan?, int?)"/>'s
+        /// own <c>numberSamples</c>, which this method does not change.
         /// </summary>
         /// <param name="percentileP">The percentile used as the fair level, in the range (0, 1]. Default is 0.95 (p95).</param>
         /// <param name="safetyBuffer">Fractional headroom added on top of the percentile. Must be greater than or equal to 0. Default is 0.10 (10%).</param>
         /// <param name="horizon">How many sampling ticks ahead the demand trend is projected. Must be greater than or equal to 0. Default is 5.</param>
-        /// <param name="deadband">The minimum difference (in items) between the computed target and the
-        /// current capacity before a scale operation is dispatched - without it, the algorithm was
-        /// measured to oscillate heavily under flat-but-noisy demand. Must be greater than or equal
-        /// to 0. Default is 3. Also governs how long a demand change can go unnoticed during a
-        /// steady period, since only a dispatched scale operation clears the sliding window - see
+        /// <param name="deadband">The minimum difference, in items, between the computed target and the
+        /// current capacity before a scale operation is dispatched. Must be 0 or greater; default is 3.
+        /// Without a deadband, the algorithm was measured to oscillate heavily under flat, noisy demand.
+        /// It also affects how long a demand change can go unnoticed during a steady period, since only a
+        /// dispatched scale operation clears the sliding window - see
         /// <see cref="IRingBufferBuilder{T}.ElasticCapacity(int, int, int?, int?, TimeSpan?, int?)"/>'s
-        /// own <c>baseTimer</c> parameter for what that unnoticed period can last at the shipped
-        /// defaults, and why <c>numberSamples</c> does not affect it.</param>
+        /// <c>baseTimer</c> parameter for how long that can last.</param>
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         /// <exception cref="InvalidOperationException">An argument is outside its valid range - validated at <c>Build</c>/<c>BuildWarmupAsync</c> time.</exception>
         IRingBufferElasticBuilder<T> MonitorTuning(double percentileP = 0.95, double safetyBuffer = 0.10, double horizon = 5, int deadband = 3);

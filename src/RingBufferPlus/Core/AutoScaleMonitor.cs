@@ -5,26 +5,28 @@
 
 namespace RingBufferPlus.Core
 {
-    // ADR003V03 (see doc/adr/ADR003V03-median-sample-autoscaling-algorithm.md): replaces the
-    // median-of-idle-samples algorithm (the now-retired AutoScaleDecision) with a sliding-window
-    // percentile + safety buffer "fair level", adjusted by a linear-regression trend projected a
-    // configurable horizon ahead, clamped to [min, max]. Ported from the validated simulation in
+    // ADR003V03 (see doc/adr/ADR003V03-median-sample-autoscaling-algorithm.md): the Monitor's
+    // autoscale algorithm. It replaces the retired median-of-idle-samples algorithm
+    // (AutoScaleDecision) with a different formula: a sliding-window percentile plus a safety
+    // buffer as a "fair level", adjusted by a linear-regression trend projected a configurable
+    // horizon ahead, then clamped to [min, max].
+    //
+    // This formula is ported from the validated simulation in
     // benchmarks/RingBufferPlus.Benchmarks/AutoScaleAlgorithmComparison.cs
-    // (PercentileRegressionDecision) - see that file and the ADR for the evidence (convergence,
-    // over-provisioning, and oscillation numbers across four synthetic scenarios) behind this
-    // formula and its defaults.
+    // (PercentileRegressionDecision). See that file and the ADR for the evidence behind it and
+    // its defaults - convergence, over-provisioning, and oscillation numbers across four
+    // synthetic scenarios.
     //
-    // Wired into RingBufferManager's engine loop via ProcessTick (the Monitor role, ADR001V03)
-    // - fed CurrentCapacity minus idle plus _waitingCount as its demand samples, never an
-    // idle-derived proxy: idle is clamped at zero and therefore blind to unmet demand, which would
-    // silently flatten the regression slope under sustained saturation - exactly the plateau where
-    // scaling up matters most, reproducing a different-shaped version of the failure mode this
-    // algorithm was chosen to fix.
+    // Wired into RingBufferManager's engine loop via ProcessTick (the Monitor role, ADR001V03).
+    // ProcessTick feeds it CurrentCapacity minus idle plus _waitingCount as demand samples -
+    // never an idle-derived proxy. Idle is clamped at zero, so it's blind to unmet demand: under
+    // sustained saturation, that would silently flatten the regression slope right where scaling
+    // up matters most, reproducing the same failure mode this algorithm was chosen to fix.
     //
-    // Deadband and window-reset-while-a-reactive-episode-is-in-flight (also validated by the same
-    // simulation, and part of ADR003V03's decision) are call-site concerns, not part of this
-    // calculation - see the simulation's SimulatePercentile, which applies both around its call to
-    // EvaluateTarget rather than inside it. ProcessTick implements both.
+    // Deadband and clearing the window mid-episode are call-site concerns, not part of this
+    // calculation - the same simulation validated both, and both are part of ADR003V03's
+    // decision. See the simulation's SimulatePercentile, which applies both around its call to
+    // EvaluateTarget rather than inside it. ProcessTick implements both here too.
     internal static class AutoScaleMonitor
     {
         /// <summary>

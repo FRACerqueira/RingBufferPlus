@@ -6,28 +6,26 @@
 namespace RingBufferPlus.Core
 {
     // ADR001V03 (see doc/adr/ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md):
-    // the Orquestrador's floor guard - the highest-priority signal of all (floor guard > backlog-
-    // reactive > manual pin > Monitor). Protects the pool's minimum contractual floor: whenever
-    // the buffer's actual, real capacity has dropped below MinCapacity, it triggers an immediate,
-    // undebounced replenishment request. This applies uniformly in any mode, including fixed
-    // capacity (MinCapacity == MaxCapacity == Capacity) - a failed item replacement (after
-    // Invalidate(), or a factory failure during a heartbeat-triggered replacement) can already
-    // shrink CurrentCapacity below its intended floor today, with nothing that currently retries
-    // it. That live gap is exactly what this guard closes.
+    // the Orchestrator's floor guard. It is the highest-priority of the four scale signals
+    // (floor guard > backlog-reactive > manual pin > Monitor).
     //
-    // "available" in the ADR's own wording means the buffer's actual, real capacity
-    // (CurrentCapacity) - NOT an idle/unused item count. A breach is CurrentCapacity strictly less
-    // than MinCapacity (not "less than or equal"): in a fixed-capacity buffer, CurrentCapacity sits
-    // exactly at MinCapacity at rest, so "less than or equal" would make the condition trivially
-    // true forever in the common, healthy case. It would still be harmless in practice (the
-    // resulting replenishment quantity is zero at exact equality), but strict "less than" avoids
-    // the pointless signaling entirely and is the cleaner choice.
+    // It protects the pool's minimum contractual floor. Whenever the buffer's real capacity drops
+    // below MinCapacity, it triggers an immediate, undebounced replenishment request. This applies
+    // in every mode, including fixed capacity (MinCapacity == MaxCapacity == Capacity): a failed
+    // item replacement - after Invalidate(), or a factory failure during a heartbeat-triggered
+    // replacement - can already shrink CurrentCapacity below its floor today, and nothing else
+    // retries it. This guard closes that gap.
     //
-    // Wired into RingBufferManager's engine loop via EvaluateFloorGuard (called after ReplaceOne
-    // and, like EvaluateBacklogReactive, as a FactoryBatchCompleted follow-up). Ported/designed in
-    // isolation first, the same staged approach AutoScaleMonitor.cs (ADR003V03) and, before it, the
-    // now-retired AutoScaleDecision.cs used: validate the pure decision logic on its own, wire it
-    // in once the surrounding signal-priority model (this same ADR) exists.
+    // "Available" in the ADR means the buffer's real capacity (CurrentCapacity), not an idle/unused
+    // item count. A breach is CurrentCapacity strictly less than MinCapacity, not "less than or
+    // equal". A fixed-capacity buffer sits exactly at MinCapacity at rest, so "less than or equal"
+    // would always be true there. That would still be harmless (the replenishment quantity would
+    // be zero), but strict "less than" avoids the pointless signal and is simply cleaner.
+    //
+    // Wired into RingBufferManager's engine loop via EvaluateFloorGuard, called after ReplaceOne
+    // and after every FactoryBatchCompleted, same as EvaluateBacklogReactive. Designed and tested
+    // in isolation first, then wired into the engine - the same staged approach AutoScaleMonitor.cs
+    // (ADR003V03) uses.
     internal static class FloorGuardDecision
     {
         /// <summary>
@@ -54,10 +52,10 @@ namespace RingBufferPlus.Core
         }
 
         /// <summary>
-        /// Decides whether the grace window since a breach was first detected has elapsed - the
-        /// point at which the public "below minimum" signal must become true because replenishment
-        /// has not (yet) restored the floor. A transient dip that resolves within the window must
-        /// never surface this as true.
+        /// Decides whether the grace window since a breach was first detected has elapsed. Once it
+        /// has, the public "below minimum" signal must become true, because replenishment hasn't
+        /// restored the floor in time. A transient dip that resolves within the window must never
+        /// trigger this.
         /// </summary>
         /// <param name="breachDetectedAt">The instant <see cref="EvaluateBreach"/> first reported a breach.</param>
         /// <param name="now">The current instant - passed explicitly rather than read internally, so this stays a pure function.</param>
@@ -82,14 +80,11 @@ namespace RingBufferPlus.Core
         }
 
         /// <summary>
-        /// Decides whether the "below minimum" report should fire right now - once when the grace
-        /// window first elapses, then again on that same cadence as a fallback, so a persistently
-        /// broken factory is never reported exactly once and then goes silent for the rest of the
-        /// outage. Round 10 (Observabilidade, v6 pre-release audit): the caller previously re-fired
-        /// on every single evaluation once the grace window had elapsed, once per call - however
-        /// often that happened to be, driven by the unrelated factory-retry backoff cadence, not by
-        /// this guard's own grace window. This decouples the two: the report repeats on its own
-        /// clock, whatever the retry cadence around it does.
+        /// Decides whether the "below minimum" report should fire right now. It fires once when the
+        /// grace window first elapses, then again on that same cadence as a fallback - so a
+        /// persistently broken factory is never reported once and then goes silent for the rest of
+        /// the outage. The report repeats on its own clock, independent of whatever retry cadence
+        /// surrounds it.
         /// </summary>
         /// <param name="breachDetectedAt">The instant <see cref="EvaluateBreach"/> first reported a breach.</param>
         /// <param name="lastReportedAt">

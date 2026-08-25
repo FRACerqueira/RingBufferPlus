@@ -35,8 +35,8 @@ namespace RingBufferPlusApiSample
 
             var app = builder.Build();
 
-            // Warmup now happens automatically: AddRingBuffer<T> registers an IHostedService
-            // alongside the pool, which runs during app.Run()'s own host startup (ADR007V03).
+            // Warmup now happens automatically: AddRingBuffer<T> registers a hosted service that
+            // runs it during the host's own startup.
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())

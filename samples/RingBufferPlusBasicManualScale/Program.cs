@@ -25,7 +25,7 @@ namespace RingBufferPlusBasicManualScale
 
             Random rnd = new();
 
-            //token to app control gracefull shutdown
+            // Token used to control graceful shutdown.
             var cts = new CancellationTokenSource();
 
             var rb = await RingBuffer<int>.New("MyBuffer")
@@ -76,9 +76,9 @@ namespace RingBufferPlusBasicManualScale
             cts.Dispose();
         }
 
-        // Switches capacity, then polls for 5 seconds so you can watch it move (or, with
-        // LockWhenScaling(), SwitchToAsync itself already waited - the poll loop still shows
-        // the settled value either way).
+        // Switches capacity, then polls for 5 seconds so you can watch it move. With
+        // LockWhenScaling(), SwitchToAsync already waits for the change - the poll loop still
+        // shows the settled value either way.
         private static async Task DemoSwitchAsync(IRingBufferManualScaleService<int> rb, ScaleSwitch target, string label)
         {
             Console.WriteLine($"Switch to {label}");

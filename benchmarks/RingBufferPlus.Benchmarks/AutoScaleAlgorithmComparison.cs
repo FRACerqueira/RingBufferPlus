@@ -5,30 +5,30 @@
 
 namespace RingBufferPlus.Benchmarks
 {
-    // NOT a BenchmarkDotNet wall-clock benchmark (no [Benchmark] methods) - this is a
-    // decision-quality simulation, not a timing measurement. It exists to answer the evidence
-    // gap ADR003/ADR006 left open: "a swap of the median-sample autoscaling algorithm for
-    // something else should be revisited with data, not because breaking changes are free."
+    // NOT a BenchmarkDotNet wall-clock benchmark - it has no [Benchmark] methods. This is a
+    // decision-quality simulation: it checks which algorithm scales better, not how fast either
+    // one runs. It exists to answer a question ADR003/ADR006 left open: a swap of the old
+    // median-sample algorithm should be justified with data, not just because breaking changes
+    // are allowed.
     //
-    // It compares two capacity-sizing algorithms against identical synthetic demand traces,
-    // sharing an identical instantaneous reactive-escalation rule in both arms so the
-    // comparison isolates the slow/corrective decision layer specifically - not the reactive
-    // fast path, which both the current design and the v6 proposal already treat the same way.
+    // It compares two capacity-sizing algorithms against the same synthetic demand traces. Both
+    // arms share the same instant reactive-escalation rule, so the comparison isolates the slow,
+    // corrective decision layer - not the fast reactive path, which both designs already handle
+    // the same way.
     //
-    //   - MedianDecision: the algorithm v5.x shipped (ADR003V03 replaced it in v6.0.0 - this is a
-    //     historical copy, kept for comparison purposes only; the original internal
-    //     RingBufferPlus.Core.AutoScaleDecision and its dedicated AutoScaleDecisionTests.cs were
-    //     both deleted once ADR003V03's replacement was wired in, since nothing calls it anymore -
-    //     this local copy is now the only place this algorithm's logic still exists at all, so
-    //     there is nothing left to keep it "in sync with").
-    //   - PercentileRegressionDecision: the v6 design proposal - sliding-window percentile
-    //     + safety buffer as a "fair level", adjusted by a linear-regression trend projected
-    //     `Horizon` ticks ahead, clamped to [min, max], with a deadband so the target does not
-    //     move for changes smaller than the buffer's own noise tolerance (added after this
-    //     simulation showed the raw formula thrashes under flat-but-noisy demand), and an
-    //     optional window reset while a reactive escalation is in flight (added after this
-    //     simulation showed a burst already served by the reactive path otherwise lingers in
-    //     the window for close to a full WindowSize, delaying the slow layer's descent).
+    //   - MedianDecision: the algorithm v5.x shipped. ADR003V03 replaced it in v6.0.0. This is a
+    //     historical copy kept only for comparison - the original internal class and its tests
+    //     were deleted once the replacement was wired in, so this copy is now the only place
+    //     this algorithm's logic still exists.
+    //   - PercentileRegressionDecision: the algorithm ADR003V03 formalized - a sliding-window
+    //     percentile plus a safety buffer as a "fair level", adjusted by a linear-regression
+    //     trend projected `Horizon` ticks ahead, and clamped to [min, max]. Two refinements were
+    //     added after this simulation exposed problems in the raw formula: a deadband, so small
+    //     changes below the buffer's own noise tolerance don't move the target (without it, the
+    //     formula thrashed under flat-but-noisy demand); and an optional window reset while a
+    //     reactive escalation is in flight (without it, a burst already handled by the reactive
+    //     path lingered in the window for nearly a full WindowSize, delaying the slow layer's
+    //     descent).
     //
     // Run with: dotnet run -c Release -- --algo-comparison
     public static class AutoScaleAlgorithmComparison
@@ -170,16 +170,16 @@ namespace RingBufferPlus.Benchmarks
 
             for (var t = 0; t < demand.Length; t++)
             {
-                // "Active" spans the whole plateau where demand is keeping pace with capacity
-                // (not just the single tick a reactive jump fires), mirroring the real engine:
-                // a scale operation stays "in flight" for as long as the buffer is servicing an
-                // elevated demand level, not just the instant it started.
+                // "Active" spans the whole plateau where demand keeps pace with capacity, not
+                // just the single tick a reactive jump fires. This mirrors the real engine: a
+                // scale operation stays "in flight" for as long as the buffer serves elevated
+                // demand, not just the instant it started.
                 var active = resetOnReactive && demand[t] >= capacityPrev;
 
                 if (resetOnReactive && wasActive && !active)
                 {
                     // Transitioning out of an active episode: purge whatever the window held,
-                    // stale or not, exactly like the real `develop` reset-on-scale behavior.
+                    // stale or not - exactly like the real engine's reset-on-scale behavior.
                     window.Clear();
                 }
                 wasActive = active;
@@ -248,8 +248,8 @@ namespace RingBufferPlus.Benchmarks
         }
     }
 
-    // Ported verbatim (logic unchanged) from src/RingBufferPlus/Core/AutoScaleDecision.cs.
-    // See the class remarks on AutoScaleAlgorithmComparison for why this copy exists.
+    // Ported verbatim from the original internal AutoScaleDecision class (since deleted - see
+    // the class remarks above on AutoScaleAlgorithmComparison for why this copy exists).
     internal static class MedianDecision
     {
         public static double Median(IReadOnlyCollection<int> samples)
@@ -291,9 +291,9 @@ namespace RingBufferPlus.Benchmarks
         }
     }
 
-    // The v6 design proposal's Monitor algorithm (see doc/adr conversation history - not yet
-    // its own ADR). Sliding-window percentile + safety buffer as the "fair level", adjusted by
-    // a linear-regression trend projected `horizon` ticks ahead, clamped to [min, max].
+    // The Monitor algorithm formalized in ADR003V03: a sliding-window percentile plus a safety
+    // buffer as the "fair level", adjusted by a linear-regression trend projected `horizon`
+    // ticks ahead, and clamped to [min, max].
     internal static class PercentileRegressionDecision
     {
         public static double Percentile(IReadOnlyList<int> samples, double p)

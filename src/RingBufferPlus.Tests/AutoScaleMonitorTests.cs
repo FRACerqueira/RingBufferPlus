@@ -3,10 +3,10 @@
 // The maintenance and evolution is maintained by the RingBufferPlus project under MIT license
 // ***************************************************************************************
 //
-// Acceptance tests for the v6.0.0 Monitor algorithm (ADR003V03), ported and validated in
-// isolation before being wired into the engine - see the class remarks on AutoScaleMonitor and
-// benchmarks/RingBufferPlus.Benchmarks/AutoScaleAlgorithmComparison.cs, whose
-// PercentileRegressionDecision this file's expectations are ported from.
+// Acceptance tests for the Monitor algorithm (ADR003V03) - see the class remarks on
+// AutoScaleMonitor. Expected values are ported from
+// benchmarks/RingBufferPlus.Benchmarks/AutoScaleAlgorithmComparison.cs's
+// PercentileRegressionDecision.
 
 using RingBufferPlus.Core;
 
@@ -102,10 +102,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void EvaluateTarget_RisingTrend_ProjectsAboveTheFairLevelAlone()
         {
-            // Strictly increasing demand (slope +1): the regression term must push the target
-            // above the fair level (percentile+buffer) computed from that same window alone,
-            // isolating the trend's own contribution rather than comparing across two different
-            // windows.
+            // Strictly increasing demand (slope +1): the trend term must push the target above
+            // the fair level (percentile + buffer) computed from the same window, isolating the
+            // trend's own effect.
             var rising = Enumerable.Range(0, 20).Select(i => 10 + i).ToArray(); // 10..29
             var fairOnly = (int)Math.Ceiling(AutoScaleMonitor.Percentile(rising, 0.95) * 1.10);
             var target = AutoScaleMonitor.EvaluateTarget(rising, percentileP: 0.95, safetyBuffer: 0.10, horizon: 5, min: 2, max: 64);
@@ -135,9 +134,9 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void EvaluateTarget_IsClampedToMin_EvenWhenTheFormulaWouldFallBelowIt()
         {
-            // A steep falling trend projected `horizon` ticks ahead can go negative; the floor
-            // must still hold. p95=17.75, fair=19.525, slope=-5, target=19.525-25=-5.475 - well
-            // below the floor without the clamp.
+            // A steep falling trend projected `horizon` ticks ahead can go negative - the floor
+            // must still hold. Here: p95=17.75, fair=19.525, slope=-5, so target=19.525-25=
+            // -5.475, well below the floor without the clamp.
             var falling = Enumerable.Range(0, 10).Select(i => 20 - (i * 5)).ToArray();
             var target = AutoScaleMonitor.EvaluateTarget(
                 falling, percentileP: 0.95, safetyBuffer: 0.10, horizon: 5, min: 4, max: 32);

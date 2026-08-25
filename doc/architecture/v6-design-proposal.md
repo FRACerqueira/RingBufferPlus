@@ -28,9 +28,9 @@ v6.0.0 is justified not by reopening that rejected option, but on its own terms:
 
 `develop`'s ADR001V02 already established the principle that matters: a single owner mutates all capacity state; satellites only send commands. v6 generalizes this to more satellites without violating that principle — it does **not** move to a "three independent actors" model (that would reopen the exact class of bug ADR001 was written to close, and would forfeit `develop`'s 8 rounds / 121 findings of hardening for no reason).
 
-- **Orquestrador** — the single owner. Owns `Channel<T>`, handles acquire/return/invalidate, tracks available / in-flight-creating / in-flight-removing, derives `CurrentCapacity` and the capacity-state properties. Only it ever increments or decrements the authoritative counters, and only on confirmed completion from a satellite — never on request.
-- **Fábrica** — executes "create N" commands from the Orquestrador. Runs the user factory with its own per-call timeout (`FactoryTimeout`), applies a simple growing backoff after consecutive failures (self-protection against hammering a broken factory — not a circuit-breaker state machine), reports completed count and last fault. Concurrency is bounded by a small new parameter (`MaxConcurrentFactoryCalls`) — this is what prevents a large backlog spike from flooding a struggling downstream with simultaneous connection attempts (see §5).
-- **Remoção** — executes "dispose these N items" commands (the Orquestrador dequeues them from the channel first — Remoção never touches the channel directly). Isolated because disposal can block (a real network round-trip for a DB/AMQP connection), same reasoning that justified isolating Fábrica.
+- **Orchestrator** — the single owner. Owns `Channel<T>`, handles acquire/return/invalidate, tracks available / in-flight-creating / in-flight-removing, derives `CurrentCapacity` and the capacity-state properties. Only it ever increments or decrements the authoritative counters, and only on confirmed completion from a satellite — never on request.
+- **Creator** — executes "create N" commands from the Orchestrator. Runs the user factory with its own per-call timeout (`FactoryTimeout`), applies a simple growing backoff after consecutive failures (self-protection against hammering a broken factory — not a circuit-breaker state machine), reports completed count and last fault. Concurrency is bounded by a small new parameter (`MaxConcurrentFactoryCalls`) — this is what prevents a large backlog spike from flooding a struggling downstream with simultaneous connection attempts (see §5).
+- **Removal** — executes "dispose these N items" commands (the Orchestrator dequeues them from the channel first — Removal never touches the channel directly). Isolated because disposal can block (a real network round-trip for a DB/AMQP connection), same reasoning that justified isolating Creator.
 - **Monitor** — the slow/predictive layer (§4). Purely computational: samples a signal, computes a target, reports it. Never mutates state directly.
 
 ## 4. Autoscale algorithm: percentile + regression, replacing the median (backed by evidence, not just judgment)
@@ -51,17 +51,17 @@ The shipped `AutoScaleReactionBenchmarks` (run against `develop` during this ana
 
 **Decision**: the reactive path triggers on real-time backlog depth (callers currently waiting) rather than counting acquire faults — it reacts before any timeout elapses, and proportionally to the actual gap (`waiting − available`), not a coarse tier jump.
 
-**Thundering-herd mitigation** (a downstream that is slow-but-technically-healthy, not actually short of capacity, must not get *more* concurrent connections thrown at it): the Orquestrador always nets out already-in-flight creation before issuing a new request (no duplicate requests across overlapping backlog waves), and Fábrica's bounded concurrency (§3) throttles how fast new instances can ever be created — if the downstream really is unhealthy, the throttled creation attempts themselves start failing and trip the existing backoff, closing the loop without a circuit-breaker. Lease duration is exposed as an observability metric (not acted on automatically) so an operator can distinguish "pool undersized" from "downstream slow."
+**Thundering-herd mitigation** (a downstream that is slow-but-technically-healthy, not actually short of capacity, must not get *more* concurrent connections thrown at it): the Orchestrator always nets out already-in-flight creation before issuing a new request (no duplicate requests across overlapping backlog waves), and Creator's bounded concurrency (§3) throttles how fast new instances can ever be created — if the downstream really is unhealthy, the throttled creation attempts themselves start failing and trip the existing backoff, closing the loop without a circuit-breaker. Lease duration is exposed as an observability metric (not acted on automatically) so an operator can distinguish "pool undersized" from "downstream slow."
 
 ## 6. Capacity model and the floor guard
 
 - `min`, `max`, optional `target` (defaults to `min` in elastic mode) — explicit, named, validated at configuration time. `min == max` means no elasticity; `target`, if given, must equal both, else a configuration error.
 - **Floor guard**: `available ≤ min` triggers an immediate, undebounced replenishment request — highest priority of all signals. The public "below minimum" flag only becomes true if that replenishment fails to restore `min` within one `FactoryTimeout` cycle (reusing the existing parameter as the grace window, adding no new one) — a real blip self-heals invisibly; a genuinely broken factory is reported truthfully, just not instantly on the first touch of the floor.
-- Signal priority inside the Orquestrador: **floor guard > backlog-reactive > manual pin (while active) > Monitor (predictive)**.
+- Signal priority inside the Orchestrator: **floor guard > backlog-reactive > manual pin (while active) > Monitor (predictive)**.
 
 ## 7. Manual scale: a temporary pin, not a competing mode
 
-v4/`develop` treated automatic and manual scaling as mutually exclusive modes (silently in v4, a compile-time exclusion in `develop`'s ADR007V02). v6 has no such mode switch — the three automatic signals are always active for an elastic pool, so `SwitchToAsync` is redefined as a **temporary pin**: it substitutes for the Monitor's predictive output for an explicit, mandatory duration (no default — this project has twice shipped a silent, permanent behavioral trap from an unbounded scaling override; a mandatory duration prevents a third instance). The floor guard and backlog-reactive signals are never suppressed by a pin — real waiting callers and the safety floor are always honored regardless of what an operator pinned earlier. `LockWhenScaling` stays removed (already decided in `develop`'s ADR007V02 amendment; the async, command-queue-based Orquestrador model has no blocking-caller concept to reintroduce).
+v4/`develop` treated automatic and manual scaling as mutually exclusive modes (silently in v4, a compile-time exclusion in `develop`'s ADR007V02). v6 has no such mode switch — the three automatic signals are always active for an elastic pool, so `SwitchToAsync` is redefined as a **temporary pin**: it substitutes for the Monitor's predictive output for an explicit, mandatory duration (no default — this project has twice shipped a silent, permanent behavioral trap from an unbounded scaling override; a mandatory duration prevents a third instance). The floor guard and backlog-reactive signals are never suppressed by a pin — real waiting callers and the safety floor are always honored regardless of what an operator pinned earlier. `LockWhenScaling` stays removed (already decided in `develop`'s ADR007V02 amendment; the async, command-queue-based Orchestrator model has no blocking-caller concept to reintroduce).
 
 ## 8. Remaining public surface
 
@@ -70,7 +70,7 @@ v4/`develop` treated automatic and manual scaling as mutually exclusive modes (s
 - **OnError** — kept, simplified to `Action<Exception>` (the logger is already configured separately), called inline, no queue.
 - **HostingExtensions** — `WarmupRingBufferAsync` (which ADR006 already flagged for an ignored `token` and a null-check that can never fire) is replaced by a proper `IHostedService` that calls `BuildWarmupAsync` with its own `StartAsync(CancellationToken)` token — fixes both known bugs at the root via the idiomatic .NET hosting contract, instead of patching the existing bespoke extension.
 - **`AcquireDelayAttempts`** — removed; it configured a manual polling loop's delay that no longer exists once acquire is a `Channel<T>` read with a linked timeout token (already true in `develop`, just not yet reflected in the parameter list).
-- **`RingBufferValue<T>` / `Invalidate`** — stays `IAsyncDisposable` exclusive (ADR005, reused). Disposing an invalidated lease is a fast, non-blocking notification to the Orquestrador, which hands the actual disposal to the Remoção actor — the caller's `DisposeAsync()` never blocks on real I/O.
+- **`RingBufferValue<T>` / `Invalidate`** — stays `IAsyncDisposable` exclusive (ADR005, reused). Disposing an invalidated lease is a fast, non-blocking notification to the Orchestrator, which hands the actual disposal to the Removal actor — the caller's `DisposeAsync()` never blocks on real I/O.
 
 ## 9. What this reuses from `develop` unchanged
 
@@ -81,7 +81,7 @@ v4/`develop` treated automatic and manual scaling as mutually exclusive modes (s
 | Decision area | ADR action |
 |---|---|
 | v6.0.0 mandate, given a real v5.0.0 release | New ADR, explicitly superseding ADR006's version-scoped promise |
-| Concurrency model (Orquestrador/Fábrica/Remoção/Monitor, floor guard, bounded factory concurrency) | Revise ADR001 (new version) |
+| Concurrency model (Orchestrator/Creator/Removal/Monitor, floor guard, bounded factory concurrency) | Revise ADR001 (new version) |
 | Autoscale algorithm (percentile+regression+deadband+window-reset) | Revise ADR003 (new version), backed by `AutoScaleAlgorithmComparison` |
 | Reactive path (backlog depth, not fault count) | Part of the ADR001 revision |
 | Capacity model (`target`), manual pin, HeartBeat/Logger/OnError/HostingExtensions/`AcquireDelayAttempts` | Revise ADR007 (new version) |

@@ -8,22 +8,20 @@ using Microsoft.Extensions.Logging;
 
 namespace RingBufferPlus.Benchmarks
 {
-    // Round 2 (Desempenho, v6 pre-release audit): confirms with a real number that
-    // RingBufferManager.LogMessage's `IsEnabled(LogLevel.Debug)` guard (added this round; it was
-    // missing before) actually avoids the interpolated-string + closure cost on every Monitor
-    // tick when a Logger is configured but Debug is not enabled - none of the other 3 new
-    // benchmarks added this round configure `.Logger(...)` at all, so none of them exercised this
-    // path either before or after the fix.
+    // Confirms with a real number that RingBufferManager.LogMessage's `IsEnabled(LogLevel.Debug)`
+    // guard actually avoids the interpolated-string + closure cost on every Monitor tick, when a
+    // Logger is configured but Debug is not enabled. The other benchmarks in this project don't
+    // configure `.Logger(...)` at all, so none of them exercise this path.
     //
     // This mirrors LogMessage's body verbatim (guard, then DateTime.Now + string interpolation,
-    // then a closure passed to a LoggerMessage.Define-style delegate) rather than calling the
-    // private method itself, the same technique MonitorTickCostBenchmarks already uses for
-    // ProcessTick's sample-window logic. Logger/Name are read from *instance fields*, not method
-    // parameters, deliberately matching RingBufferManager's own shape: the closure below captures
-    // `this` (for the fields) and `msg` (a local declared after the guard), so the compiler-
-    // generated display class is allocated after the early return, not before it - the same as
-    // production. A parameter-captured logger would force the display class to be allocated at
-    // method entry, before the guard runs, and understate the guard's real saving.
+    // then a closure passed to a LoggerMessage.Define-style delegate) instead of calling the
+    // private method itself - the same technique MonitorTickCostBenchmarks uses for ProcessTick's
+    // sample-window logic. Logger/Name are read from *instance fields*, not method parameters, to
+    // match RingBufferManager's own shape: the closure below captures `this` (for the fields) and
+    // `msg` (a local declared after the guard), so the compiler-generated display class is
+    // allocated after the early return, not before it - same as production. A parameter-captured
+    // logger would force that allocation at method entry, before the guard runs, and understate
+    // the guard's real saving.
     [MemoryDiagnoser]
     public class MonitorTickLogGuardBenchmarks
     {
@@ -41,13 +39,13 @@ namespace RingBufferPlus.Benchmarks
         [GlobalSetup]
         public void Setup() => _logger = new FixedEnabledLogger(enabled: Mode == "DebugEnabled");
 
-        // Guard added this round (Round 2): `if (Logger is null || !Logger.IsEnabled(LogLevel.Debug)) return;`
+        // The guard being measured: `if (Logger is null || !Logger.IsEnabled(LogLevel.Debug)) return;`
         [Benchmark(Baseline = true)]
         public void LogMessage_WithGuard() => LogMessageWithGuard();
 
-        // Pre-fix behavior (Round 1): `if (Logger is null) return;` only - no IsEnabled check, so
-        // this always pays the format + closure cost once any Logger is configured, regardless of
-        // whether Debug is enabled.
+        // The old behavior, without the guard: `if (Logger is null) return;` only - no
+        // IsEnabled check, so this always pays the format + closure cost once any Logger is
+        // configured, regardless of whether Debug is enabled.
         [Benchmark]
         public void LogMessage_WithoutGuard() => LogMessageWithoutGuard();
 

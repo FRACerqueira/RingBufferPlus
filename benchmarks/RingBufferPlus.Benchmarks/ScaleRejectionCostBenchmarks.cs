@@ -10,15 +10,14 @@ using RingBufferPlus;
 
 namespace RingBufferPlus.Benchmarks
 {
-    // Round 1 (v6 pre-release audit, auditoria-desempenho gap): measures how fast SwitchToAsync
-    // returns `false` (rejected, not queued) when a scale batch is already in flight
-    // (ADR001V03: at most one such batch at a time) - the cost of the rejection path itself, not
-    // the batch it's rejected against.
+    // Measures how fast SwitchToAsync returns `false` (rejected, not queued) when a scale batch
+    // is already in flight (ADR001V03: at most one such batch at a time). This isolates the cost
+    // of the rejection path itself, not the batch it's rejected against.
     //
-    // RunStrategy.Monitoring pins InvocationCount to 1 per iteration, same reasoning as
-    // ScaleCostBenchmarks: IterationSetup only runs once per iteration, and this benchmark's own
-    // precondition (a batch genuinely in flight) would no longer hold on a second invocation
-    // within the same iteration once the first rejected call itself completes near-instantly.
+    // RunStrategy.Monitoring pins InvocationCount to 1 per iteration, for the same reason as
+    // ScaleCostBenchmarks: IterationSetup only runs once per iteration. This benchmark's own
+    // precondition - a batch genuinely in flight - would stop holding on a second invocation in
+    // the same iteration, since the first rejected call completes almost instantly.
     [SimpleJob(RunStrategy.Monitoring, launchCount: 1, warmupCount: 2, iterationCount: 10)]
     [MemoryDiagnoser]
     public class ScaleRejectionCostBenchmarks
