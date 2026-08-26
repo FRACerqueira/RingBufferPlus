@@ -65,33 +65,20 @@ namespace RingBufferPlusRabbitSample
             //create connection
             connectionRabbit = await connectionFactory!.CreateConnectionAsync(cts.Token);
 
-            //create ring buffer, no lock while scaling
+            var logger = hostApp.Services.GetService<ILogger<Program>>();
+
+            //create ring buffer with autoscale (always on for an elastic pool since v6.0.0)
             var rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Logger(hostApp.Services.GetService<ILogger<Program>>())
-                .BackgroundLogger()
+                .Logger(logger)
                 .Factory((token) => ChannelFactory(token)!)
-                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault()
-                .BuildWarmupAsync(cts.Token);
-
-            ReportCapacity(rb);
-            await RunLoadTestAsync(rb, cts.Token);
-
-            Console.WriteLine("Dispose ring buffer");
-            await rb.DisposeAsync();
-            cts.Cancel();
-            cts.Dispose();
-
-            cts = CancellationTokenSource.CreateLinkedTokenSource(tokenapplifetime);
-
-            //create ring buffer again, this time locking acquire/switch while scaling
-            rb = await RingBuffer<IChannel>.New("RabbitChanels")
-                .Logger(hostApp.Services.GetService<ILogger<Program>>())
-                .BackgroundLogger()
-                .Factory((token) => ChannelFactory(token)!)
-                .ElasticCapacity(10, 5, 20, 50, TimeSpan.FromSeconds(5))
-                .LockWhenScaling()
-                .AutoScaleAcquireFault()
+                // Raised from the default (4): this pool's range (5-20) is wide enough that
+                // warmup and scale-up batches benefit from opening more channels in parallel
+                // over the shared connection.
+                .ElasticCapacity(5, 20, 10, 50, TimeSpan.FromSeconds(5), maxConcurrentFactoryCalls: 8)
+                // OnError replaces this buffer's own Error-level logging instead of adding to
+                // it, so route it back through the same logger here - e.g. a transient RabbitMQ
+                // connection drop while opening a channel during warmup or scale-up.
+                .OnError(ex => logger?.LogError(ex, "RingBufferPlus factory error"))
                 .BuildWarmupAsync(cts.Token);
 
             ReportCapacity(rb);
@@ -104,8 +91,8 @@ namespace RingBufferPlusRabbitSample
         }
 
         // Publishes from WorkerCount concurrent tasks for 60 seconds, sharing one ring buffer of
-        // RabbitMQ channels - this is the pattern channel pooling exists for: many concurrent
-        // publishers, one shared IConnection, no per-publish channel-open cost.
+        // RabbitMQ channels. This is exactly what channel pooling is for: many concurrent
+        // publishers share one IConnection, with no per-publish channel-open cost.
         private static async Task RunLoadTestAsync(IRingBufferService<IChannel> rb, CancellationToken shutdownToken)
         {
             Console.WriteLine($"Wait... 20 sec. before starting {WorkerCount} concurrent workers");

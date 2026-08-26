@@ -29,13 +29,14 @@ namespace RingBufferPlusApiSample
                 var applifetime = services.GetService<IHostApplicationLifetime>();
                 return ringbuf
                         .Factory((cts) => { return Task.FromResult(10); })
-                        .ElasticCapacity(5, 2, 7)
+                        .ElasticCapacity(2, 7, 5)
                         .Build(applifetime!.ApplicationStopping);
             });
 
             var app = builder.Build();
 
-            await app.WarmupRingBufferAsync<int>("Mybuffer");
+            // Warmup now happens automatically: AddRingBuffer<T> registers a hosted service that
+            // runs it during the host's own startup.
 
             // Configure the HTTP request pipeline.
             if (app.Environment.IsDevelopment())

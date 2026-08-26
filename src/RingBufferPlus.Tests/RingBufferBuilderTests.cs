@@ -49,7 +49,7 @@ namespace RingBufferPlus.Tests
         {
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
+                .ElasticCapacity(2, 10, 5)
                 .Build();
 
             Assert.Equal(5, service.Capacity);
@@ -57,31 +57,73 @@ namespace RingBufferPlus.Tests
             Assert.Equal(10, service.MaxCapacity);
         }
 
+        // ---------------------------------------------------------------------
+        // `target` as an explicit, optional third parameter (ADR007V03): defaults to `minCapacity`
+        // when omitted ("provision for demand, not worst case"); `minCapacity == maxCapacity` is a
+        // valid, degenerate elastic configuration (no real elasticity), not an error - but an
+        // explicitly-given `target` must still equal both in that case, same as the general
+        // target-must-be-within-[min,max] rule already enforces.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public void ElasticCapacity_WhenTargetOmitted_DefaultsToMinCapacity()
+        {
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(2, 10)
+                .Build();
+
+            Assert.Equal(2, service.Capacity);
+            Assert.Equal(2, service.MinCapacity);
+            Assert.Equal(10, service.MaxCapacity);
+        }
+
+        [Fact]
+        public void ElasticCapacity_WhenMinEqualsMaxAndTargetOmitted_BuildsSuccessfully()
+        {
+            var service = CreateBuilder()
+                .Factory(_ => Task.FromResult(0))
+                .ElasticCapacity(5, 5)
+                .Build();
+
+            Assert.Equal(5, service.Capacity);
+            Assert.Equal(5, service.MinCapacity);
+            Assert.Equal(5, service.MaxCapacity);
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenMinEqualsMaxAndTargetDiffers()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 5, 6);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
         [Fact]
         public void ElasticCapacity_ReturnsManualScaleService()
         {
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
+                .ElasticCapacity(2, 10, 5)
                 .Build();
 
             Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
         }
 
         [Fact]
-        public async Task ElasticCapacity_WithAutoScaleAcquireFault_HidesManualSwitchAtCompileTime_AndThrowsIfCastBack()
+        public async Task FixedCapacity_HidesManualSwitchAtCompileTime_AndThrowsIfCastBack()
         {
             IRingBufferService<int> service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
-                .AutoScaleAcquireFault(3)
+                .FixedCapacity(5)
                 .Build();
 
             // ADR007: Build() above statically returns IRingBufferService<int> - SwitchToAsync is not
-            // in scope at compile time. A caller that casts back to IRingBufferManualScaleService<int>
-            // must not silently no-op; it must fail loudly (see the advisor note on the escaped-cast path).
+            // in scope at compile time for a fixed-capacity buffer (it has nothing to scale). A caller
+            // that casts back to IRingBufferManualScaleService<int> must not silently no-op; it must
+            // fail loudly.
             var escaped = Assert.IsAssignableFrom<IRingBufferManualScaleService<int>>(service);
-            await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity));
+            await Assert.ThrowsAsync<InvalidOperationException>(() => escaped.SwitchToAsync(ScaleSwitch.MaxCapacity, TimeSpan.FromMinutes(1)));
 
             await service.DisposeAsync();
         }
@@ -89,7 +131,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void OnError_ShouldSetErrorHandler()
         {
-            Action<ILogger?, Exception> errorHandler = (logger, ex) => { };
+            Action<Exception> errorHandler = ex => { };
 
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
@@ -99,22 +141,6 @@ namespace RingBufferPlus.Tests
 
             var errorHandlerfield = service.GetType().GetProperty("ErrorHandler")!;
             Assert.NotNull(errorHandlerfield.GetValue(service));
-        }
-
-        [Fact]
-        public void AutoScaleAcquireFault_ShouldSetAutoScaleFault()
-        {
-            var service = CreateBuilder()
-                .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10)
-                .AutoScaleAcquireFault(5)
-                .Build();
-
-            var autoScaleFaultField = service.GetType().GetProperty("AutoScaleFault")!;
-            var numberFaultField = service.GetType().GetProperty("NumberFault")!;
-
-            Assert.True((bool)autoScaleFaultField.GetValue(service)!);
-            Assert.Equal((byte)5, (byte)numberFaultField.GetValue(service)!);
         }
 
         [Fact]
@@ -135,7 +161,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void HeartBeat_ShouldSetHeartBeat()
         {
-            Action<RingBufferValue<int>> heartBeat = value => { };
+            Func<int, bool> heartBeat = value => true;
 
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
@@ -175,24 +201,11 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public void BackgroundLogger_ShouldSetBackgroundLogger()
-        {
-            var service = CreateBuilder()
-                .Factory(_ => Task.FromResult(0))
-                .BackgroundLogger(true)
-                .FixedCapacity(2)
-                .Build();
-
-            var backgroundLoggerField = service.GetType().GetProperty("BackgroundLogger")!;
-            Assert.True((bool)backgroundLoggerField.GetValue(service)!);
-        }
-
-        [Fact]
         public void ElasticCapacity_ShouldSetSampleUnitAndBaseTime()
         {
             var service = CreateBuilder()
                 .Factory(_ => Task.FromResult(0))
-                .ElasticCapacity(5, 2, 10, 10, TimeSpan.FromSeconds(5))
+                .ElasticCapacity(2, 10, 5, 10, TimeSpan.FromSeconds(5))
                 .Build();
 
             var samplesBaseField = service.GetType().GetProperty("SamplesBase")!;
@@ -235,9 +248,42 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
+        public void ValidateBuild_LogsTheRealValidationException_NotNull()
+        {
+            // LogError must pass the real exception as the Exception parameter, not null - a
+            // structured logging sink (Application Insights, Serilog) reading the canonical
+            // Exception field would otherwise get nothing for a builder validation error.
+            _loggerMock.Setup(l => l.IsEnabled(LogLevel.Error)).Returns(true);
+            Exception? capturedException = null;
+            _loggerMock.Setup(l => l.Log(
+                It.IsAny<LogLevel>(),
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()))
+                .Callback(new InvocationAction(invocation => capturedException = invocation.Arguments[3] as Exception));
+
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).FixedCapacity(1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+            Assert.NotNull(capturedException);
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenPulseHeartBeatIsZero()
+        {
+            // PulseHeartBeat sustains several disposal bounds regardless of Elastic/HeartBeat
+            // configuration - a zero value must be rejected at Build() time, or every defensive
+            // dispose would expire instantly.
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).HeartBeat(_ => true, TimeSpan.Zero).FixedCapacity(2);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsLessThanTwo()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 1, 10);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(1, 10, 5);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -245,7 +291,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMaxCapacityIsLessThanTwo()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 2, 1);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 1, 2);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -253,7 +299,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsGreaterThanMaxCapacity()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 10, 5);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(10, 5, 5);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -261,7 +307,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMinCapacityIsGreaterThanInitialCapacity()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 10, 12);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(10, 12, 5);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -269,7 +315,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenMaxCapacityIsLessThanInitialCapacity()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(10, 2, 5);
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 5, 10);
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -277,7 +323,7 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenSampleUnitIsLessThanOne()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 0, TimeSpan.FromSeconds(5));
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5, 0, TimeSpan.FromSeconds(5));
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
@@ -285,9 +331,62 @@ namespace RingBufferPlus.Tests
         [Fact]
         public void ValidateBuild_ShouldThrowException_WhenSampleBaseTimeIsLessThan100ms()
         {
-            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(5, 2, 10, 10, TimeSpan.FromMilliseconds(500));
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5, 10, TimeSpan.FromMilliseconds(500));
 
             Assert.Throws<InvalidOperationException>(() => builder.Build());
         }
+
+        // ---------------------------------------------------------------------
+        // ADR003V03: MonitorTuning's four parameters back the Monitor's predictive autoscale
+        // algorithm - out-of-range values would otherwise surface as an unhandled exception deep
+        // inside AutoScaleMonitor.EvaluateTarget (e.g. an out-of-[0,1] percentile indexing past the
+        // sorted samples array) instead of a clear build-time validation error.
+        // ---------------------------------------------------------------------
+
+        [Theory]
+        [InlineData(0)]
+        [InlineData(-0.1)]
+        [InlineData(1.1)]
+        public void ValidateBuild_ShouldThrowException_WhenPercentilePIsOutOfRange(double percentileP)
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5).MonitorTuning(percentileP: percentileP);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenSafetyBufferIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5).MonitorTuning(safetyBuffer: -0.01);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenHorizonIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5).MonitorTuning(horizon: -1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void ValidateBuild_ShouldThrowException_WhenDeadbandIsNegative()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5).MonitorTuning(deadband: -1);
+
+            Assert.Throws<InvalidOperationException>(() => builder.Build());
+        }
+
+        [Fact]
+        public void MonitorTuning_WithValidValues_BuildsSuccessfully()
+        {
+            var builder = CreateBuilder().Factory(_ => Task.FromResult(0)).ElasticCapacity(2, 10, 5).MonitorTuning(0.90, 0.20, 3, 1);
+
+            var service = builder.Build();
+
+            Assert.NotNull(service);
+        }
+
     }
 }

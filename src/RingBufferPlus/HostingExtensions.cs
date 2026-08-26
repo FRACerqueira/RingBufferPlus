@@ -18,60 +18,69 @@ namespace Microsoft.Extensions.DependencyInjection
     public static class HostingExtensions
     {
         /// <summary>
-        /// Add RingBuffer in ServiceCollection.
+        /// Add RingBuffer in ServiceCollection, warming it up automatically once the host starts.
         /// </summary>
+        /// <remarks>
+        /// Warmup is no longer a separate opt-in step - an <see cref="IHostedService"/>
+        /// is registered alongside the pool and calls <see cref="IRingBufferService{T}.WarmupAsync(CancellationToken)"/>
+        /// automatically in its own <c>StartAsync</c>, using that call's own token.
+        /// </remarks>
         /// <typeparam name="T">Type of buffer.</typeparam>
         /// <param name="serviceCollection">The <see cref="IServiceCollection"/>.</param>
         /// <param name="buffername">The unique name to RingBuffer.</param>
         /// <param name="userfunc">The Handler to return the <see cref="IRingBufferService{T}"/>.</param>
         /// <returns><see cref="IServiceCollection"/>.</returns>
-        /// <exception cref="ArgumentNullException">Buffer name null or empty</exception>
+        /// <exception cref="ArgumentNullException">Buffer name is null. An empty string is accepted.</exception>
         public static IServiceCollection AddRingBuffer<T>(this IServiceCollection serviceCollection, string buffername, Func<IRingBufferBuilder<T>, IServiceProvider, IRingBufferService<T>> userfunc)
         {
             ArgumentNullException.ThrowIfNull(buffername);
 
-            serviceCollection.AddSingleton((service) =>
+            // Registered under a DI key (buffername) so the hosted service below resolves exactly
+            // this buffer, without touching any other AddRingBuffer<T> registration of the same T.
+            // A broken userfunc for buffer "B" must not fault buffer "A"'s startup.
+            //
+            // The plain (unkeyed) singleton right after this one only forwards to the same keyed
+            // instance - it exists to preserve the documented IEnumerable<IRingBufferService<T>>/
+            // "last one wins" constructor-injection behavior (see usage-dependency-injection.md),
+            // not to build a second, divergent instance.
+            serviceCollection.AddKeyedSingleton(buffername, (service, _) =>
             {
                 var loggerFactory = service.GetService<ILoggerFactory>();
                 return userfunc.Invoke(new RingBufferBuilder<T>(buffername, loggerFactory), service);
             });
+            serviceCollection.AddSingleton(service => service.GetRequiredKeyedService<IRingBufferService<T>>(buffername));
+            // AddHostedService<T>(factory) registers via TryAddEnumerable, which dedups by
+            // (ServiceType, ImplementationType). RingBufferWarmupHostedService<T> is the same
+            // closed generic type for every AddRingBuffer<T> call sharing this T, regardless of
+            // buffername - so a second or third call for the same T would silently register zero
+            // IHostedService entries (no exception, no log), and only the first buffer of that T
+            // would get its automatic warmup.
+            //
+            // AddSingleton<IHostedService> is additive instead - not deduped by type - so each
+            // call genuinely registers its own hosted service instance.
+            serviceCollection.AddSingleton<IHostedService>(service => new RingBufferWarmupHostedService<T>(service, buffername));
             return serviceCollection;
         }
+    }
 
-        /// <summary>
-        /// Warms up with full capacity ready or reaching timeout.
-        /// </summary>
-        /// <remarks>
-        /// It is recommended to use this method in the initialization of the application.
-        /// <para>If you do not use this command, the first access to buffer services (<see cref="IRingBufferService{T}"/>) will trigger warmup instead (not recommended).</para>
-        /// </remarks>
-        /// <typeparam name="T">Type of buffer.</typeparam>
-        /// <param name="appbluild">The <see cref="IHost"/>.</param>
-        /// <param name="buffername">The unique name to RingBuffer.</param>
-        /// <param name="token">The <see cref="CancellationToken"/>. Default value is <see cref="IHostApplicationLifetime.ApplicationStopping"/>.</param>
-        /// <exception cref="ArgumentNullException">Buffer name null or empty, or buffer not found.</exception>
-        public static async Task WarmupRingBufferAsync<T>(this IHost appbluild, string buffername, CancellationToken? token = null)
+    // Registered once per AddRingBuffer<T> call (ADR007V03), so a host with several buffers of
+    // the same T gets one of these per buffername, each warming up only its own buffer.
+    // StartAsync's own token is used directly.
+    internal sealed class RingBufferWarmupHostedService<T>(IServiceProvider services, string buffername) : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken)
         {
-            ArgumentNullException.ThrowIfNull(buffername);
-
-            var rb = appbluild.Services.GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name == buffername);
+            // Resolved by DI key, not by enumerating and filtering every IRingBufferService<T> -
+            // see AddRingBuffer<T>'s own comment for why (this is what stops one buffer's broken
+            // factory from faulting another's startup).
+            var rb = services.GetKeyedService<IRingBufferService<T>>(buffername);
             if (rb is null)
             {
-                throw new ArgumentNullException(nameof(buffername), $"RingBuffer({buffername}) not found");
+                throw new InvalidOperationException($"RingBuffer({buffername}) not found");
             }
-
-            CancellationToken effectiveToken;
-            if (token is not null)
-            {
-                effectiveToken = token.Value;
-            }
-            else
-            {
-                var applifetime = appbluild.Services.GetService<IHostApplicationLifetime>();
-                effectiveToken = applifetime?.ApplicationStopping ?? CancellationToken.None;
-            }
-
-            await rb.WarmupAsync(effectiveToken);
+            return rb.WarmupAsync(cancellationToken);
         }
+
+        public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 }

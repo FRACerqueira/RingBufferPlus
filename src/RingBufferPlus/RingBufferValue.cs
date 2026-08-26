@@ -21,7 +21,7 @@ namespace RingBufferPlus
     {
         private readonly Func<RingBufferValue<T>, ValueTask>? _turnback = turnback;
         private readonly string _name = name;
-        private bool _disposed;
+        private int _disposed;
 
         /// <summary>
         /// Name of RingBuffer.
@@ -45,7 +45,7 @@ namespace RingBufferPlus
 
         /// <summary>
         /// Invalidates the return of the value to the buffer. A replacement instance will be created.
-        /// <br>This command will be ignored if the acquire was unsuccessful.</br>
+        /// <para>This command will be ignored if the acquire was unsuccessful.</para>
         /// </summary>
         public void Invalidate()
         {
@@ -60,13 +60,13 @@ namespace RingBufferPlus
         /// </summary>
         public async ValueTask DisposeAsync()
         {
-            if (!_disposed)
+            if (Interlocked.Exchange(ref _disposed, 1) != 0)
             {
-                _disposed = true;
-                if (_turnback is not null)
-                {
-                    await _turnback(this).ConfigureAwait(false);
-                }
+                return;
+            }
+            if (_turnback is not null)
+            {
+                await _turnback(this).ConfigureAwait(false);
             }
         }
 

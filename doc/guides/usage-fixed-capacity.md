@@ -32,11 +32,11 @@ await using (var buffer = await rb.AcquireAsync(cancellation))
 await rb.DisposeAsync();
 ```
 
-`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MinCapacity`/`MaxCapacity`/`AutoScaleAcquireFault`/`LockWhenScaling` are not offered as options: they would be meaningless for a fixed pool.
+`FixedCapacity(n)` returns an `IRingBufferFixedBuilder<T>` — a distinct type from the elastic path, so `MonitorTuning`/`LockWhenScaling`/`SwitchToAsync` are not offered as options: they would be meaningless for a fixed pool, which has no elastic range to tune, pin, or switch within. `MinCapacity`/`MaxCapacity` are not offered as separate *options* either, but that's a different reason: there's only one capacity value to configure here, not that they're meaningless — both still exist on the built service (equal to `Capacity`), and the floor guard still reads and acts on them (see below).
 
 ## What happens internally
 
-`BuildWarmupAsync` builds `n` items via `Factory` (respecting the per-call `Factory` timeout) and blocks asynchronously until all `n` are in the pool. From then on, `Capacity`, `MinCapacity`, and `MaxCapacity` all report the same value, and `IsInitCapacity`/`IsMinCapacity`/`IsMaxCapacity` are always `true` simultaneously — there is no scale engine activity beyond the optional heartbeat/logger background tasks.
+`BuildWarmupAsync` builds `n` items via `Factory` (respecting the per-call `Factory` timeout) and blocks asynchronously until all `n` are in the pool. From then on, `Capacity`, `MinCapacity`, and `MaxCapacity` all report the same value, and `IsInitCapacity`/`IsMinCapacity`/`IsMaxCapacity` are always `true` simultaneously — there is no *elastic* scale engine activity (no backlog-reactive signal, no Monitor, no `SwitchToAsync`) beyond the optional heartbeat/logger background tasks. The floor guard is the one exception: it still applies here too, and can produce real `scale.*` telemetry and the "below minimum capacity" log (see [the observability guide](usage-observability.md)) if a failed heartbeat- or `Invalidate()`-triggered replacement ever drops `CurrentCapacity` below this value.
 
 ## Trade-offs / limitations
 

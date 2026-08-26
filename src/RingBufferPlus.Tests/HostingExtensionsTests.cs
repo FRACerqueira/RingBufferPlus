@@ -29,7 +29,22 @@ namespace RingBufferPlus.Tests
         }
 
         [Fact]
-        public async Task WarmupRingBufferAsync_ShouldWarmupRingBuffer()
+        public void AddRingBuffer_ShouldAlsoRegisterAHostedServiceForWarmup()
+        {
+            // ADR007V03: AddRingBuffer<T> registers an IHostedService alongside the pool, so
+            // warmup happens automatically on host start - there is no separate opt-in call.
+            var services = new ServiceCollection();
+            Func<IRingBufferBuilder<int>, IServiceProvider, IRingBufferService<int>> userFunc = (buffer, provider) => Mock.Of<IRingBufferService<int>>();
+
+            services.AddRingBuffer("testBuffer", userFunc);
+            var serviceProvider = services.BuildServiceProvider();
+
+            var hostedServices = serviceProvider.GetServices<IHostedService>();
+            Assert.Contains(hostedServices, s => s.GetType().Name.StartsWith("RingBufferWarmupHostedService"));
+        }
+
+        [Fact]
+        public async Task HostedService_StartAsync_WarmsUpTheNamedBufferWithItsOwnToken()
         {
             // Arrange
             var ringBufferServiceMock = new Mock<IRingBufferService<int>>();
@@ -37,18 +52,96 @@ namespace RingBufferPlus.Tests
             ringBufferServiceMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
 
             var services = new ServiceCollection();
-            services.AddSingleton(ringBufferServiceMock.Object);
+            services.AddKeyedSingleton("testBuffer", ringBufferServiceMock.Object);
             var serviceProvider = services.BuildServiceProvider();
 
-            var hostMock = new Mock<IHost>();
-            hostMock.Setup(x => x.Services).Returns(serviceProvider);
+            var hostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "testBuffer");
+            using var explicitToken = new CancellationTokenSource();
 
-            // Act
-            await hostMock.Object.WarmupRingBufferAsync<int>("testBuffer");
+            // Act: StartAsync's own token must reach WarmupAsync directly, not a substitute.
+            await hostedService.StartAsync(explicitToken.Token);
 
             // Assert
-            ringBufferServiceMock.Verify(x => x.WarmupAsync(It.IsAny<CancellationToken>()), Times.Once);
+            ringBufferServiceMock.Verify(x => x.WarmupAsync(explicitToken.Token), Times.Once);
         }
 
+        [Fact]
+        public async Task HostedService_StartAsync_WhenBufferNotRegistered_Throws()
+        {
+            var services = new ServiceCollection();
+            var serviceProvider = services.BuildServiceProvider();
+
+            var hostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "missingBuffer");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() => hostedService.StartAsync(CancellationToken.None));
+        }
+
+        // ---------------------------------------------------------------------
+        // A naive lookup - GetServices<IRingBufferService<T>>().FirstOrDefault(x => x.Name ==
+        // buffername) - would force the DI container to construct every registered buffer, not
+        // just the named one, because FirstOrDefault enumerates in registration order until it
+        // matches. "bad" is registered before "good" here so that lookup strategy would hit
+        // "bad"'s factory first, faulting an otherwise-healthy buffer's startup.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public async Task HostedService_StartAsync_ForOneBuffer_DoesNotConstructAnUnrelatedBufferOfTheSameType()
+        {
+            var badFactoryInvoked = false;
+            var goodMock = new Mock<IRingBufferService<int>>();
+            goodMock.Setup(x => x.Name).Returns("good");
+            goodMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddRingBuffer<int>("bad", (_, _) =>
+            {
+                badFactoryInvoked = true;
+                throw new InvalidOperationException("bad buffer is intentionally broken");
+            });
+            services.AddRingBuffer<int>("good", (_, _) => goodMock.Object);
+
+            var serviceProvider = services.BuildServiceProvider();
+            var goodHostedService = new RingBufferWarmupHostedService<int>(serviceProvider, "good");
+
+            await goodHostedService.StartAsync(CancellationToken.None);
+
+            Assert.False(badFactoryInvoked, "Starting one buffer's hosted service must not construct an unrelated, differently-named buffer of the same T.");
+            goodMock.Verify(x => x.WarmupAsync(It.IsAny<CancellationToken>()), Times.Once);
+        }
+
+        // ---------------------------------------------------------------------
+        // AddHostedService<T>(factory) registers via TryAddEnumerable, which dedups by
+        // (ServiceType, ImplementationType). RingBufferWarmupHostedService<T> is the same closed
+        // generic type for every AddRingBuffer<T> call sharing this T, so without a different
+        // registration approach, every call after the first for a given T would silently
+        // register zero hosted services - only the first buffer of each T would get automatic
+        // warmup.
+        // ---------------------------------------------------------------------
+
+        [Fact]
+        public async Task AddRingBuffer_TwiceForTheSameT_BothGetTheirOwnHostedServiceAndWarmup()
+        {
+            var alphaMock = new Mock<IRingBufferService<int>>();
+            alphaMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+            var betaMock = new Mock<IRingBufferService<int>>();
+            betaMock.Setup(x => x.WarmupAsync(It.IsAny<CancellationToken>())).Returns(Task.CompletedTask);
+
+            var services = new ServiceCollection();
+            services.AddRingBuffer<int>("alpha", (_, _) => alphaMock.Object);
+            services.AddRingBuffer<int>("beta", (_, _) => betaMock.Object);
+
+            var serviceProvider = services.BuildServiceProvider();
+            var hostedServices = serviceProvider.GetServices<IHostedService>().ToList();
+
+            Assert.Equal(2, hostedServices.Count);
+
+            foreach (var hostedService in hostedServices)
+            {
+                await hostedService.StartAsync(CancellationToken.None);
+            }
+
+            alphaMock.Verify(x => x.WarmupAsync(It.IsAny<CancellationToken>()), Times.Once);
+            betaMock.Verify(x => x.WarmupAsync(It.IsAny<CancellationToken>()), Times.Once);
+        }
     }
 }

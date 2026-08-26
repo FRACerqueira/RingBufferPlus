@@ -7,16 +7,16 @@ namespace XmlDocMarkdownGenerator
         //perform XmlDoc Markdown Generator
         static int Main()
         {
-            if (Directory.Exists(@"..\..\..\..\docs\assemblies"))
+            if (Directory.Exists(@"..\..\..\..\..\doc\api\assemblies"))
             {
-                Directory.Delete(@"..\..\..\..\docs\assemblies", true);
+                Directory.Delete(@"..\..\..\..\..\doc\api\assemblies", true);
             }
 
-            var args = new string[] { "RingBufferPlus", @"..\..\..\..\docs\assemblies" };
+            var args = new string[] { "RingBufferPlus", @"..\..\..\..\..\doc\api\assemblies" };
             XmlDocMarkdownApp.Run(args);
 
             //create custom header and footer for namespaces
-            var files = Directory.GetFiles(@"..\..\..\..\docs\assemblies", "*.md");
+            var files = Directory.GetFiles(@"..\..\..\..\..\doc\api\assemblies", "*.md");
             foreach (var item in files)
             {
                 var content = File.ReadAllLines(item).ToList();
@@ -50,7 +50,7 @@ namespace XmlDocMarkdownGenerator
                 File.WriteAllLines(item, content);
             }
 
-            var folders = Directory.GetDirectories(@"..\..\..\..\docs\assemblies");
+            var folders = Directory.GetDirectories(@"..\..\..\..\..\doc\api\assemblies");
             foreach (var item in folders)
             {
                 var itemsfolder = Directory.GetDirectories(item);

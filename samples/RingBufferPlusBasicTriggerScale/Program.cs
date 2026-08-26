@@ -35,8 +35,12 @@ namespace RingBufferPlusBasicTriggerScale
                 .Logger(HostApp.Services.GetService<ILogger<Program>>())
                 .Factory((_) => { return Task.FromResult(rnd.Next(1, 10)); })
                 .AcquireTimeout(TimeSpan.FromMilliseconds(500))
-                .ElasticCapacity(3, 2, 4, 50, TimeSpan.FromSeconds(5))
-                .AutoScaleAcquireFault(0)
+                .ElasticCapacity(2, 4, 3, 50, TimeSpan.FromSeconds(5))
+                // The default deadband (3) exceeds the largest possible target-capacity gap in
+                // this sample's 2-4 range (2), so the Monitor could never dispatch a scale
+                // operation on its own. Lowering it to 1 lets the Monitor actually act; the
+                // other tuning parameters are left at their defaults.
+                .MonitorTuning(deadband: 1)
                 .BuildWarmupAsync(cts.Token);
 
             Console.WriteLine($"Ring Buffer name({rb.Name}) created.");
@@ -53,13 +57,12 @@ namespace RingBufferPlusBasicTriggerScale
             }
             sw.Reset();
 
-            //simulate 3 AcquireAsync to expire free resources
+            // Acquire 3 items at once, using up all the free resources.
             Console.WriteLine("Try 3 AcquireAsync");
             await using (var buffer1 = await rb.AcquireAsync(cts.Token))
             {
                 await using (var buffer2 = await rb.AcquireAsync(cts.Token))
                 {
-                    //AcquireAsync fault
                     await using (var buffer3 = await rb.AcquireAsync(cts.Token))
                     {
                         Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");
@@ -75,14 +78,14 @@ namespace RingBufferPlusBasicTriggerScale
             Console.WriteLine($"Ring Buffer name({rb.Name}) IsMinCapacity = {rb.IsMinCapacity}.");
 
             Console.WriteLine("Try 4 AcquireAsync");
-            //simulate 4 AcquireAsync to expire free resources
+            // Acquire 4 items at once, using up all the free resources.
             await using (var buffer1 = await rb.AcquireAsync(tokenapplifetime))
             {
                 await using (var buffer2 = await rb.AcquireAsync(tokenapplifetime))
                 {
-                    //AcquireAsync fault
                     await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
                     {
+                        // This 4th acquire may time out if the pool has not grown yet.
                         await using (var buffer4 = await rb.AcquireAsync(tokenapplifetime))
                         {
                             Console.WriteLine($"Buffer is ok({buffer1.Successful}:{buffer1.ElapsedTime}) value: {buffer1.Current}");

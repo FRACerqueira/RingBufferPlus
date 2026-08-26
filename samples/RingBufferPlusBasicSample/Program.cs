@@ -54,6 +54,8 @@ namespace RingBufferPlusBasicSample
             await using (var buffer3 = await rb.AcquireAsync(tokenapplifetime))
             {
                 Console.WriteLine($"Buffer is ok({buffer3.Successful}:{buffer3.ElapsedTime}) value: {buffer3.Current}");
+                // Discards this item instead of returning it to the pool on dispose - a
+                // replacement is created in its place.
                 buffer3.Invalidate();
             }
 
@@ -62,9 +64,11 @@ namespace RingBufferPlusBasicSample
             Console.WriteLine("Ring Buffer disposed.");
         }
 
-        private static void MyHeartBeat(RingBufferValue<int> value)
+        private static bool MyHeartBeat(int value)
         {
-            //do anything with value ex: health check
+            // Do anything with the value here, e.g. a health check.
+            // Return false to discard it instead - a replacement is created automatically.
+            return true;
         }
 
         private static IHostBuilder CreateHostBuilder(string[] args) =>

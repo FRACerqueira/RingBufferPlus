@@ -48,17 +48,35 @@ The `RingBufferPlus` assembly keeps its dependency footprint minimal: today it r
 
 ### Unit tests
 
-Make sure to run all unit tests before creating a pull request.
+Build and run the full test suite (all three target frameworks - net8.0, net9.0, net10.0) before creating a pull request:
+
+```
+dotnet build
+dotnet test src/RingBufferPlus.Tests
+```
+
 Any new code should also have reasonable unit test coverage.
+
+### Regenerating the generated API reference
+
+If your change adds or edits an XML doc comment (`///`) on any public member, regenerate `doc/api/**` so the published reference stays in sync - it is not regenerated automatically:
+
+```
+dotnet build src/XmlDocMarkdownGenerator
+```
+
+then run the resulting `XmlDocMarkdownGenerator.exe` **from its own output directory** (`src/XmlDocMarkdownGenerator/bin/Debug/<tfm>/`), not via `dotnet run` from the project folder - the tool's relative output path assumes it is executed from its own `bin/` directory. Running it via `dotnet run` writes the generated files to the wrong location. After running it, `git status -- src/docs` should show only the files whose source doc comments you actually changed - review the diff before committing.
+
+One known, accepted limitation of the generated reference: a type declared in a namespace other than the assembly's primary one (e.g. `HostingExtensions`, deliberately placed in `Microsoft.Extensions.DependencyInjection` for discoverability) gets a "See Also" link back to the primary namespace's index page instead of a dedicated one for its own namespace. The link still resolves correctly; only its label/target namespace pairing looks off. This is a limitation of the generator tool itself, not something to fix by moving the type to a different namespace.
 
 ## API stability policy
 
-Starting from **v5.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md)):
+Starting from **v6.0.0**, this project follows strict [Semantic Versioning](https://semver.org/) with a mandatory deprecation cycle (see [ADR004](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md)):
 
 * No public symbol (type, member, or overload) is removed, or has its behavior changed in a breaking way, without first being marked `[Obsolete("migration message")]` for at least one full release cycle.
 * A breaking change without a prior deprecation cycle is not a default option — it requires its own ADR explicitly justifying the exception.
-* v5.0.0 itself is exempt from this policy: it is a single, deliberate "clean slate" reset explicitly authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md), with no `[Obsolete]` bridge from v4.x. This exemption applies only to that one release and does not repeat for any future major.
-* v4.x and earlier receive no further fixes once v5.0.0 ships (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V01-semantic-versioning-policy-and-fluent-api-stability.md).
+* v5.0.0 and v6.0.0 are each exempt from this policy: v5.0.0 was a single, deliberate "clean slate" reset authorized by [ADR006](doc/adr/ADR006V01-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md); v6.0.0 is a second, independently justified reset authorized by [ADR006V02](doc/adr/ADR006V02-mandate-for-a-complete-product-overhaul-in-v5-with-authorized-breaking-changes.md) (real evidence of a structural autoscaling defect, not a citation of precedent), moving the deprecation cycle's resumption point from v5.0.0 to v6.0.0 (see [ADR004V03](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md)). Per that ADR, this is the **last** such reset without its own fresh justification meeting the same evidentiary bar — a third is not to be assumed.
+* v5.x and earlier receive no further fixes now that v6.0.0 has shipped (no backport) — see `SECURITY.md` and [ADR004](doc/adr/ADR004V03-semantic-versioning-policy-and-fluent-api-stability.md).
 
 If your contribution removes or changes the behavior of a public symbol, call this out explicitly in the pull request description so it can be checked against this policy.
 

@@ -11,8 +11,8 @@
 	<PropertyGroup>
 		<Authors>Fernando Cerqueira</Authors>
 		<Owners>Fernando Cerqueira</Owners>
-		<Title>The generic ring buffer with auto-scaler (elastic buffer).</Title>
-		<Description>RingBufferPlus is an MIT-licensed open source library that implements a generic autoscaler ring buffer (elastic buffer).</Description>
+		<Title>RingBufferPlus - elastic, auto-scaling resource pool for .NET</Title>
+		<Description>Stop provisioning for worst case. RingBufferPlus is a bounded, thread-safe pool for any expensive-to-create resource - database connections, RabbitMQ channels, HTTP clients. Capacity scales up and down automatically to match real demand (or pin it manually), with native OpenTelemetry metrics and tracing built in, no extra dependency. Targets .NET 8, 9, and 10. MIT-licensed.</Description>
 		<PackageReleaseNotes>https://github.com/FRACerqueira/RingBufferPlus/releases</PackageReleaseNotes>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
 		<PackageTags>csharp;dotnet;dotnetcore;ringbuffer;ring-buffer;circular-buffer;rabittmq;cyclic-buffer;elastic-buffer</PackageTags>
@@ -21,7 +21,7 @@
 		<SymbolPackageFormat>snupkg</SymbolPackageFormat>
 		<RepositoryType>git</RepositoryType>
 		<PackageId>RingBufferPlus</PackageId>
-		<PackageVersion>5.0.0</PackageVersion>
+		<PackageVersion>6.0.0</PackageVersion>
 		<PackageReadmeFile>README.md</PackageReadmeFile>
 		<PackageIcon>Icon.png</PackageIcon>
 		<PackageRequireLicenseAcceptance>True</PackageRequireLicenseAcceptance>
@@ -32,6 +32,11 @@
 	<ItemGroup>
 		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
 			<_Parameter1>RingBufferPlus.Tests</_Parameter1>
+		</AssemblyAttribute>
+		<!-- Needed so MonitorTickCostBenchmarks can call the internal AutoScaleMonitor directly -
+		     a pure-function microbenchmark of the actual algorithm, not a new public surface. -->
+		<AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+			<_Parameter1>RingBufferPlus.Benchmarks</_Parameter1>
 		</AssemblyAttribute>
 	</ItemGroup>
 	<ItemGroup Condition="'$(TargetFramework)'=='net10.0'">
