@@ -6,16 +6,9 @@
 namespace RingBufferPlus.Core
 {
     // ADR003V03 (see doc/adr/ADR003V03-median-sample-autoscaling-algorithm.md): the Monitor's
-    // autoscale algorithm. It replaces the retired median-of-idle-samples algorithm
-    // (AutoScaleDecision) with a different formula: a sliding-window percentile plus a safety
-    // buffer as a "fair level", adjusted by a linear-regression trend projected a configurable
-    // horizon ahead, then clamped to [min, max].
-    //
-    // This formula is ported from the validated simulation in
-    // benchmarks/RingBufferPlus.Benchmarks/AutoScaleAlgorithmComparison.cs
-    // (PercentileRegressionDecision). See that file and the ADR for the evidence behind it and
-    // its defaults - convergence, over-provisioning, and oscillation numbers across four
-    // synthetic scenarios.
+    // autoscale algorithm - a sliding-window percentile plus a safety buffer as a "fair level",
+    // adjusted by a linear-regression trend, clamped to [min, max]. Full rationale and evidence
+    // live in the ADR.
     //
     // Wired into RingBufferManager's engine loop via ProcessTick (the Monitor role, ADR001V03).
     // ProcessTick feeds it CurrentCapacity minus idle plus _waitingCount as demand samples -
@@ -24,9 +17,9 @@ namespace RingBufferPlus.Core
     // up matters most, reproducing the same failure mode this algorithm was chosen to fix.
     //
     // Deadband and clearing the window mid-episode are call-site concerns, not part of this
-    // calculation - the same simulation validated both, and both are part of ADR003V03's
-    // decision. See the simulation's SimulatePercentile, which applies both around its call to
-    // EvaluateTarget rather than inside it. ProcessTick implements both here too.
+    // calculation. Mirrors the validating simulation's SimulatePercentile, which applies both
+    // around its call to EvaluateTarget rather than inside it - ProcessTick implements both here
+    // too, same split.
     internal static class AutoScaleMonitor
     {
         /// <summary>

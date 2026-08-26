@@ -116,11 +116,6 @@ namespace RingBufferPlus
         /// <returns><see cref="IRingBufferElasticBuilder{T}"/>.</returns>
         IRingBufferElasticBuilder<T> LockWhenScaling(bool value = true);
 
-        // Moved here from the now-removed IRingBufferAutoScaleBuilder<T> (ADR007V03): since the
-        // Monitor is unconditionally active for every elastic pool now, tuning it is no longer a
-        // mode-specific concern. OPEN QUESTION from when this method was first added (2026-08-23,
-        // still unresolved by this move): whether this shape (one method, four parameters,
-        // all-or-nothing) is still the right surface once real usage exists to judge it against.
         /// <summary>
         /// Tunes the Monitor, the lowest-priority of the four scale signals (floor guard &gt;
         /// backlog-reactive &gt; manual pin &gt; Monitor). It computes a target capacity from a

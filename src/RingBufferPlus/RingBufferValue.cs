@@ -45,7 +45,7 @@ namespace RingBufferPlus
 
         /// <summary>
         /// Invalidates the return of the value to the buffer. A replacement instance will be created.
-        /// <br>This command will be ignored if the acquire was unsuccessful.</br>
+        /// <para>This command will be ignored if the acquire was unsuccessful.</para>
         /// </summary>
         public void Invalidate()
         {

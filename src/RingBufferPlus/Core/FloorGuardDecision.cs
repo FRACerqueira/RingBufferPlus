@@ -6,26 +6,22 @@
 namespace RingBufferPlus.Core
 {
     // ADR001V03 (see doc/adr/ADR001V03-concurrency-model-for-ring-buffer-manager-scale-up-and-down.md):
-    // the Orchestrator's floor guard. It is the highest-priority of the four scale signals
-    // (floor guard > backlog-reactive > manual pin > Monitor).
+    // the Orchestrator's floor guard - highest-priority of the four scale signals. Full rationale
+    // and priority ordering live in the ADR.
     //
-    // It protects the pool's minimum contractual floor. Whenever the buffer's real capacity drops
-    // below MinCapacity, it triggers an immediate, undebounced replenishment request. This applies
-    // in every mode, including fixed capacity (MinCapacity == MaxCapacity == Capacity): a failed
-    // item replacement - after Invalidate(), or a factory failure during a heartbeat-triggered
-    // replacement - can already shrink CurrentCapacity below its floor today, and nothing else
-    // retries it. This guard closes that gap.
+    // This applies in every mode, including fixed capacity (MinCapacity == MaxCapacity ==
+    // Capacity): a failed item replacement - after Invalidate(), or a factory failure during a
+    // heartbeat-triggered replacement - can already shrink CurrentCapacity below its floor today,
+    // and nothing else retries it. This guard closes that gap.
     //
     // "Available" in the ADR means the buffer's real capacity (CurrentCapacity), not an idle/unused
     // item count. A breach is CurrentCapacity strictly less than MinCapacity, not "less than or
-    // equal". A fixed-capacity buffer sits exactly at MinCapacity at rest, so "less than or equal"
-    // would always be true there. That would still be harmless (the replenishment quantity would
-    // be zero), but strict "less than" avoids the pointless signal and is simply cleaner.
+    // equal" as the ADR literally states - a fixed-capacity buffer sits exactly at MinCapacity at
+    // rest, so "less than or equal" would always be true there. Harmless either way (the
+    // replenishment quantity would be zero), but strict "less than" avoids the pointless signal.
     //
     // Wired into RingBufferManager's engine loop via EvaluateFloorGuard, called after ReplaceOne
-    // and after every FactoryBatchCompleted, same as EvaluateBacklogReactive. Designed and tested
-    // in isolation first, then wired into the engine - the same staged approach AutoScaleMonitor.cs
-    // (ADR003V03) uses.
+    // and after every FactoryBatchCompleted, same as EvaluateBacklogReactive.
     internal static class FloorGuardDecision
     {
         /// <summary>
